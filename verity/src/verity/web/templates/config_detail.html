@@ -1,0 +1,102 @@
+<!--
+  CONFIG DETAIL PAGE — Full view of an inference configuration
+
+  Shows config parameters and which agents/tasks use it.
+
+  DATA PASSED BY ROUTE:
+  - config: dict from get_inference_config_by_name()
+  - usage: list of {entity_type, entity_name, entity_display_name, version_label}
+-->
+{% extends "base.html" %}
+
+{% block title %}{{ config.display_name or config.name }} — Verity{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/configs">Configs</a>
+    <span class="separator">›</span>
+    <span>{{ config.display_name or config.name }}</span>
+{% endblock %}
+
+{% block page_title %}{{ config.display_name or config.name }}{% endblock %}
+
+{% block content %}
+
+<!-- ── CONFIG PARAMETERS ───────────────────────────────────── -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Configuration Parameters</h2>
+    <div class="verity-card">
+        <div class="verity-detail-grid">
+            <div class="verity-detail-label">Display Name</div>
+            <div class="verity-detail-value" style="font-weight: 600;">{{ config.display_name or config.name }}</div>
+
+            <div class="verity-detail-label">Machine Name</div>
+            <div class="verity-detail-value" style="font-family: monospace; font-size: 0.85rem;">{{ config.name }}</div>
+
+            <div class="verity-detail-label">Description</div>
+            <div class="verity-detail-value">{{ config.description }}</div>
+
+            <div class="verity-detail-label">Intended Use</div>
+            <div class="verity-detail-value">{{ config.intended_use }}</div>
+
+            <div class="verity-detail-label">Model</div>
+            <div class="verity-detail-value" style="font-weight: 500;">{{ config.model_name }}</div>
+
+            <div class="verity-detail-label">Temperature</div>
+            <div class="verity-detail-value">{{ config.temperature if config.temperature is not none else 'model default' }}</div>
+
+            <div class="verity-detail-label">Max Tokens</div>
+            <div class="verity-detail-value">{{ config.max_tokens or 'model default' }}</div>
+
+            {% if config.top_p is not none %}
+            <div class="verity-detail-label">Top P</div>
+            <div class="verity-detail-value">{{ config.top_p }}</div>
+            {% endif %}
+
+            {% if config.top_k is not none %}
+            <div class="verity-detail-label">Top K</div>
+            <div class="verity-detail-value">{{ config.top_k }}</div>
+            {% endif %}
+
+            {% if config.extended_params and config.extended_params != '{}' %}
+            <div class="verity-detail-label">Extended Params</div>
+            <div class="verity-detail-value verity-code" style="padding: 6px;">{{ config.extended_params }}</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+
+<!-- ── USED BY ─────────────────────────────────────────────── -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Used By (Champion Versions)</h2>
+
+    {% if usage %}
+    <table class="verity-table">
+        <thead>
+            <tr>
+                <th>Entity</th>
+                <th>Type</th>
+                <th>Version</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for u in usage %}
+            <tr class="clickable" onclick="window.location='/admin/{{ u.entity_type }}s/{{ u.entity_name }}'">
+                <td>
+                    <a href="/admin/{{ u.entity_type }}s/{{ u.entity_name }}">{{ u.entity_display_name }}</a>
+                </td>
+                <td><span class="verity-badge verity-badge-{{ u.entity_type }}">{{ u.entity_type }}</span></td>
+                <td>v{{ u.version_label }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="verity-empty">
+        <div class="verity-empty-message">No agents or tasks currently use this config.</div>
+    </div>
+    {% endif %}
+</div>
+
+{% endblock %}

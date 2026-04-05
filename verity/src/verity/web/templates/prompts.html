@@ -35,10 +35,10 @@
     </thead>
     <tbody>
         {% for p in prompts %}
-        <tr>
+        <tr class="clickable" onclick="window.location='/admin/prompts/{{ p.name }}'">
             <!-- Display name + machine name -->
             <td>
-                <div style="font-weight: 600;">{{ p.display_name or p.name }}</div>
+                <a href="/admin/prompts/{{ p.name }}" style="font-weight: 600;">{{ p.display_name or p.name }}</a>
                 <div style="font-size: 0.65rem; color: var(--verity-text-light); font-family: monospace;">{{ p.name }}</div>
             </td>
 

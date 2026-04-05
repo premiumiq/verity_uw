@@ -1,0 +1,119 @@
+<!--
+  PROMPT DETAIL PAGE — Full view of a single prompt
+
+  Shows prompt metadata, all versions with content, validity periods,
+  and which entity (agent/task) uses this prompt.
+
+  DATA PASSED BY ROUTE:
+  - prompt: dict from get_prompt_by_name()
+  - versions: list of prompt_version dicts
+  - entity_apps: dict for applications column
+-->
+{% extends "base.html" %}
+
+{% block title %}{{ prompt.display_name or prompt.name }} — Verity{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/prompts">Prompts</a>
+    <span class="separator">›</span>
+    <span>{{ prompt.display_name or prompt.name }}</span>
+{% endblock %}
+
+{% block page_title %}{{ prompt.display_name or prompt.name }}{% endblock %}
+
+{% block content %}
+
+<!-- ── PROMPT METADATA ─────────────────────────────────────── -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Prompt Details</h2>
+    <div class="verity-card">
+        <div class="verity-detail-grid">
+            <div class="verity-detail-label">Display Name</div>
+            <div class="verity-detail-value" style="font-weight: 600;">{{ prompt.display_name or prompt.name }}</div>
+
+            <div class="verity-detail-label">Machine Name</div>
+            <div class="verity-detail-value" style="font-family: monospace; font-size: 0.85rem;">{{ prompt.name }}</div>
+
+            <div class="verity-detail-label">Description</div>
+            <div class="verity-detail-value">{{ prompt.description }}</div>
+
+            {% if prompt.primary_entity_type %}
+            <div class="verity-detail-label">Primary Entity</div>
+            <div class="verity-detail-value">
+                <span class="verity-badge verity-badge-{{ prompt.primary_entity_type }}">{{ prompt.primary_entity_type }}</span>
+            </div>
+            {% endif %}
+
+            <div class="verity-detail-label">Versions</div>
+            <div class="verity-detail-value">{{ versions|length }}</div>
+        </div>
+    </div>
+</div>
+
+
+<!-- ── VERSION HISTORY ──────────────────────────────────────── -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Version History</h2>
+
+    {% if versions %}
+    <table class="verity-table">
+        <thead>
+            <tr>
+                <th>Version</th>
+                <th>State</th>
+                <th>Role</th>
+                <th>Governance</th>
+                <th>Valid From</th>
+                <th>Valid To</th>
+                <th>Author</th>
+                <th>Change Summary</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for v in versions %}
+            <tr>
+                <td>v{{ v.version_number }}</td>
+                <td><span class="verity-badge verity-badge-{{ v.lifecycle_state }}">{{ v.lifecycle_state }}</span></td>
+                <td><span class="verity-badge verity-badge-candidate">{{ v.api_role }}</span></td>
+                <td>
+                    {% if v.governance_tier == 'behavioural' %}
+                        <span class="verity-badge verity-badge-high">behavioural</span>
+                    {% elif v.governance_tier == 'contextual' %}
+                        <span class="verity-badge verity-badge-medium">contextual</span>
+                    {% else %}
+                        <span class="verity-badge verity-badge-low">{{ v.governance_tier }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ v.valid_from.strftime('%Y-%m-%d %H:%M') if v.valid_from else '—' }}</td>
+                <td>{{ v.valid_to.strftime('%Y-%m-%d') if v.valid_to and v.valid_to.year < 2999 else ('active' if v.valid_to else '—') }}</td>
+                <td>{{ v.author_name or '—' }}</td>
+                <td style="font-size: 0.8rem;">{{ v.change_summary or '—' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Show content of each version -->
+    {% for v in versions %}
+    <div class="verity-card" style="margin-top: 12px; margin-bottom: 12px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+            <span style="font-weight: 600;">v{{ v.version_number }}</span>
+            <span class="verity-badge verity-badge-{{ v.lifecycle_state }}">{{ v.lifecycle_state }}</span>
+            <span class="verity-badge verity-badge-candidate">{{ v.api_role }}</span>
+            {% if v.approved_by %}
+                <span style="font-size: 0.75rem; color: var(--verity-text-light);">Approved by {{ v.approved_by }}</span>
+            {% endif %}
+        </div>
+        <div class="verity-code">{{ v.content }}</div>
+    </div>
+    {% endfor %}
+
+    {% else %}
+    <div class="verity-empty">
+        <div class="verity-empty-message">No versions found.</div>
+    </div>
+    {% endif %}
+</div>
+
+{% endblock %}

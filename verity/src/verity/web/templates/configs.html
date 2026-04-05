@@ -31,9 +31,9 @@
     </thead>
     <tbody>
         {% for c in configs %}
-        <tr>
+        <tr class="clickable" onclick="window.location='/admin/configs/{{ c.name }}'">
             <td>
-                <div style="font-weight: 600;">{{ c.display_name or c.name }}</div>
+                <a href="/admin/configs/{{ c.name }}" style="font-weight: 600;">{{ c.display_name or c.name }}</a>
                 <div style="font-size: 0.65rem; color: var(--verity-text-light); font-family: monospace;">{{ c.name }}</div>
             </td>
             <td>{{ c.model_name }}</td>

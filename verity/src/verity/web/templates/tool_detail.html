@@ -1,0 +1,108 @@
+<!--
+  TOOL DETAIL PAGE — Full view of a registered tool
+
+  Shows tool metadata, schemas, mock config, and which agents use it.
+
+  DATA PASSED BY ROUTE:
+  - tool: dict from get_tool_by_name()
+  - usage: list of {entity_type, entity_name} from tool_usage
+-->
+{% extends "base.html" %}
+
+{% block title %}{{ tool.display_name }} — Verity{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/tools">Tools</a>
+    <span class="separator">›</span>
+    <span>{{ tool.display_name }}</span>
+{% endblock %}
+
+{% block page_title %}{{ tool.display_name }}{% endblock %}
+
+{% block content %}
+
+<!-- ── TOOL METADATA ───────────────────────────────────────── -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Tool Details</h2>
+    <div class="verity-card">
+        <div class="verity-detail-grid">
+            <div class="verity-detail-label">Display Name</div>
+            <div class="verity-detail-value" style="font-weight: 600;">{{ tool.display_name }}</div>
+
+            <div class="verity-detail-label">Machine Name</div>
+            <div class="verity-detail-value" style="font-family: monospace; font-size: 0.85rem;">{{ tool.name }}</div>
+
+            <div class="verity-detail-label">Description</div>
+            <div class="verity-detail-value">{{ tool.description }}</div>
+
+            <div class="verity-detail-label">Implementation</div>
+            <div class="verity-detail-value" style="font-family: monospace; font-size: 0.8rem;">{{ tool.implementation_path }}</div>
+
+            <div class="verity-detail-label">Write Operation</div>
+            <div class="verity-detail-value">{{ 'Yes' if tool.is_write_operation else 'No' }}</div>
+
+            <div class="verity-detail-label">Mock Mode</div>
+            <div class="verity-detail-value">{{ 'Enabled' if tool.mock_mode_enabled else 'Disabled' }}</div>
+
+            <div class="verity-detail-label">Requires Confirmation</div>
+            <div class="verity-detail-value">{{ 'Yes' if tool.requires_confirmation else 'No' }}</div>
+
+            <div class="verity-detail-label">Data Classification</div>
+            <div class="verity-detail-value">{{ tool.data_classification_max }}</div>
+        </div>
+    </div>
+</div>
+
+
+<!-- ── INPUT/OUTPUT SCHEMAS ────────────────────────────────── -->
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px;">
+    <div class="verity-section">
+        <h2 class="verity-section-title">Input Schema</h2>
+        <div class="verity-code">{{ tool.input_schema | tojson(indent=2) }}</div>
+    </div>
+    <div class="verity-section">
+        <h2 class="verity-section-title">Output Schema</h2>
+        <div class="verity-code">{{ tool.output_schema | tojson(indent=2) }}</div>
+    </div>
+</div>
+
+
+<!-- ── USED BY ─────────────────────────────────────────────── -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Authorized For (Champion Versions)</h2>
+
+    {% if usage %}
+    <table class="verity-table">
+        <thead>
+            <tr>
+                <th>Entity</th>
+                <th>Type</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for u in usage %}
+            <tr>
+                <td>{{ u.entity_name }}</td>
+                <td><span class="verity-badge verity-badge-{{ u.entity_type }}">{{ u.entity_type }}</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="verity-empty">
+        <div class="verity-empty-message">No agents or tasks currently authorized for this tool.</div>
+    </div>
+    {% endif %}
+</div>
+
+
+<!-- ── MOCK RESPONSES ──────────────────────────────────────── -->
+{% if tool.mock_responses and tool.mock_responses != '{}' %}
+<div class="verity-section">
+    <h2 class="verity-section-title">Mock Responses</h2>
+    <div class="verity-code">{{ tool.mock_responses | tojson(indent=2) if tool.mock_responses is mapping else tool.mock_responses }}</div>
+</div>
+{% endif %}
+
+{% endblock %}

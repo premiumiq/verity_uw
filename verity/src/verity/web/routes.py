@@ -243,6 +243,20 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             entity_apps=entity_apps,
         )
 
+    @router.get("/prompts/{prompt_name}", response_class=HTMLResponse)
+    async def prompt_detail(request: Request, prompt_name: str):
+        """Show full detail for one prompt: versions with content and validity."""
+        await verity.ensure_connected()
+        prompt = await verity.registry.db.fetch_one("get_prompt_by_name", {"prompt_name": prompt_name})
+        if not prompt:
+            return HTMLResponse("<h1>Prompt not found</h1>", status_code=404)
+        versions = await verity.registry.list_prompt_versions(prompt["id"])
+        return _render(templates, request, "prompt_detail.html",
+            active_page="prompts",
+            prompt=prompt,
+            versions=versions,
+        )
+
     # ── INFERENCE CONFIGS ─────────────────────────────────────
 
     @router.get("/configs", response_class=HTMLResponse)
@@ -254,6 +268,20 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             active_page="configs",
             configs=configs,
             entity_apps=entity_apps,
+        )
+
+    @router.get("/configs/{config_name}", response_class=HTMLResponse)
+    async def config_detail(request: Request, config_name: str):
+        """Show full detail for an inference config with usage."""
+        await verity.ensure_connected()
+        config = await verity.registry.db.fetch_one("get_inference_config_by_name", {"config_name": config_name})
+        if not config:
+            return HTMLResponse("<h1>Config not found</h1>", status_code=404)
+        usage = await verity.db.fetch_all("get_config_usage", {"config_id": str(config["id"])})
+        return _render(templates, request, "config_detail.html",
+            active_page="configs",
+            config=config,
+            usage=usage,
         )
 
     # ── TOOLS ─────────────────────────────────────────────────
@@ -276,6 +304,22 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             active_page="tools",
             tools=tools,
             tool_usage=tool_usage,
+        )
+
+    @router.get("/tools/{tool_name}", response_class=HTMLResponse)
+    async def tool_detail(request: Request, tool_name: str):
+        """Show full detail for a tool with schemas and usage."""
+        await verity.ensure_connected()
+        tool = await verity.registry.db.fetch_one("get_tool_by_name", {"tool_name": tool_name})
+        if not tool:
+            return HTMLResponse("<h1>Tool not found</h1>", status_code=404)
+        # Get which agents/tasks use this tool
+        usage_rows = await verity.db.fetch_all("get_tool_usage")
+        usage = [r for r in usage_rows if r["tool_id"] == str(tool["id"])]
+        return _render(templates, request, "tool_detail.html",
+            active_page="tools",
+            tool=tool,
+            usage=usage,
         )
 
     # ── PIPELINES ─────────────────────────────────────────────

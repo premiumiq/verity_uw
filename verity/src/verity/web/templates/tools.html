@@ -34,10 +34,10 @@
     </thead>
     <tbody>
         {% for t in tools %}
-        <tr>
+        <tr class="clickable" onclick="window.location='/admin/tools/{{ t.name }}'">
             <!-- Tool name with description -->
             <td>
-                <div style="font-weight: 600;">{{ t.display_name }}</div>
+                <a href="/admin/tools/{{ t.name }}" style="font-weight: 600;">{{ t.display_name }}</a>
                 <div style="font-size: 0.7rem; color: var(--verity-text-light); font-family: monospace;">{{ t.name }}</div>
                 <div style="font-size: 0.75rem; color: var(--verity-text-light); margin-top: 2px;">
                     {{ t.description[:100] }}{% if t.description|length > 100 %}...{% endif %}

@@ -380,6 +380,28 @@ SELECT * FROM inference_config WHERE active = TRUE ORDER BY name;
 SELECT * FROM inference_config WHERE name = %(config_name)s;
 
 
+-- name: get_config_usage
+-- Which agents and tasks use a specific inference config (champion versions only).
+SELECT
+    'agent' AS entity_type,
+    a.name AS entity_name,
+    a.display_name AS entity_display_name,
+    av.version_label
+FROM agent_version av
+JOIN agent a ON a.id = av.agent_id AND av.id = a.current_champion_version_id
+WHERE av.inference_config_id = %(config_id)s::uuid
+UNION ALL
+SELECT
+    'task' AS entity_type,
+    t.name AS entity_name,
+    t.display_name AS entity_display_name,
+    tv.version_label
+FROM task_version tv
+JOIN task t ON t.id = tv.task_id AND tv.id = t.current_champion_version_id
+WHERE tv.inference_config_id = %(config_id)s::uuid
+ORDER BY entity_type, entity_display_name;
+
+
 -- name: list_tools
 SELECT * FROM tool WHERE active = TRUE ORDER BY name;
 
