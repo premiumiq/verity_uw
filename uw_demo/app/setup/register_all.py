@@ -42,7 +42,7 @@ async def main():
     await apply_schema(DB_URL, drop_existing=True)
 
     # ── Connect Verity SDK ────────────────────────────────────
-    verity = Verity(database_url=DB_URL)
+    verity = Verity(database_url=DB_URL, application="uw_demo")
     await verity.connect()
 
     try:
@@ -77,6 +77,10 @@ async def main():
         # ── STEP 8: Pipeline ──────────────────────────────────
         print("Step 8: Registering pipeline...")
         pipeline = await seed_pipeline(verity)
+
+        # ── STEP 8b: Application Registration ─────────────────
+        print("Step 8b: Registering application and mapping entities...")
+        await seed_application(verity, agents, tasks, tools, prompts, pipeline)
 
         # ── STEP 9-10: Test Suites + Cases ────────────────────
         print("Step 9-10: Registering test suites and cases...")
@@ -737,6 +741,58 @@ async def seed_pipeline(verity: Verity) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════
+# STEP 8b: APPLICATION REGISTRATION
+# ══════════════════════════════════════════════════════════════
+
+async def seed_application(verity, agents, tasks, tools, prompts, pipeline):
+    """Register the UW Demo application and map all entities to it."""
+
+    # Register the application
+    app = await verity.register_application(
+        name="uw_demo",
+        display_name="Underwriting Demo",
+        description="Commercial underwriting platform for D&O and GL lines, powered by Verity.",
+    )
+    app_id = app["id"]
+    print(f"  + application: uw_demo")
+
+    # Map all agents to the application
+    for name, data in agents.items():
+        await verity.registry.map_entity_to_application(app_id, "agent", data["id"])
+    print(f"  + mapped {len(agents)} agents")
+
+    # Map all tasks
+    for name, data in tasks.items():
+        await verity.registry.map_entity_to_application(app_id, "task", data["id"])
+    print(f"  + mapped {len(tasks)} tasks")
+
+    # Map all tools
+    for name, tool_id in tools.items():
+        await verity.registry.map_entity_to_application(app_id, "tool", tool_id)
+    print(f"  + mapped {len(tools)} tools")
+
+    # Map pipeline
+    await verity.registry.map_entity_to_application(app_id, "pipeline", pipeline["id"])
+    print(f"  + mapped 1 pipeline")
+
+    # Create execution contexts for the 4 seeded submissions
+    submission_ids = [
+        "00000001-0001-0001-0001-000000000001",
+        "00000002-0002-0002-0002-000000000002",
+        "00000003-0003-0003-0003-000000000003",
+        "00000004-0004-0004-0004-000000000004",
+    ]
+    for sub_id in submission_ids:
+        await verity.registry.create_execution_context(
+            application_id=app_id,
+            context_ref=f"submission:{sub_id}",
+            context_type="submission",
+            metadata={"submission_id": sub_id},
+        )
+    print(f"  + created {len(submission_ids)} execution contexts")
+
+
+# ══════════════════════════════════════════════════════════════
 # STEPS 9-10: TEST SUITES + CASES
 # ══════════════════════════════════════════════════════════════
 
@@ -1106,6 +1162,7 @@ async def seed_decisions(verity, agent_versions, task_versions):
                 input_tokens=1500 + (decision_count * 100),
                 output_tokens=800 + (decision_count * 50),
                 duration_ms=2000 + (decision_count * 300),
+                application="uw_demo",
                 status="complete",
             ))
 

@@ -230,3 +230,24 @@ VALUES (
     %(minimum_acceptable)s, %(target_champion)s
 )
 RETURNING id, created_at;
+
+
+-- name: insert_application
+INSERT INTO application (name, display_name, description)
+VALUES (%(name)s, %(display_name)s, %(description)s)
+RETURNING id, created_at;
+
+
+-- name: insert_application_entity
+INSERT INTO application_entity (application_id, entity_type, entity_id)
+VALUES (%(application_id)s::uuid, %(entity_type)s::entity_type, %(entity_id)s::uuid)
+ON CONFLICT (application_id, entity_type, entity_id) DO NOTHING
+RETURNING id;
+
+
+-- name: insert_execution_context
+INSERT INTO execution_context (application_id, context_ref, context_type, metadata)
+VALUES (%(application_id)s::uuid, %(context_ref)s, %(context_type)s, %(metadata)s)
+ON CONFLICT (application_id, context_ref) DO UPDATE
+    SET metadata = EXCLUDED.metadata
+RETURNING id, created_at;

@@ -1,0 +1,58 @@
+<!--
+  APPLICATIONS PAGE — Registered consuming applications
+
+  Shows all applications that have registered with Verity,
+  with the entities mapped to each.
+
+  DATA PASSED BY ROUTE:
+  - applications: list of application dicts with entity_counts
+-->
+{% extends "base.html" %}
+
+{% block title %}Applications — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <span>Applications</span>
+{% endblock %}
+
+{% block page_title %}Applications{% endblock %}
+
+{% block content %}
+
+{% if applications %}
+{% for app in applications %}
+<div class="verity-card" style="margin-bottom: 16px;">
+    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+        <span style="font-size: 1.1rem; font-weight: 600;">{{ app.display_name }}</span>
+        <span style="font-family: monospace; font-size: 0.8rem; color: var(--verity-text-light);">{{ app.name }}</span>
+    </div>
+
+    {% if app.description %}
+    <div style="font-size: 0.85rem; color: var(--verity-text-light); margin-bottom: 12px;">
+        {{ app.description }}
+    </div>
+    {% endif %}
+
+    <!-- Mapped entities -->
+    {% if app.entities %}
+    <div style="font-size: 0.8rem;">
+        {% for entity in app.entities %}
+        <span class="verity-badge verity-badge-{{ entity.entity_type }}" style="margin-right: 4px; margin-bottom: 4px;">
+            {{ entity.entity_type }}: {{ entity.entity_display_name }}
+        </span>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div style="font-size: 0.8rem; color: var(--verity-text-light);">No entities mapped</div>
+    {% endif %}
+</div>
+{% endfor %}
+{% else %}
+<div class="verity-empty">
+    <div style="font-size: 2rem; opacity: 0.3;">📱</div>
+    <div class="verity-empty-message">No applications registered yet.</div>
+</div>
+{% endif %}
+
+{% endblock %}

@@ -50,11 +50,13 @@ class Verity:
     registry, lifecycle, execution, decisions, testing, reporting, pipelines.
     """
 
-    def __init__(self, database_url: str, anthropic_api_key: str = ""):
+    def __init__(self, database_url: str, anthropic_api_key: str = "", application: str = "default"):
         self.database_url = database_url
         self.anthropic_api_key = anthropic_api_key
+        self.application = application
         self.db = Database(database_url)
         self._connected = False
+        self._application_id = None  # Resolved on first use
 
         # Core modules — initialized eagerly, they share the db instance
         self.registry = Registry(self.db)
@@ -66,6 +68,7 @@ class Verity:
             registry=self.registry,
             decisions=self.decisions,
             anthropic_api_key=anthropic_api_key,
+            application=application,
         )
         self.pipeline_executor = PipelineExecutor(
             registry=self.registry,
@@ -158,12 +161,12 @@ class Verity:
         submission_id: Optional[UUID] = None,
         channel: str = "production",
         mock: Optional[MockContext] = None,
+        execution_context_id: Optional[UUID] = None,
     ) -> PipelineResult:
         """Execute a full pipeline with dependency resolution and parallel groups.
 
+        Pass execution_context_id to link all decisions to a business context.
         Pass mock=MockContext(...) to mock all steps.
-        The same MockContext flows to every step — all agent/task/tool
-        calls go through the gateway and respect the mock settings.
         """
         await self.ensure_connected()
         return await self.pipeline_executor.run_pipeline(
@@ -172,6 +175,7 @@ class Verity:
             submission_id=submission_id,
             channel=channel,
             mock=mock,
+            execution_context_id=execution_context_id,
         )
 
     def register_tool_implementation(self, tool_name: str, func: Callable):
@@ -294,3 +298,52 @@ class Verity:
     async def list_pipelines(self) -> list[dict]:
         await self.ensure_connected()
         return await self.registry.list_pipelines()
+
+    # ── APPLICATIONS & EXECUTION CONTEXT ──────────────────────
+
+    async def register_application(self, name: str, display_name: str, description: str = "") -> dict:
+        """Register a consuming application with Verity."""
+        await self.ensure_connected()
+        return await self.registry.register_application(
+            name=name, display_name=display_name, description=description,
+        )
+
+    async def map_entity_to_application(self, application_name: str, entity_type: str, entity_id) -> dict:
+        """Map an entity to an application."""
+        await self.ensure_connected()
+        app = await self.registry.get_application_by_name(application_name)
+        if not app:
+            raise ValueError(f"Application '{application_name}' not found")
+        return await self.registry.map_entity_to_application(
+            application_id=app["id"], entity_type=entity_type, entity_id=entity_id,
+        )
+
+    async def create_execution_context(
+        self, context_ref: str, context_type: str = None, metadata: dict = None,
+        application_name: str = None,
+    ) -> dict:
+        """Create an execution context for a business operation.
+
+        Uses self.application if application_name not specified.
+        Returns {"id": uuid, "created_at": timestamp}.
+        """
+        await self.ensure_connected()
+        app_name = application_name or self.application
+        app = await self.registry.get_application_by_name(app_name)
+        if not app:
+            raise ValueError(f"Application '{app_name}' not found. Register it first.")
+        return await self.registry.create_execution_context(
+            application_id=app["id"],
+            context_ref=context_ref,
+            context_type=context_type,
+            metadata=metadata,
+        )
+
+    async def get_decisions_by_context(self, execution_context_id) -> list[dict]:
+        """Get all decisions for an execution context."""
+        await self.ensure_connected()
+        return await self.decisions.get_decisions_by_context(execution_context_id)
+
+    async def list_applications(self) -> list[dict]:
+        await self.ensure_connected()
+        return await self.registry.list_applications()

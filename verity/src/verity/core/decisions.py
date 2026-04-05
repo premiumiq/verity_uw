@@ -61,6 +61,7 @@ class Decisions:
             "tool_calls_made": json.dumps(decision.tool_calls_made) if decision.tool_calls_made else None,
             "message_history": json.dumps(decision.message_history) if decision.message_history else None,
             "application": decision.application,
+            "execution_context_id": str(decision.execution_context_id) if decision.execution_context_id else None,
             "hitl_required": decision.hitl_required,
             "status": decision.status,
             "error_message": decision.error_message,
@@ -155,6 +156,12 @@ class Decisions:
             )
             for r in rows
         ]
+
+    async def get_decisions_by_context(self, execution_context_id: UUID) -> list[dict]:
+        """Get all decisions for an execution context (spans multiple pipeline runs)."""
+        return await self.db.fetch_all("list_decisions_by_context", {
+            "execution_context_id": str(execution_context_id),
+        })
 
     async def record_override(self, override: OverrideLogCreate) -> dict:
         """Record a human override of an AI decision."""

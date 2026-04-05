@@ -124,29 +124,38 @@ def create_uw_routes(verity) -> APIRouter:
         if not sub:
             return HTMLResponse("<h1>Submission not found</h1>", status_code=404)
 
+        # Create or get execution context for this submission
+        try:
+            ctx = await verity.create_execution_context(
+                context_ref=f"submission:{submission_id}",
+                context_type="submission",
+                metadata={"named_insured": sub["named_insured"], "lob": sub["lob"]},
+            )
+            exec_ctx_id = ctx["id"]
+        except Exception:
+            exec_ctx_id = None  # Graceful fallback if app not registered yet
+
+        pipeline_context = {
+            "submission_id": submission_id,
+            "lob": sub["lob"],
+            "named_insured": sub["named_insured"],
+        }
+
         if mode == "live":
-            # Live — calls Claude through Verity's execution engine
             result = await verity.execute_pipeline(
                 pipeline_name="uw_submission_pipeline",
-                context={
-                    "submission_id": submission_id,
-                    "lob": sub["lob"],
-                    "named_insured": sub["named_insured"],
-                },
+                context=pipeline_context,
                 submission_id=submission_id,
+                execution_context_id=exec_ctx_id,
             )
         else:
-            # Mock — builds MockContext, still goes through execution engine
             mock = get_mock_context(submission_id)
             result = await verity.execute_pipeline(
                 pipeline_name="uw_submission_pipeline",
-                context={
-                    "submission_id": submission_id,
-                    "lob": sub["lob"],
-                    "named_insured": sub["named_insured"],
-                },
+                context=pipeline_context,
                 submission_id=submission_id,
                 mock=mock,
+                execution_context_id=exec_ctx_id,
             )
 
         # Store the pipeline_run_id so "View in Verity" links work

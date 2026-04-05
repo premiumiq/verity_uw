@@ -244,6 +244,21 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             pipelines=pipelines,
         )
 
+    # ── APPLICATIONS ──────────────────────────────────────────
+
+    @router.get("/applications", response_class=HTMLResponse)
+    async def applications_list(request: Request):
+        """Show registered applications with mapped entities."""
+        await verity.ensure_connected()
+        apps = await verity.list_applications()
+        # Enrich each app with its mapped entities
+        for app in apps:
+            app["entities"] = await verity.registry.list_application_entities(app["id"])
+        return _render(templates, request, "applications.html",
+            active_page="applications",
+            applications=apps,
+        )
+
     # ── DECISION LOG ──────────────────────────────────────────
 
     @router.get("/decisions", response_class=HTMLResponse)

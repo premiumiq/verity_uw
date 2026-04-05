@@ -444,6 +444,55 @@ CREATE TABLE pipeline_version (
 );
 
 
+-- ── APPLICATIONS ─────────────────────────────────────────────
+-- Each consuming business application registers itself with Verity.
+-- Enables multi-tenant governance: filter decisions, inventory, and
+-- entity mappings by application.
+
+CREATE TABLE application (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name            VARCHAR(100) UNIQUE NOT NULL,
+    display_name    VARCHAR(200) NOT NULL,
+    description     TEXT,
+    created_at      TIMESTAMP DEFAULT NOW()
+);
+
+-- ── APPLICATION ↔ ENTITY MAPPING ─────────────────────────────
+-- Many-to-many: which agents, tasks, prompts, tools, pipelines
+-- belong to which application. Entities can be shared across apps.
+
+CREATE TABLE application_entity (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    application_id  UUID NOT NULL REFERENCES application(id),
+    entity_type     entity_type NOT NULL,
+    entity_id       UUID NOT NULL,
+    created_at      TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT uq_app_entity UNIQUE (application_id, entity_type, entity_id)
+);
+
+CREATE INDEX idx_ae_app ON application_entity(application_id);
+CREATE INDEX idx_ae_entity ON application_entity(entity_type, entity_id);
+
+
+-- ── EXECUTION CONTEXT ────────────────────────────────────────
+-- Business-level grouping registered by the consuming application.
+-- A context can span multiple pipeline runs (e.g., initial run + re-run).
+-- The context_ref is opaque to Verity — the business app defines it.
+-- Uniqueness is per application: (application_id, context_ref).
+
+CREATE TABLE execution_context (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    application_id  UUID NOT NULL REFERENCES application(id),
+    context_ref     VARCHAR(500) NOT NULL,
+    context_type    VARCHAR(100),
+    metadata        JSONB DEFAULT '{}',
+    created_at      TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT uq_app_context UNIQUE (application_id, context_ref)
+);
+
+CREATE INDEX idx_ec_app ON execution_context(application_id);
+
+
 -- ── TEST SUITES & CASES ───────────────────────────────────────
 
 CREATE TABLE test_suite (
@@ -692,8 +741,11 @@ CREATE TABLE agent_decision_log (
     message_history         JSONB,
 
     -- Source application that created this decision.
-    -- Prevents cross-application collision in shared Verity databases.
     application             VARCHAR(100) DEFAULT 'default',
+
+    -- Execution context: business-level grouping registered by the app.
+    -- Links this decision to a specific business operation (e.g., submission, policy).
+    execution_context_id    UUID REFERENCES execution_context(id),
 
     hitl_required           BOOLEAN DEFAULT FALSE,
     hitl_completed          BOOLEAN DEFAULT FALSE,

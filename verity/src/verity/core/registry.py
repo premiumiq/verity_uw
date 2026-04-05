@@ -321,6 +321,49 @@ class Registry:
     async def get_pipeline_by_name(self, name: str) -> Optional[dict]:
         return await self.db.fetch_one("get_pipeline_by_name", {"pipeline_name": name})
 
+    # ── APPLICATION & CONTEXT ─────────────────────────────────
+
+    async def register_application(self, **kwargs) -> dict:
+        """Register a consuming application."""
+        return await self.db.execute_returning("insert_application", kwargs)
+
+    async def map_entity_to_application(self, application_id, entity_type: str, entity_id) -> dict:
+        """Map an entity (agent, task, prompt, tool, pipeline) to an application."""
+        return await self.db.execute_returning("insert_application_entity", {
+            "application_id": str(application_id),
+            "entity_type": entity_type,
+            "entity_id": str(entity_id),
+        })
+
+    async def create_execution_context(self, application_id, context_ref: str,
+                                        context_type: str = None, metadata: dict = None) -> dict:
+        """Create or update an execution context for a business operation."""
+        import json as _json
+        return await self.db.execute_returning("insert_execution_context", {
+            "application_id": str(application_id),
+            "context_ref": context_ref,
+            "context_type": context_type,
+            "metadata": _json.dumps(metadata) if metadata else "{}",
+        })
+
+    async def list_applications(self) -> list[dict]:
+        return await self.db.fetch_all("list_applications")
+
+    async def get_application_by_name(self, name: str) -> Optional[dict]:
+        return await self.db.fetch_one("get_application_by_name", {"app_name": name})
+
+    async def list_application_entities(self, application_id) -> list[dict]:
+        return await self.db.fetch_all("list_application_entities", {"application_id": str(application_id)})
+
+    async def get_execution_context(self, context_id) -> Optional[dict]:
+        return await self.db.fetch_one("get_execution_context", {"context_id": str(context_id)})
+
+    async def get_execution_context_by_ref(self, application_id, context_ref: str) -> Optional[dict]:
+        return await self.db.fetch_one("get_execution_context_by_ref", {
+            "application_id": str(application_id),
+            "context_ref": context_ref,
+        })
+
 
 def _to_float(val) -> Optional[float]:
     """Convert Decimal or other numeric to float, or None."""

@@ -12,7 +12,7 @@ INSERT INTO agent_decision_log (
     input_summary, input_json, output_json, output_summary,
     reasoning_text, risk_factors, confidence_score, low_confidence_flag,
     model_used, input_tokens, output_tokens, duration_ms,
-    tool_calls_made, message_history, application,
+    tool_calls_made, message_history, application, execution_context_id,
     hitl_required, status, error_message
 )
 VALUES (
@@ -23,7 +23,7 @@ VALUES (
     %(input_summary)s, %(input_json)s, %(output_json)s, %(output_summary)s,
     %(reasoning_text)s, %(risk_factors)s, %(confidence_score)s, %(low_confidence_flag)s,
     %(model_used)s, %(input_tokens)s, %(output_tokens)s, %(duration_ms)s,
-    %(tool_calls_made)s, %(message_history)s, %(application)s,
+    %(tool_calls_made)s, %(message_history)s, %(application)s, %(execution_context_id)s,
     %(hitl_required)s, %(status)s, %(error_message)s
 )
 RETURNING id, created_at;
@@ -211,11 +211,38 @@ WHERE adl.pipeline_run_id = %(pipeline_run_id)s::uuid
 ORDER BY adl.decision_depth, adl.created_at;
 
 
+-- name: list_decisions_by_context
+-- All decisions for an execution context (spans multiple pipeline runs).
+SELECT
+    adl.id,
+    adl.entity_type,
+    adl.entity_version_id,
+    adl.channel,
+    adl.pipeline_run_id,
+    adl.step_name,
+    adl.output_summary,
+    adl.confidence_score,
+    adl.duration_ms,
+    adl.application,
+    adl.status,
+    adl.created_at,
+    COALESCE(a.name, t.name) AS entity_name,
+    COALESCE(a.display_name, t.display_name) AS entity_display_name,
+    COALESCE(av.version_label, tv.version_label) AS version_label
+FROM agent_decision_log adl
+LEFT JOIN agent_version av ON av.id = adl.entity_version_id AND adl.entity_type = 'agent'
+LEFT JOIN agent a ON a.id = av.agent_id
+LEFT JOIN task_version tv ON tv.id = adl.entity_version_id AND adl.entity_type = 'task'
+LEFT JOIN task t ON t.id = tv.task_id
+WHERE adl.execution_context_id = %(execution_context_id)s::uuid
+ORDER BY adl.created_at;
+
+
 -- name: list_pipeline_runs
 -- Get distinct pipeline runs with aggregated info for the Pipeline Runs page.
 SELECT
     adl.pipeline_run_id,
-    adl.application,
+    COALESCE(app.display_name, adl.application) AS application,
     COUNT(*) AS step_count,
     STRING_AGG(DISTINCT COALESCE(a.display_name, t.display_name), ', ') AS entities,
     BOOL_OR(adl.status = 'failed') AS has_failures,
@@ -223,12 +250,13 @@ SELECT
     MIN(adl.created_at) AS first_at,
     MAX(adl.created_at) AS last_at
 FROM agent_decision_log adl
+LEFT JOIN application app ON app.name = adl.application
 LEFT JOIN agent_version av ON av.id = adl.entity_version_id AND adl.entity_type = 'agent'
 LEFT JOIN agent a ON a.id = av.agent_id
 LEFT JOIN task_version tv ON tv.id = adl.entity_version_id AND adl.entity_type = 'task'
 LEFT JOIN task t ON t.id = tv.task_id
 WHERE adl.pipeline_run_id IS NOT NULL
-GROUP BY adl.pipeline_run_id, adl.application
+GROUP BY adl.pipeline_run_id, app.display_name, adl.application
 ORDER BY first_at DESC
 LIMIT 50;
 

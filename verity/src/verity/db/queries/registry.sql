@@ -342,3 +342,46 @@ SELECT
 FROM pipeline p
 LEFT JOIN pipeline_version pv ON pv.id = p.current_champion_version_id
 WHERE p.name = %(pipeline_name)s;
+
+
+-- name: list_applications
+SELECT * FROM application ORDER BY name;
+
+
+-- name: get_application_by_name
+SELECT * FROM application WHERE name = %(app_name)s;
+
+
+-- name: list_application_entities
+-- All entities mapped to an application, with their display names.
+SELECT
+    ae.entity_type,
+    ae.entity_id,
+    CASE ae.entity_type
+        WHEN 'agent' THEN (SELECT display_name FROM agent WHERE id = ae.entity_id)
+        WHEN 'task' THEN (SELECT display_name FROM task WHERE id = ae.entity_id)
+        WHEN 'prompt' THEN (SELECT name FROM prompt WHERE id = ae.entity_id)
+        WHEN 'tool' THEN (SELECT display_name FROM tool WHERE id = ae.entity_id)
+        WHEN 'pipeline' THEN (SELECT display_name FROM pipeline WHERE id = ae.entity_id)
+    END AS entity_display_name
+FROM application_entity ae
+WHERE ae.application_id = %(application_id)s::uuid
+ORDER BY ae.entity_type, entity_display_name;
+
+
+-- name: get_execution_context
+SELECT * FROM execution_context WHERE id = %(context_id)s::uuid;
+
+
+-- name: get_execution_context_by_ref
+SELECT * FROM execution_context
+WHERE application_id = %(application_id)s::uuid
+  AND context_ref = %(context_ref)s;
+
+
+-- name: list_execution_contexts
+SELECT ec.*, app.name AS application_name
+FROM execution_context ec
+JOIN application app ON app.id = ec.application_id
+ORDER BY ec.created_at DESC
+LIMIT 50;

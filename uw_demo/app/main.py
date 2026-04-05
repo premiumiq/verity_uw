@@ -40,6 +40,7 @@ from verity import Verity
 verity = Verity(
     database_url=settings.VERITY_DB_URL,
     anthropic_api_key=settings.ANTHROPIC_API_KEY,
+    application="uw_demo",
 )
 
 # ── REGISTER TOOL IMPLEMENTATIONS ─────────────────────────────

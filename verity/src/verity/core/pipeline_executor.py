@@ -56,6 +56,7 @@ class PipelineExecutor:
         submission_id: Optional[UUID] = None,
         channel: str = "production",
         mock=None,  # Optional MockContext
+        execution_context_id=None,  # Optional UUID — links decisions to a business context
     ) -> PipelineResult:
         """Execute a pipeline from its champion version.
 
@@ -157,7 +158,7 @@ class PipelineExecutor:
             if len(runnable) == 1:
                 result = await self._execute_step(
                     runnable[0], context, accumulated_results,
-                    submission_id, channel, pipeline_run_id, mock,
+                    submission_id, channel, pipeline_run_id, mock, execution_context_id,
                 )
                 accumulated_results[runnable[0].step_name] = result
                 all_steps.append(result)
@@ -227,6 +228,7 @@ class PipelineExecutor:
         channel: str,
         pipeline_run_id: UUID,
         mock=None,
+        execution_context_id=None,
     ) -> StepResult:
         """Execute a single pipeline step (agent, task, or tool)."""
         start_ms = _now_ms()
@@ -249,6 +251,7 @@ class PipelineExecutor:
                     pipeline_run_id=pipeline_run_id,
                     step_name=step.step_name,
                     mock=mock,
+                    execution_context_id=execution_context_id,
                 )
             elif entity_type == "task":
                 exec_result = await self.engine.run_task(
@@ -259,9 +262,9 @@ class PipelineExecutor:
                     pipeline_run_id=pipeline_run_id,
                     step_name=step.step_name,
                     mock=mock,
+                    execution_context_id=execution_context_id,
                 )
             elif entity_type == "tool":
-                # Tool as a first-class pipeline step — no LLM call
                 exec_result = await self.engine.run_tool(
                     tool_name=step.entity_name,
                     input_data=step_context,
@@ -270,6 +273,7 @@ class PipelineExecutor:
                     pipeline_run_id=pipeline_run_id,
                     step_name=step.step_name,
                     mock=mock,
+                    execution_context_id=execution_context_id,
                 )
             else:
                 return StepResult(

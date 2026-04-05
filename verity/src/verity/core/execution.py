@@ -249,6 +249,7 @@ class ExecutionEngine:
         step_name: Optional[str] = None,
         mock: Optional[MockContext] = None,
         stream: bool = False,
+        execution_context_id: Optional[UUID] = None,
     ) -> ExecutionResult:
         """Execute an agent with full governance and mock support."""
         start_ms = _now_ms()
@@ -280,6 +281,7 @@ class ExecutionEngine:
                     parent_decision_id=parent_decision_id,
                     decision_depth=decision_depth, step_name=step_name,
                     status="complete", mock_mode=True,
+                    execution_context_id=execution_context_id,
                 )
                 return ExecutionResult(
                     decision_log_id=log_result["decision_log_id"],
@@ -415,6 +417,7 @@ class ExecutionEngine:
         step_name: Optional[str] = None,
         mock: Optional[MockContext] = None,
         stream: bool = False,
+        execution_context_id: Optional[UUID] = None,
     ) -> ExecutionResult:
         """Execute a task with single-turn structured output and mock support."""
         start_ms = _now_ms()
@@ -437,6 +440,7 @@ class ExecutionEngine:
                     parent_decision_id=parent_decision_id,
                     decision_depth=decision_depth, step_name=step_name,
                     status="complete", mock_mode=True,
+                    execution_context_id=execution_context_id,
                 )
                 return ExecutionResult(
                     decision_log_id=log_result["decision_log_id"],
@@ -545,6 +549,7 @@ class ExecutionEngine:
         decision_depth: int = 0,
         step_name: Optional[str] = None,
         mock: Optional[MockContext] = None,
+        execution_context_id: Optional[UUID] = None,
     ) -> ExecutionResult:
         """Execute a tool directly — no LLM call.
 
@@ -654,6 +659,7 @@ class ExecutionEngine:
         status: str,
         error_message: Optional[str] = None,
         mock_mode: bool = False,
+        execution_context_id: Optional[UUID] = None,
     ) -> dict:
         """Create a decision log entry with full snapshot."""
         snapshot = config.get_inference_snapshot() if hasattr(config, 'get_inference_snapshot') else {}
@@ -678,6 +684,7 @@ class ExecutionEngine:
             parent_decision_id=parent_decision_id,
             decision_depth=decision_depth,
             step_name=step_name,
+            execution_context_id=execution_context_id,
             input_summary=str(context)[:500],
             input_json=context if isinstance(context, dict) else None,
             output_json=output if isinstance(output, dict) else None,

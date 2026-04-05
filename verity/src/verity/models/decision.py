@@ -40,6 +40,7 @@ class DecisionLogCreate(BaseModel):
     tool_calls_made: Optional[list[dict[str, Any]]] = None
     message_history: Optional[list[dict[str, Any]]] = None
     application: str = "default"
+    execution_context_id: Optional[UUID] = None
     hitl_required: bool = False
     status: str = "complete"
     error_message: Optional[str] = None
