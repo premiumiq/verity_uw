@@ -1,6 +1,14 @@
-# UI Enhancement Plan — Future
+# UI Enhancement Plan — IMPLEMENTING
 
-Captured 2026-04-05. To be implemented after version management / date pinning.
+Captured 2026-04-05. Version management + date pinning now complete.
+
+## Decisions
+- **Chart library:** ECharts via CDN. Wrap each chart in a clearly commented JS function.
+- **Build approach:** Incremental in 4 passes, commit after each:
+  - Pass 1: Navigation restructure + page renames
+  - Pass 2: Table enhancements + validity columns + applications column
+  - Pass 3: Detail pages (prompt, config, tool) + schema additions (display_name)
+  - Pass 4: Dashboard redesign with ECharts
 
 ---
 

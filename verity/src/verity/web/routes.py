@@ -84,7 +84,7 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
         agents = await verity.list_agents()
         tasks = await verity.list_tasks()
         return _render(templates, request, "dashboard.html",
-            active_page="dashboard",
+            active_page="home",
             counts=counts,
             recent_decisions=recent,
             agents=agents,
@@ -346,6 +346,21 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             active_page="test_results",
             counts=counts,
             recent_decisions=[],
+            agents=[], tasks=[],
+        )
+
+    # ── GROUND TRUTH ──────────────────────────────────────────
+
+    @router.get("/ground-truth", response_class=HTMLResponse)
+    async def ground_truth_page(request: Request):
+        """Ground truth datasets — placeholder."""
+        await verity.ensure_connected()
+        counts = await verity.dashboard_counts()
+        return _render(templates, request, "dashboard.html",
+            active_page="ground_truth",
+            counts=counts,
+            recent_decisions=[],
+            agents=[], tasks=[],
         )
 
     # ── PIPELINE RUNS ───────────────────────────────────────────

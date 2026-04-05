@@ -59,14 +59,19 @@
         <!-- Navigation links -->
         <div class="verity-sidebar-nav">
 
-            <!-- OVERVIEW section -->
-            <div class="verity-nav-section">Overview</div>
-            <a href="/admin/" class="verity-nav-link {% if active_page == 'dashboard' %}active{% endif %}">
-                <span class="verity-nav-icon">◫</span> Dashboard
+            <!-- HOME -->
+            <a href="/admin/" class="verity-nav-link {% if active_page == 'home' %}active{% endif %}">
+                <span class="verity-nav-icon">◫</span> Home
             </a>
 
-            <!-- REGISTRY section — browse all governed entities -->
+            <!-- REGISTRY — all governed entities -->
             <div class="verity-nav-section" style="margin-top: 16px;">Registry</div>
+            <a href="/admin/applications" class="verity-nav-link {% if active_page == 'applications' %}active{% endif %}">
+                <span class="verity-nav-icon">▣</span> Applications
+            </a>
+            <a href="/admin/pipelines" class="verity-nav-link {% if active_page == 'pipelines' %}active{% endif %}">
+                <span class="verity-nav-icon">⟿</span> Pipelines
+            </a>
             <a href="/admin/agents" class="verity-nav-link {% if active_page == 'agents' %}active{% endif %}">
                 <span class="verity-nav-icon">⬡</span> Agents
             </a>
@@ -77,41 +82,58 @@
                 <span class="verity-nav-icon">¶</span> Prompts
             </a>
             <a href="/admin/configs" class="verity-nav-link {% if active_page == 'configs' %}active{% endif %}">
-                <span class="verity-nav-icon">⚙</span> Inference Configs
+                <span class="verity-nav-icon">⚙</span> Configs
             </a>
             <a href="/admin/tools" class="verity-nav-link {% if active_page == 'tools' %}active{% endif %}">
                 <span class="verity-nav-icon">⚒</span> Tools
             </a>
-            <a href="/admin/pipelines" class="verity-nav-link {% if active_page == 'pipelines' %}active{% endif %}">
-                <span class="verity-nav-icon">⟿</span> Pipelines
-            </a>
-            <a href="/admin/applications" class="verity-nav-link {% if active_page == 'applications' %}active{% endif %}">
-                <span class="verity-nav-icon">▣</span> Applications
-            </a>
+            <span class="verity-nav-link" style="opacity: 0.35; cursor: default;">
+                <span class="verity-nav-icon">⊞</span> MCPs
+                <span style="font-size: 0.55rem; opacity: 0.6; margin-left: 4px;">soon</span>
+            </span>
+            <span class="verity-nav-link" style="opacity: 0.35; cursor: default;">
+                <span class="verity-nav-icon">◈</span> AI Models
+                <span style="font-size: 0.55rem; opacity: 0.6; margin-left: 4px;">soon</span>
+            </span>
 
-            <!-- EXECUTION section — runs, decisions, overrides -->
-            <div class="verity-nav-section" style="margin-top: 16px;">Execution</div>
+            <!-- OBSERVABILITY — execution monitoring -->
+            <div class="verity-nav-section" style="margin-top: 16px;">Observability</div>
+            <span class="verity-nav-link" style="opacity: 0.35; cursor: default;">
+                <span class="verity-nav-icon">📊</span> Usage
+                <span style="font-size: 0.55rem; opacity: 0.6; margin-left: 4px;">soon</span>
+            </span>
             <a href="/admin/pipeline-runs" class="verity-nav-link {% if active_page == 'pipeline_runs' %}active{% endif %}">
                 <span class="verity-nav-icon">⟿</span> Pipeline Runs
             </a>
             <a href="/admin/decisions" class="verity-nav-link {% if active_page == 'decisions' %}active{% endif %}">
-                <span class="verity-nav-icon">◉</span> Decision Log
+                <span class="verity-nav-icon">◉</span> Decision Logs
             </a>
             <a href="/admin/overrides" class="verity-nav-link {% if active_page == 'overrides' %}active{% endif %}">
-                <span class="verity-nav-icon">⚠</span> Overrides
+                <span class="verity-nav-icon">⚠</span> HITL Overrides
             </a>
+            <span class="verity-nav-link" style="opacity: 0.35; cursor: default;">
+                <span class="verity-nav-icon">💲</span> Spend Analysis
+                <span style="font-size: 0.55rem; opacity: 0.6; margin-left: 4px;">soon</span>
+            </span>
 
-            <!-- GOVERNANCE section — compliance, lifecycle, testing -->
+            <!-- GOVERNANCE — compliance, lifecycle, testing -->
             <div class="verity-nav-section" style="margin-top: 16px;">Governance</div>
             <a href="/admin/model-inventory" class="verity-nav-link {% if active_page == 'model_inventory' %}active{% endif %}">
-                <span class="verity-nav-icon">☰</span> Model Inventory
+                <span class="verity-nav-icon">☰</span> Inventory
             </a>
             <a href="/admin/lifecycle" class="verity-nav-link {% if active_page == 'lifecycle' %}active{% endif %}">
                 <span class="verity-nav-icon">↗</span> Lifecycle
             </a>
-            <a href="/admin/test-results" class="verity-nav-link {% if active_page == 'test_results' %}active{% endif %}">
-                <span class="verity-nav-icon">✓</span> Test Results
+            <a href="/admin/ground-truth" class="verity-nav-link {% if active_page == 'ground_truth' %}active{% endif %}">
+                <span class="verity-nav-icon">◎</span> Ground Truth
             </a>
+            <a href="/admin/test-results" class="verity-nav-link {% if active_page == 'test_results' %}active{% endif %}">
+                <span class="verity-nav-icon">✓</span> Test Status
+            </a>
+            <span class="verity-nav-link" style="opacity: 0.35; cursor: default;">
+                <span class="verity-nav-icon">🔴</span> Incidents
+                <span style="font-size: 0.55rem; opacity: 0.6; margin-left: 4px;">soon</span>
+            </span>
 
         </div><!-- end sidebar-nav -->
 
