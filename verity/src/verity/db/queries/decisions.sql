@@ -53,6 +53,8 @@ SELECT
     adl.channel,
     adl.mock_mode,
     adl.pipeline_run_id,
+    adl.execution_context_id,
+    COALESCE(app.display_name, adl.application) AS application,
     adl.parent_decision_id,
     adl.decision_depth,
     adl.step_name,
@@ -68,12 +70,15 @@ SELECT
     adl.created_at,
     COALESCE(a.display_name, t.display_name) AS entity_name,
     COALESCE(a.display_name, t.display_name) AS entity_display_name,
-    COALESCE(av.version_label, tv.version_label) AS version_label
+    COALESCE(av.version_label, tv.version_label) AS version_label,
+    ec.context_ref AS execution_context_ref
 FROM agent_decision_log adl
+LEFT JOIN application app ON app.name = adl.application
 LEFT JOIN agent_version av ON av.id = adl.entity_version_id AND adl.entity_type = 'agent'
 LEFT JOIN agent a ON a.id = av.agent_id
 LEFT JOIN task_version tv ON tv.id = adl.entity_version_id AND adl.entity_type = 'task'
 LEFT JOIN task t ON t.id = tv.task_id
+LEFT JOIN execution_context ec ON ec.id = adl.execution_context_id
 ORDER BY adl.created_at DESC
 LIMIT %(limit)s OFFSET %(offset)s;
 

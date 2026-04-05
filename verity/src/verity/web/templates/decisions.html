@@ -1,28 +1,26 @@
 <!--
-  DECISION LOG PAGE — Searchable list of all AI invocations
+  DECISION LOG PAGE — All AI invocations
 
   Every Claude call (agent or task) creates a decision log entry.
-  This page shows them most-recent-first with key metadata.
-  Click any row to see the full decision detail.
+  Shows entity, step, run ID, context, application, status, and timing.
 
   DATA PASSED BY ROUTE:
-  - decisions: list of DecisionLog entries
+  - decisions: list of DecisionLog entries (with pipeline_run_id, execution_context_ref, application)
   - total: total count of decisions
 -->
 {% extends "base.html" %}
 
-{% block title %}Decision Log — Verity Admin{% endblock %}
+{% block title %}Decision Logs — Verity{% endblock %}
 
 {% block breadcrumbs %}
     <span class="separator">›</span>
-    <span>Decision Log</span>
+    <span>Decision Logs</span>
 {% endblock %}
 
-{% block page_title %}Decision Log{% endblock %}
+{% block page_title %}Decision Logs{% endblock %}
 
 {% block content %}
 
-<!-- Total count -->
 <div style="margin-bottom: 16px; font-size: 0.85rem; color: var(--verity-text-light);">
     {{ total }} total decisions logged
 </div>
@@ -33,9 +31,10 @@
         <tr>
             <th>Entity</th>
             <th>Type</th>
-            <th>Version</th>
             <th>Step</th>
-            <th>Submission</th>
+            <th>Run ID</th>
+            <th>Context</th>
+            <th>Application</th>
             <th>Status</th>
             <th>Tokens</th>
             <th>Duration</th>
@@ -45,15 +44,45 @@
     <tbody>
         {% for d in decisions %}
         <tr class="clickable" onclick="window.location='/admin/decisions/{{ d.id }}'">
+            <!-- Entity display name -->
             <td><a href="/admin/decisions/{{ d.id }}">{{ d.entity_name or '—' }}</a></td>
+
+            <!-- Entity type badge -->
             <td><span class="verity-badge verity-badge-{{ d.entity_type }}">{{ d.entity_type }}</span></td>
-            <td>{{ d.version_label or '—' }}</td>
-            <td>{{ d.step_name or '—' }}</td>
-            <td>{{ d.submission_id|string|truncate(8, True, '') if d.submission_id else '—' }}</td>
+
+            <!-- Pipeline step name -->
+            <td style="font-size: 0.8rem;">{{ d.step_name or '—' }}</td>
+
+            <!-- Run ID (short format: first 4...last 4) -->
+            <td style="font-family: monospace; font-size: 0.7rem;">
+                {% if d.pipeline_run_id %}
+                    <a href="/admin/audit-trail/run/{{ d.pipeline_run_id }}" style="color: var(--verity-blue-deep);">
+                        {{ d.pipeline_run_id | short_id }}
+                    </a>
+                {% else %}
+                    —
+                {% endif %}
+            </td>
+
+            <!-- Execution context ref (short format) -->
+            <td style="font-size: 0.75rem; color: var(--verity-text-light);">
+                {{ d.execution_context_ref or '—' }}
+            </td>
+
+            <!-- Application -->
+            <td style="font-size: 0.8rem;">{{ d.application or '—' }}</td>
+
+            <!-- Status badge -->
             <td><span class="verity-badge verity-badge-{{ d.status }}">{{ d.status }}</span></td>
-            <td>{{ (d.input_tokens or 0) + (d.output_tokens or 0) }}</td>
-            <td>{{ d.duration_ms or 0 }}ms</td>
-            <td>{{ d.created_at.strftime('%m-%d %H:%M') if d.created_at else '—' }}</td>
+
+            <!-- Tokens -->
+            <td style="font-size: 0.8rem;">{{ (d.input_tokens or 0) + (d.output_tokens or 0) }}</td>
+
+            <!-- Duration -->
+            <td style="font-size: 0.8rem;">{{ d.duration_ms or 0 }}ms</td>
+
+            <!-- Timestamp -->
+            <td style="font-size: 0.8rem;">{{ d.created_at.strftime('%m-%d %H:%M') if d.created_at else '—' }}</td>
         </tr>
         {% endfor %}
     </tbody>

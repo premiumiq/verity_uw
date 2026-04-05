@@ -42,6 +42,18 @@ def _enum_value(value):
     return value
 
 
+def _short_id(value):
+    """Jinja2 filter: format a UUID as first 4 chars + ... + last 4 chars.
+
+    Turns 'aaaa0001-0001-0001-0001-000000000001' into 'aaaa...0001'
+    Much more readable in tables than full UUIDs or truncated starts.
+    """
+    s = str(value) if value else ''
+    if len(s) > 12:
+        return f"{s[:4]}...{s[-4:]}"
+    return s
+
+
 def _render(templates, request, template_name, **context):
     """Helper to render a template with consistent API.
 
@@ -64,8 +76,9 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
     router = APIRouter()
     templates = Jinja2Templates(directory=templates_dir)
 
-    # Register the enumval filter (for explicit use: {{ x | enumval }})
+    # Register custom Jinja2 filters
     templates.env.filters["enumval"] = _enum_value
+    templates.env.filters["short_id"] = _short_id
 
     # ── SHARED DATA LOADERS ───────────────────────────────────
     # These load cross-reference data used by multiple pages.

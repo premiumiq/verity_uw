@@ -55,6 +55,8 @@ class DecisionLog(BaseModel):
     channel: DeploymentChannel
     mock_mode: bool = False
     pipeline_run_id: Optional[UUID] = None
+    execution_context_id: Optional[UUID] = None
+    application: str = "default"
     parent_decision_id: Optional[UUID] = None
     decision_depth: int = 0
     step_name: Optional[str] = None
@@ -67,6 +69,8 @@ class DecisionLog(BaseModel):
     duration_ms: Optional[int] = None
     status: str = "complete"
     hitl_required: bool = False
+    # Joined from execution_context table
+    execution_context_ref: Optional[str] = None
     created_at: Optional[datetime] = None
 
     # Joined fields
