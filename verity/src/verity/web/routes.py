@@ -80,11 +80,15 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
     async def dashboard(request: Request):
         await verity.ensure_connected()
         counts = await verity.dashboard_counts()
-        recent = await verity.decisions.list_recent_decisions(limit=10)
+        recent = await verity.decisions.list_recent_decisions(limit=5)
+        agents = await verity.list_agents()
+        tasks = await verity.list_tasks()
         return _render(templates, request, "dashboard.html",
             active_page="dashboard",
             counts=counts,
             recent_decisions=recent,
+            agents=agents,
+            tasks=tasks,
         )
 
     # ── AGENTS ────────────────────────────────────────────────
@@ -213,9 +217,20 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
     async def tools_list(request: Request):
         await verity.ensure_connected()
         tools = await verity.list_tools()
+
+        # Build cross-reference: which agents/tasks use each tool
+        usage_rows = await verity.db.fetch_all("get_tool_usage")
+        tool_usage = {}  # {tool_id_str: [{entity_type, entity_name}, ...]}
+        for row in usage_rows:
+            tid = row["tool_id"]
+            if tid not in tool_usage:
+                tool_usage[tid] = []
+            tool_usage[tid].append({"entity_type": row["entity_type"], "entity_name": row["entity_name"]})
+
         return _render(templates, request, "tools.html",
             active_page="tools",
             tools=tools,
+            tool_usage=tool_usage,
         )
 
     # ── PIPELINES ─────────────────────────────────────────────
@@ -316,6 +331,30 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             active_page="test_results",
             counts=counts,
             recent_decisions=[],
+        )
+
+    # ── PIPELINE RUNS ───────────────────────────────────────────
+
+    @router.get("/pipeline-runs", response_class=HTMLResponse)
+    async def pipeline_runs_page(request: Request):
+        """Show all pipeline runs grouped by pipeline_run_id."""
+        await verity.ensure_connected()
+        runs = await verity.db.fetch_all("list_pipeline_runs")
+        return _render(templates, request, "pipeline_runs.html",
+            active_page="pipeline_runs",
+            runs=runs,
+        )
+
+    # ── OVERRIDES ─────────────────────────────────────────────
+
+    @router.get("/overrides", response_class=HTMLResponse)
+    async def overrides_page(request: Request):
+        """Show all human overrides of AI decisions."""
+        await verity.ensure_connected()
+        overrides = await verity.db.fetch_all("list_all_overrides")
+        return _render(templates, request, "overrides.html",
+            active_page="overrides",
+            overrides=overrides,
         )
 
     return router

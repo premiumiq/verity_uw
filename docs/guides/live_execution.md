@@ -58,7 +58,7 @@ For each pipeline step, the execution engine:
 After a live run:
 
 1. Click **"View Audit Trail in Verity"** on the pipeline results page
-2. Or go to http://localhost:8000/verity/admin/decisions — the new decisions appear at the top
+2. Or go to http://localhost:8000/admin/decisions — the new decisions appear at the top
 3. Click any decision to see:
    - The exact inference config snapshot (temperature, model, max_tokens)
    - The tool calls Claude made and what each tool returned

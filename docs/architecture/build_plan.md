@@ -216,9 +216,9 @@ verity = Verity(database_url=settings.VERITY_DB_URL)
 verity_api = create_verity_api(verity)
 app.mount("/verity/api", verity_api)
 
-# Mount Verity admin web UI at /verity/admin/...
+# Mount Verity admin web UI at /admin/...
 verity_web = create_verity_web(verity)
-app.mount("/verity/admin", verity_web)
+app.mount("/admin", verity_web)
 
 # Business workflow routes at /uw/...
 from uw_demo.app.ui.routes import router as uw_router
@@ -405,20 +405,20 @@ volumes:
 
 | # | Feature | Demo Action | Verity UI Page |
 |---|---|---|---|
-| 1 | **Agent/Task Registry** | Browse all registered AI components | `/verity/admin/agents`, `/tasks` |
+| 1 | **Agent/Task Registry** | Browse all registered AI components | `/admin/agents`, `/tasks` |
 | 2 | **Version Management** | See version history, compare configs between versions | Agent/task detail pages |
-| 3 | **Prompt Governance** | View prompts by governance tier; behavioural prompts show approval status | `/verity/admin/prompts` |
-| 4 | **Inference Configs** | Named config sets with all LLM parameters | `/verity/admin/configs` |
+| 3 | **Prompt Governance** | View prompts by governance tier; behavioural prompts show approval status | `/admin/prompts` |
+| 4 | **Inference Configs** | Named config sets with all LLM parameters | `/admin/configs` |
 | 5 | **Tool Authorization** | Which tools each agent version is authorized to call | Agent detail page |
-| 6 | **7-State Lifecycle** | Promote a version through gates; show HITL approval requirements per tier | `/verity/admin/lifecycle` |
+| 6 | **7-State Lifecycle** | Promote a version through gates; show HITL approval requirements per tier | `/admin/lifecycle` |
 | 7 | **Execution Governance** | Run an agent/task; show Verity resolving config at runtime | Live demo + decision detail |
-| 8 | **Decision Logging** | Every AI call logged: prompts, config snapshot, I/O, tokens, duration | `/verity/admin/decisions` |
-| 9 | **Audit Trail** | Per-submission chain: every task and agent that ran, with exact versions | `/verity/admin/audit-trail` |
+| 8 | **Decision Logging** | Every AI call logged: prompts, config snapshot, I/O, tokens, duration | `/admin/decisions` |
+| 9 | **Audit Trail** | Per-submission chain: every task and agent that ran, with exact versions | `/admin/audit-trail` |
 | 10 | **Override Tracking** | Human overrides AI decision with reason code | Decision detail page |
-| 11 | **Model Inventory** | Regulatory report: all champions, materiality, validation, override rates | `/verity/admin/model-inventory` |
+| 11 | **Model Inventory** | Regulatory report: all champions, materiality, validation, override rates | `/admin/model-inventory` |
 | 12 | **Model Cards** | SR 11-7 documentation per entity version | Agent/task detail page |
-| 13 | **Testing Framework** | Test suites with results, metric types per capability | `/verity/admin/test-results` |
-| 14 | **Pipeline Visualization** | Show pipeline steps with entity types and dependencies | `/verity/admin/pipelines` |
+| 13 | **Testing Framework** | Test suites with results, metric types per capability | `/admin/test-results` |
+| 14 | **Pipeline Visualization** | Show pipeline steps with entity types and dependencies | `/admin/pipelines` |
 
 ### Business Application Features (UW Demo powered by Verity)
 
@@ -599,7 +599,7 @@ These can be added incrementally to App 1 to strengthen the demo:
 8. `POST /verity/api/v1/decisions/log` creates record and returns decision_log_id
 
 ### Verity Web UI
-9. Dashboard at `/verity/admin/` shows: 2 agents, 2 tasks, 5 configs, recent decisions
+9. Dashboard at `/admin/` shows: 2 agents, 2 tasks, 5 configs, recent decisions
 10. Agent detail: version history (v0.9.0 deprecated + v1.0.0 champion), prompts, tools, model card
 11. Decision log: 15-20 pre-seeded entries, filterable by entity type
 12. Lifecycle page: promote a new triage_agent v1.1.0 through draft → candidate → champion

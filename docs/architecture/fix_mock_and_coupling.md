@@ -269,7 +269,7 @@ result = await verity.execute_pipeline(...)
 sub["last_pipeline_run_id"] = str(result.pipeline_run_id)
 
 # "View in Verity" link uses pipeline_run_id, not submission_id
-# <a href="/verity/admin/audit-trail/{{ sub.last_pipeline_run_id }}">
+# <a href="/admin/audit-trail/{{ sub.last_pipeline_run_id }}">
 ```
 
 **Audit trail page updates:** Instead of `audit-trail/{submission_id}`, the URL becomes `audit-trail/run/{pipeline_run_id}`. The query filters by `pipeline_run_id`, which is unique per execution — no collision possible.
@@ -396,7 +396,7 @@ for case in test_cases:
 
 ### Decoupling
 6. `execute_pipeline()` returns `PipelineResult.pipeline_run_id`
-7. UW app stores `pipeline_run_id`, links to `/verity/admin/audit-trail/run/{pipeline_run_id}`
+7. UW app stores `pipeline_run_id`, links to `/admin/audit-trail/run/{pipeline_run_id}`
 8. Audit trail by `pipeline_run_id` returns only decisions from that specific run — no collision
 9. `submission_id` remains in decision log as metadata but is not used for linking
 

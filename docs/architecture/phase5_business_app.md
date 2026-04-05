@@ -34,8 +34,8 @@ The Verity admin UI shows the governance side — agents, tasks, prompts, decisi
 
 ### Link Between UIs
 - UW submission detail has "View in Verity" links that jump to:
-  - `/verity/admin/audit-trail/{submission_id}` — full decision chain
-  - `/verity/admin/decisions/{decision_id}` — individual decision detail
+  - `/admin/audit-trail/{submission_id}` — full decision chain
+  - `/admin/decisions/{decision_id}` — individual decision detail
 - Verity admin sidebar footer has "UW Demo →" link
 
 ---

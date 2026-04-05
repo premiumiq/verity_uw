@@ -1,12 +1,15 @@
 <!--
   DASHBOARD PAGE — Verity Admin Overview
 
-  Shows at-a-glance counts of all governed entities and recent decisions.
-  This is the landing page at /verity/admin/
+  Shows at-a-glance governance health: entity counts (clickable),
+  recent activity summary, and cross-reference highlights.
+  Distinct from Decision Log (which shows raw execution records).
 
   DATA PASSED BY ROUTE:
-  - counts: DashboardCounts (agent_count, task_count, prompt_count, etc.)
-  - recent_decisions: list of recent DecisionLog entries
+  - counts: DashboardCounts
+  - recent_decisions: list of recent DecisionLog entries (last 5)
+  - agents: list of agent dicts (for cross-reference)
+  - tasks: list of task dicts (for cross-reference)
 -->
 {% extends "base.html" %}
 
@@ -16,59 +19,85 @@
 
 {% block content %}
 
-<!-- ── ENTITY COUNT CARDS ──────────────────────────────────────
-     Grid of cards showing how many agents, tasks, prompts, etc.
-     are registered in Verity. -->
+<!-- ── ENTITY COUNT CARDS (clickable — link to relevant page) ── -->
 <div class="verity-stats-grid">
 
-    <!-- Agents card -->
-    <div class="verity-card">
-        <div class="verity-card-header">Agents</div>
-        <div class="verity-card-value">{{ counts.agent_count }}</div>
-        <div class="verity-card-footer">Goal-directed AI systems</div>
-    </div>
+    <!-- Agents card — click "2" to go to Agents page -->
+    <a href="/admin/agents" style="text-decoration: none;">
+        <div class="verity-card" style="cursor: pointer; transition: border-color 0.15s;"
+             onmouseover="this.style.borderColor='var(--verity-blue)'"
+             onmouseout="this.style.borderColor='var(--verity-border)'">
+            <div class="verity-card-header">Agents</div>
+            <div class="verity-card-value">{{ counts.agent_count }}</div>
+            <div class="verity-card-footer">Goal-directed AI systems</div>
+        </div>
+    </a>
 
     <!-- Tasks card -->
-    <div class="verity-card">
-        <div class="verity-card-header">Tasks</div>
-        <div class="verity-card-value">{{ counts.task_count }}</div>
-        <div class="verity-card-footer">Bounded AI operations</div>
-    </div>
+    <a href="/admin/tasks" style="text-decoration: none;">
+        <div class="verity-card" style="cursor: pointer; transition: border-color 0.15s;"
+             onmouseover="this.style.borderColor='var(--verity-blue)'"
+             onmouseout="this.style.borderColor='var(--verity-border)'">
+            <div class="verity-card-header">Tasks</div>
+            <div class="verity-card-value">{{ counts.task_count }}</div>
+            <div class="verity-card-footer">Bounded AI operations</div>
+        </div>
+    </a>
 
     <!-- Prompts card -->
-    <div class="verity-card">
-        <div class="verity-card-header">Prompts</div>
-        <div class="verity-card-value">{{ counts.prompt_count }}</div>
-        <div class="verity-card-footer">Governed prompt versions</div>
-    </div>
+    <a href="/admin/prompts" style="text-decoration: none;">
+        <div class="verity-card" style="cursor: pointer; transition: border-color 0.15s;"
+             onmouseover="this.style.borderColor='var(--verity-blue)'"
+             onmouseout="this.style.borderColor='var(--verity-border)'">
+            <div class="verity-card-header">Prompts</div>
+            <div class="verity-card-value">{{ counts.prompt_count }}</div>
+            <div class="verity-card-footer">Governed prompt versions</div>
+        </div>
+    </a>
 
     <!-- Inference Configs card -->
-    <div class="verity-card">
-        <div class="verity-card-header">Inference Configs</div>
-        <div class="verity-card-value">{{ counts.config_count }}</div>
-        <div class="verity-card-footer">Named LLM parameter sets</div>
-    </div>
+    <a href="/admin/configs" style="text-decoration: none;">
+        <div class="verity-card" style="cursor: pointer; transition: border-color 0.15s;"
+             onmouseover="this.style.borderColor='var(--verity-blue)'"
+             onmouseout="this.style.borderColor='var(--verity-border)'">
+            <div class="verity-card-header">Inference Configs</div>
+            <div class="verity-card-value">{{ counts.config_count }}</div>
+            <div class="verity-card-footer">Named LLM parameter sets</div>
+        </div>
+    </a>
 
     <!-- Tools card -->
-    <div class="verity-card">
-        <div class="verity-card-header">Tools</div>
-        <div class="verity-card-value">{{ counts.tool_count }}</div>
-        <div class="verity-card-footer">Registered callable tools</div>
-    </div>
+    <a href="/admin/tools" style="text-decoration: none;">
+        <div class="verity-card" style="cursor: pointer; transition: border-color 0.15s;"
+             onmouseover="this.style.borderColor='var(--verity-blue)'"
+             onmouseout="this.style.borderColor='var(--verity-border)'">
+            <div class="verity-card-header">Tools</div>
+            <div class="verity-card-value">{{ counts.tool_count }}</div>
+            <div class="verity-card-footer">Registered callable tools</div>
+        </div>
+    </a>
 
     <!-- Decisions card -->
-    <div class="verity-card">
-        <div class="verity-card-header">Decisions Logged</div>
-        <div class="verity-card-value">{{ counts.total_decisions }}</div>
-        <div class="verity-card-footer">Total AI invocations</div>
-    </div>
+    <a href="/admin/decisions" style="text-decoration: none;">
+        <div class="verity-card" style="cursor: pointer; transition: border-color 0.15s;"
+             onmouseover="this.style.borderColor='var(--verity-blue)'"
+             onmouseout="this.style.borderColor='var(--verity-border)'">
+            <div class="verity-card-header">Decisions Logged</div>
+            <div class="verity-card-value">{{ counts.total_decisions }}</div>
+            <div class="verity-card-footer">Total AI invocations</div>
+        </div>
+    </a>
 
     <!-- Overrides card -->
-    <div class="verity-card">
-        <div class="verity-card-header">Overrides</div>
-        <div class="verity-card-value">{{ counts.total_overrides }}</div>
-        <div class="verity-card-footer">Human corrections to AI</div>
-    </div>
+    <a href="/admin/overrides" style="text-decoration: none;">
+        <div class="verity-card" style="cursor: pointer; transition: border-color 0.15s;"
+             onmouseover="this.style.borderColor='var(--verity-amber)'"
+             onmouseout="this.style.borderColor='var(--verity-border)'">
+            <div class="verity-card-header">Overrides</div>
+            <div class="verity-card-value">{{ counts.total_overrides }}</div>
+            <div class="verity-card-footer">Human corrections to AI</div>
+        </div>
+    </a>
 
     <!-- Open Incidents card -->
     <div class="verity-card">
@@ -80,11 +109,70 @@
 </div>
 
 
-<!-- ── RECENT DECISIONS TABLE ──────────────────────────────────
-     Shows the most recent AI invocations logged in Verity.
-     Clicking a row navigates to the full decision detail. -->
+<!-- ── GOVERNED ENTITIES SUMMARY ───────────────────────────────
+     Shows which agents/tasks use which configs, prompts, and tools.
+     This is the cross-reference view that answers "what uses what." -->
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px;">
+
+    <!-- Agents summary with their configs and tool counts -->
+    <div class="verity-section">
+        <h2 class="verity-section-title">Agents</h2>
+        {% if agents %}
+        {% for agent in agents %}
+        <div class="verity-card" style="margin-bottom: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <a href="/admin/agents/{{ agent.name }}" style="font-weight: 600; font-size: 0.9rem;">{{ agent.display_name }}</a>
+                <span class="verity-badge verity-badge-{{ agent.materiality_tier }}">{{ agent.materiality_tier }}</span>
+                {% if agent.champion_version %}
+                <span class="verity-badge verity-badge-champion">v{{ agent.champion_version }}</span>
+                {% endif %}
+            </div>
+            <div style="font-size: 0.75rem; color: var(--verity-text-light);">
+                Config: {{ agent.inference_config_name or '—' }}
+                · {{ agent.description[:80] }}{% if agent.description|length > 80 %}...{% endif %}
+            </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div style="font-size: 0.85rem; color: var(--verity-text-light);">No agents registered</div>
+        {% endif %}
+    </div>
+
+    <!-- Tasks summary -->
+    <div class="verity-section">
+        <h2 class="verity-section-title">Tasks</h2>
+        {% if tasks %}
+        {% for task in tasks %}
+        <div class="verity-card" style="margin-bottom: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <a href="/admin/tasks/{{ task.name }}" style="font-weight: 600; font-size: 0.9rem;">{{ task.display_name }}</a>
+                <span class="verity-badge verity-badge-task">{{ task.capability_type }}</span>
+                {% if task.champion_version %}
+                <span class="verity-badge verity-badge-champion">v{{ task.champion_version }}</span>
+                {% endif %}
+            </div>
+            <div style="font-size: 0.75rem; color: var(--verity-text-light);">
+                Config: {{ task.inference_config_name or '—' }}
+                · {{ task.description[:80] }}{% if task.description|length > 80 %}...{% endif %}
+            </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div style="font-size: 0.85rem; color: var(--verity-text-light);">No tasks registered</div>
+        {% endif %}
+    </div>
+
+</div>
+
+
+<!-- ── RECENT ACTIVITY ────────────────────────────────────────
+     Last 5 decisions — just a quick snapshot, not the full log.
+     Links to the full Decision Log page for details. -->
 <div class="verity-section">
-    <h2 class="verity-section-title">Recent Decisions</h2>
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+        <h2 class="verity-section-title" style="margin-bottom: 0; border-bottom: none;">Recent Activity</h2>
+        <a href="/admin/decisions" class="verity-btn verity-btn-secondary verity-btn-sm">View All Decisions →</a>
+    </div>
 
     {% if recent_decisions %}
     <table class="verity-table">
@@ -92,7 +180,6 @@
             <tr>
                 <th>Entity</th>
                 <th>Type</th>
-                <th>Version</th>
                 <th>Step</th>
                 <th>Status</th>
                 <th>Duration</th>
@@ -101,20 +188,18 @@
         </thead>
         <tbody>
             {% for d in recent_decisions %}
-            <tr class="clickable" onclick="window.location='/verity/admin/decisions/{{ d.id }}'">
+            <tr class="clickable" onclick="window.location='/admin/decisions/{{ d.id }}'">
                 <td>{{ d.entity_name or '—' }}</td>
                 <td><span class="verity-badge verity-badge-{{ d.entity_type }}">{{ d.entity_type }}</span></td>
-                <td>{{ d.version_label or '—' }}</td>
                 <td>{{ d.step_name or '—' }}</td>
                 <td><span class="verity-badge verity-badge-{{ d.status }}">{{ d.status }}</span></td>
                 <td>{{ d.duration_ms or 0 }}ms</td>
-                <td>{{ d.created_at.strftime('%Y-%m-%d %H:%M') if d.created_at else '—' }}</td>
+                <td>{{ d.created_at.strftime('%m-%d %H:%M') if d.created_at else '—' }}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
     {% else %}
-    <!-- Empty state when no decisions have been logged yet -->
     <div class="verity-empty">
         <div style="font-size: 2rem; opacity: 0.3;">◉</div>
         <div class="verity-empty-message">No decisions logged yet. Run an agent or task to see activity here.</div>

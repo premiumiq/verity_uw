@@ -15,7 +15,7 @@ python -m uw_demo.app.setup.register_all
 You should see output ending with:
 ```
 ✓ Seed complete. All demo data loaded.
-  Open http://localhost:8000/verity/admin/ to see the data.
+  Open http://localhost:8000/admin/ to see the data.
 ```
 
 If you see errors, the script drops and re-creates the schema each time, so you can just run it again.
@@ -75,19 +75,19 @@ Expected counts:
 uvicorn uw_demo.app.main:app --port 8000 --reload
 ```
 
-Open http://localhost:8000/verity/admin/ and verify each page:
+Open http://localhost:8000/admin/ and verify each page:
 
-### Dashboard (`/verity/admin/`)
+### Dashboard (`/admin/`)
 - 8 stat cards showing: Agents=2, Tasks=2, Prompts=8, Configs=5, Tools=8, Decisions=16, Overrides=2, Incidents=0
 - Recent Decisions table with 10 rows showing entity names, types (agent/task badges), step names, and status
 
-### Agents (`/verity/admin/agents`)
+### Agents (`/admin/agents`)
 - Table with 2 rows: triage_agent and appetite_agent
 - Both show "high" materiality badge (red/orange)
 - Both show "1.0.0" champion version badge (green)
 - Inference config column shows "triage_balanced"
 
-### Agent Detail (`/verity/admin/agents/triage_agent`)
+### Agent Detail (`/admin/agents/triage_agent`)
 - Agent Details card: name, materiality=high, champion=1.0.0, owner=Sarah Chen
 - Description and purpose text from the PRD
 - Version History table with 2 rows: v0.9.0 (deprecated) and v1.0.0 (champion)
@@ -96,27 +96,27 @@ Open http://localhost:8000/verity/admin/ and verify each page:
 - Authorized Tools: 5 tools listed (get_submission_context, get_underwriting_guidelines, etc.)
 - Model Card section: purpose, design rationale, known limitations, status=approved
 
-### Tasks (`/verity/admin/tasks`)
+### Tasks (`/admin/tasks`)
 - Table with 2 rows: document_classifier (classification) and field_extractor (extraction)
 - Both show "medium" materiality badge
 - Both show champion version badge
 
-### Prompts (`/verity/admin/prompts`)
+### Prompts (`/admin/prompts`)
 - Table with 8 rows
 - Shows governance tier badges: behavioural (red), contextual (amber), formatting (green)
 - Shows API role badges: system, user
 
-### Inference Configs (`/verity/admin/configs`)
+### Inference Configs (`/admin/configs`)
 - Table with 5 rows showing name, model, temperature, max_tokens, intended use
 - classification_strict: temp=0.0, max_tokens=512
 - triage_balanced: temp=0.2, max_tokens=4096
 
-### Tools (`/verity/admin/tools`)
+### Tools (`/admin/tools`)
 - Table with 8 tools
 - Write operation column: 3 tools marked ✓ (update_submission_event, store_triage_result, update_appetite_status)
 - Mock mode: all ✓
 
-### Pipelines (`/verity/admin/pipelines`)
+### Pipelines (`/admin/pipelines`)
 - 1 pipeline: "Underwriting Submission Processing Pipeline" with champion v1 badge
 - Steps table with 4 rows showing dependency chain:
   1. classify_documents → task: document_classifier
@@ -124,7 +124,7 @@ Open http://localhost:8000/verity/admin/ and verify each page:
   3. triage_submission → agent: triage_agent (depends on extract)
   4. assess_appetite → agent: appetite_agent (depends on triage)
 
-### Decision Log (`/verity/admin/decisions`)
+### Decision Log (`/admin/decisions`)
 - "16 total decisions logged" header
 - Table with 16 rows showing entity names, type badges (agent/task), step names, submission IDs
 - Rows are clickable — clicking opens decision detail
@@ -135,7 +135,7 @@ Open http://localhost:8000/verity/admin/ and verify each page:
 - Output section: full JSON output
 - For agent decisions: reasoning text visible
 
-### Model Inventory (`/verity/admin/model-inventory`)
+### Model Inventory (`/admin/model-inventory`)
 - Agents section (2 rows):
   - triage_agent: materiality=high, F1=0.860, Kappa=0.780, model card=approved
   - appetite_agent: materiality=high, model card=approved

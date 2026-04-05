@@ -189,3 +189,65 @@ This enables:
 - Reuse of common agents/tasks across applications with independent lifecycle per app
 
 **Priority:** Medium — needed when a second application is built on Verity. Not needed for single-app demo.
+
+---
+
+## FC-10: Execution Context
+
+**Gap:** Business applications currently pass raw business keys (`submission_id`) to Verity's decision log. While `pipeline_run_id` provides Verity-owned grouping for pipeline runs, there is no formal registration of business-level execution contexts. A business app should be able to register a named execution context (e.g., `submission:SUB-001`) that is unique within that application, and Verity should guarantee uniqueness of (application + context_ref).
+
+**Design:** Add an `execution_context` table linked to the `application` table (FC-9):
+
+```sql
+CREATE TABLE execution_context (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    application_id  UUID NOT NULL REFERENCES application(id),
+    -- The business app's own identifier for this context (opaque to Verity)
+    context_ref     VARCHAR(500) NOT NULL,
+    -- e.g., "submission:00000001-...", "policy:POL-2026-001", "renewal:REN-123"
+    context_type    VARCHAR(100),
+    -- e.g., "submission", "policy", "renewal"
+    metadata        JSONB DEFAULT '{}',
+    -- Optional business metadata (Verity doesn't interpret this)
+    created_at      TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT uq_app_context UNIQUE (application_id, context_ref)
+);
+```
+
+Usage:
+```python
+# Business app registers a context before running a pipeline
+ctx = await verity.create_execution_context(
+    application="uw_demo",
+    context_ref=f"submission:{submission_id}",
+    context_type="submission",
+    metadata={"named_insured": "Acme Dynamics", "lob": "D&O"},
+)
+
+# Pipeline runs link to this context
+result = await verity.execute_pipeline(..., execution_context_id=ctx["id"])
+```
+
+The `agent_decision_log.pipeline_run_id` groups steps within one run. The `execution_context_id` groups multiple runs for the same business entity (e.g., initial run + re-run for audit). Together with the `application` table, this provides full scoping: application → context → pipeline run → individual decisions.
+
+**Depends on:** FC-9 (Multi-Application Support)
+
+**Priority:** High — required for proper multi-application isolation.
+
+---
+
+## FC-11: Lifecycle Management UI
+
+**Gap:** The `/admin/lifecycle` page is a placeholder. There is no UI for promoting a new entity version through the 7-state lifecycle, recording approvals, or viewing promotion history.
+
+**Design:** Build a lifecycle management page with:
+- Entity selector (pick an agent or task)
+- Version list showing all versions with current lifecycle state
+- "Create New Version" form (major/minor/patch, change summary, inference config)
+- "Promote" button per version with approval form (approver name, role, rationale, evidence checkboxes)
+- Promotion history timeline showing all state transitions with approver and timestamp
+- Rollback button on champion versions
+
+This is the key governance demo moment: "let me show you how we promote a new model version with human-in-the-loop approval gates."
+
+**Priority:** Medium — high demo value for CIO audiences, but the SDK methods already work (used by seed script).

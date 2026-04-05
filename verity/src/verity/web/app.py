@@ -1,14 +1,14 @@
 """Verity Web Application Factory.
 
 Creates a FastAPI sub-application for the Verity admin web UI.
-This is mounted by the consuming app (e.g., UW Demo) at /verity/admin/.
+This is mounted by the consuming app (e.g., UW Demo) at /admin/.
 
 Usage:
     from verity.web.app import create_verity_web
 
     verity = Verity(database_url="...")
     web_app = create_verity_web(verity)
-    main_app.mount("/verity/admin", web_app)
+    main_app.mount("/admin", web_app)
 """
 
 from pathlib import Path

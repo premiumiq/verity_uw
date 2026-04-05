@@ -57,7 +57,7 @@ uvicorn uw_demo.app.main:app --port 8000 --reload
 Open your Windows browser and go to:
 
 ```
-http://localhost:8000/verity/admin/
+http://localhost:8000/admin/
 ```
 
 This works because WSL2 forwards ports to Windows automatically.
@@ -80,17 +80,17 @@ Click each link in the sidebar and verify it loads without errors:
 
 | Sidebar Link | URL | What You Should See |
 |---|---|---|
-| Dashboard | `/verity/admin/` | Stat cards (all zeros) + empty decisions table |
-| Agents | `/verity/admin/agents` | Empty table with "No agents registered yet" |
-| Tasks | `/verity/admin/tasks` | Empty table with "No tasks registered yet" |
-| Prompts | `/verity/admin/prompts` | Empty table |
-| Inference Configs | `/verity/admin/configs` | Empty table |
-| Tools | `/verity/admin/tools` | Empty table |
-| Pipelines | `/verity/admin/pipelines` | Empty with "No pipelines registered yet" |
-| Decision Log | `/verity/admin/decisions` | "0 total decisions logged" + empty table |
-| Model Inventory | `/verity/admin/model-inventory` | Empty agents and tasks sections |
-| Lifecycle | `/verity/admin/lifecycle` | Placeholder (shows agents list) |
-| Test Results | `/verity/admin/test-results` | Placeholder (shows dashboard) |
+| Dashboard | `/admin/` | Stat cards (all zeros) + empty decisions table |
+| Agents | `/admin/agents` | Empty table with "No agents registered yet" |
+| Tasks | `/admin/tasks` | Empty table with "No tasks registered yet" |
+| Prompts | `/admin/prompts` | Empty table |
+| Inference Configs | `/admin/configs` | Empty table |
+| Tools | `/admin/tools` | Empty table |
+| Pipelines | `/admin/pipelines` | Empty with "No pipelines registered yet" |
+| Decision Log | `/admin/decisions` | "0 total decisions logged" + empty table |
+| Model Inventory | `/admin/model-inventory` | Empty agents and tasks sections |
+| Lifecycle | `/admin/lifecycle` | Placeholder (shows agents list) |
+| Test Results | `/admin/test-results` | Placeholder (shows dashboard) |
 
 **Every page should:**
 - Load without errors (no "Internal Server Error")
@@ -106,7 +106,7 @@ The custom stylesheet (`verity.css`) provides the PremiumIQ color palette.
 
 Open this URL directly in your browser:
 ```
-http://localhost:8000/verity/admin/static/verity.css
+http://localhost:8000/admin/static/verity.css
 ```
 
 You should see the raw CSS file with color variables like `--verity-blue: #8FAADC`.
@@ -126,12 +126,12 @@ curl -s http://localhost:8000/health
 # Expected: {"status":"healthy","app":"uw_demo","env":"demo"}
 
 # Dashboard page — check it returns HTML with correct title
-curl -s http://localhost:8000/verity/admin/ | grep '<title>'
+curl -s http://localhost:8000/admin/ | grep '<title>'
 # Expected: <title>Dashboard — Verity Admin</title>
 
 # Check all pages return HTTP 200
 for page in "" "agents" "tasks" "prompts" "configs" "tools" "pipelines" "decisions" "model-inventory"; do
-    status=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000/verity/admin/$page")
+    status=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000/admin/$page")
     echo "$page: HTTP $status"
 done
 # Expected: every line shows HTTP 200
@@ -188,7 +188,7 @@ Check the terminal where uvicorn is running — it will show the Python tracebac
 
 ### Pages are blank / unstyled
 
-1. Check that `verity.css` loads: `curl http://localhost:8000/verity/admin/static/verity.css`
+1. Check that `verity.css` loads: `curl http://localhost:8000/admin/static/verity.css`
 2. Check browser DevTools (F12) → Console for errors
 3. Check browser DevTools → Network tab — are CSS/font requests failing?
 

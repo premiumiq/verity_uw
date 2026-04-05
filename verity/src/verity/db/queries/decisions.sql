@@ -209,3 +209,43 @@ LEFT JOIN task_version tv ON tv.id = adl.entity_version_id AND adl.entity_type =
 LEFT JOIN task t ON t.id = tv.task_id
 WHERE adl.pipeline_run_id = %(pipeline_run_id)s::uuid
 ORDER BY adl.decision_depth, adl.created_at;
+
+
+-- name: list_pipeline_runs
+-- Get distinct pipeline runs with aggregated info for the Pipeline Runs page.
+SELECT
+    adl.pipeline_run_id,
+    adl.application,
+    COUNT(*) AS step_count,
+    STRING_AGG(DISTINCT COALESCE(a.display_name, t.display_name), ', ') AS entities,
+    BOOL_OR(adl.status = 'failed') AS has_failures,
+    SUM(COALESCE(adl.duration_ms, 0)) AS total_duration_ms,
+    MIN(adl.created_at) AS first_at,
+    MAX(adl.created_at) AS last_at
+FROM agent_decision_log adl
+LEFT JOIN agent_version av ON av.id = adl.entity_version_id AND adl.entity_type = 'agent'
+LEFT JOIN agent a ON a.id = av.agent_id
+LEFT JOIN task_version tv ON tv.id = adl.entity_version_id AND adl.entity_type = 'task'
+LEFT JOIN task t ON t.id = tv.task_id
+WHERE adl.pipeline_run_id IS NOT NULL
+GROUP BY adl.pipeline_run_id, adl.application
+ORDER BY first_at DESC
+LIMIT 50;
+
+
+-- name: list_all_overrides
+-- All override records with joined decision context.
+SELECT
+    ol.*,
+    adl.output_summary AS original_output_summary,
+    adl.confidence_score AS original_confidence,
+    COALESCE(a.name, t.name) AS entity_name,
+    COALESCE(a.display_name, t.display_name) AS entity_display_name,
+    COALESCE(av.version_label, tv.version_label) AS version_label
+FROM override_log ol
+JOIN agent_decision_log adl ON adl.id = ol.decision_log_id
+LEFT JOIN agent_version av ON av.id = ol.entity_version_id AND ol.entity_type = 'agent'
+LEFT JOIN agent a ON a.id = av.agent_id
+LEFT JOIN task_version tv ON tv.id = ol.entity_version_id AND ol.entity_type = 'task'
+LEFT JOIN task t ON t.id = tv.task_id
+ORDER BY ol.created_at DESC;

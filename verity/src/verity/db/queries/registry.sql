@@ -294,6 +294,29 @@ SELECT * FROM tool WHERE active = TRUE ORDER BY name;
 SELECT * FROM tool WHERE name = %(tool_name)s;
 
 
+-- name: get_tool_usage
+-- For each tool, which agents/tasks have it authorized (champion versions only).
+-- Returns tool_id, entity_type, entity_name for cross-reference display.
+SELECT
+    avt.tool_id::text AS tool_id,
+    'agent' AS entity_type,
+    a.display_name AS entity_name
+FROM agent_version_tool avt
+JOIN agent_version av ON av.id = avt.agent_version_id
+JOIN agent a ON a.id = av.agent_id AND av.id = a.current_champion_version_id
+WHERE avt.authorized = TRUE
+UNION ALL
+SELECT
+    tvt.tool_id::text AS tool_id,
+    'task' AS entity_type,
+    t.display_name AS entity_name
+FROM task_version_tool tvt
+JOIN task_version tv ON tv.id = tvt.task_version_id
+JOIN task t ON t.id = tv.task_id AND tv.id = t.current_champion_version_id
+WHERE tvt.authorized = TRUE
+ORDER BY tool_id, entity_type;
+
+
 -- name: list_pipelines
 SELECT
     p.id,

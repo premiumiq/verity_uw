@@ -1,0 +1,76 @@
+<!--
+  OVERRIDES PAGE — All human overrides of AI decisions
+
+  Shows every instance where a human overrode an AI recommendation,
+  with the reason code, who did it, and what changed.
+
+  DATA PASSED BY ROUTE:
+  - overrides: list of override records with joined decision data
+-->
+{% extends "base.html" %}
+
+{% block title %}Overrides — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <span>Overrides</span>
+{% endblock %}
+
+{% block page_title %}Overrides{% endblock %}
+
+{% block content %}
+
+<div style="margin-bottom: 16px; font-size: 0.85rem; color: var(--verity-text-light);">
+    {{ overrides|length }} overrides recorded
+</div>
+
+{% if overrides %}
+{% for ov in overrides %}
+<div class="verity-card" style="margin-bottom: 12px; border-left: 3px solid var(--verity-amber);">
+    <!-- Override header -->
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+        <span class="verity-badge verity-badge-shadow">override</span>
+        <span style="font-weight: 600;">{{ ov.overrider_name }}</span>
+        <span style="color: var(--verity-text-light); font-size: 0.8rem;">{{ ov.overrider_role or '' }}</span>
+        <span style="margin-left: auto; font-size: 0.75rem; color: var(--verity-text-light);">
+            {{ ov.created_at.strftime('%Y-%m-%d %H:%M') if ov.created_at else '—' }}
+        </span>
+    </div>
+
+    <div class="verity-detail-grid" style="margin-bottom: 8px;">
+        <div class="verity-detail-label">Reason</div>
+        <div class="verity-detail-value">{{ ov.override_reason_code | replace('_', ' ') | title }}</div>
+
+        {% if ov.ai_recommendation %}
+        <div class="verity-detail-label">AI Said</div>
+        <div class="verity-detail-value verity-code" style="padding: 6px; font-size: 0.8rem;">{{ ov.ai_recommendation }}</div>
+        {% endif %}
+
+        {% if ov.human_decision %}
+        <div class="verity-detail-label">Human Said</div>
+        <div class="verity-detail-value verity-code" style="padding: 6px; font-size: 0.8rem;">{{ ov.human_decision }}</div>
+        {% endif %}
+    </div>
+
+    {% if ov.override_notes %}
+    <div style="font-size: 0.85rem; color: var(--verity-text); margin-top: 4px;">
+        <strong>Notes:</strong> {{ ov.override_notes }}
+    </div>
+    {% endif %}
+
+    <!-- Link to the original decision -->
+    <div style="margin-top: 8px;">
+        <a href="/admin/decisions/{{ ov.decision_log_id }}" class="verity-btn verity-btn-secondary verity-btn-sm">
+            View Original Decision
+        </a>
+    </div>
+</div>
+{% endfor %}
+{% else %}
+<div class="verity-empty">
+    <div style="font-size: 2rem; opacity: 0.3;">⚠</div>
+    <div class="verity-empty-message">No overrides recorded yet.</div>
+</div>
+{% endif %}
+
+{% endblock %}

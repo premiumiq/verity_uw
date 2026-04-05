@@ -44,8 +44,8 @@
     </thead>
     <tbody>
         {% for d in decisions %}
-        <tr class="clickable" onclick="window.location='/verity/admin/decisions/{{ d.id }}'">
-            <td><a href="/verity/admin/decisions/{{ d.id }}">{{ d.entity_name or '—' }}</a></td>
+        <tr class="clickable" onclick="window.location='/admin/decisions/{{ d.id }}'">
+            <td><a href="/admin/decisions/{{ d.id }}">{{ d.entity_name or '—' }}</a></td>
             <td><span class="verity-badge verity-badge-{{ d.entity_type }}">{{ d.entity_type }}</span></td>
             <td>{{ d.version_label or '—' }}</td>
             <td>{{ d.step_name or '—' }}</td>

@@ -1,5 +1,8 @@
 <!--
-  PROMPTS PAGE — Browse all registered prompts with governance tiers
+  PROMPTS PAGE — Browse all prompts with cross-references
+
+  Shows which entity (agent or task) each prompt is assigned to,
+  so you can answer "which prompts are used where."
 
   DATA PASSED BY ROUTE:
   - prompts: list of dicts from registry.list_prompts()
@@ -21,31 +24,57 @@
 <table class="verity-table">
     <thead>
         <tr>
-            <th>Name</th>
+            <th>Prompt</th>
+            <th>Used By</th>
             <th>Role</th>
-            <th>Governance Tier</th>
-            <th>Latest Version</th>
+            <th>Governance</th>
+            <th>Version</th>
             <th>State</th>
-            <th>Author</th>
         </tr>
     </thead>
     <tbody>
         {% for p in prompts %}
         <tr>
-            <td style="font-weight: 600;">{{ p.name }}</td>
-            <td><span class="verity-badge verity-badge-agent">{{ p.api_role or '—' }}</span></td>
+            <!-- Prompt name with description -->
+            <td>
+                <div style="font-weight: 600;">{{ p.name }}</div>
+                <div style="font-size: 0.7rem; color: var(--verity-text-light);">{{ p.description[:80] if p.description else '' }}{% if p.description and p.description|length > 80 %}...{% endif %}</div>
+            </td>
+
+            <!-- Which entity uses this prompt — links to that entity's detail page -->
+            <td>
+                {% if p.primary_entity_type and p.primary_entity_type in ['agent', 'task'] %}
+                    <span class="verity-badge verity-badge-{{ p.primary_entity_type }}">{{ p.primary_entity_type }}</span>
+                    <span style="font-size: 0.8rem;">
+                        <!-- The prompt name encodes the entity: triage_agent_system → triage_agent -->
+                        {{ p.name.replace('_system', '').replace('_context', '').replace('_instruction', '').replace('_input', '') }}
+                    </span>
+                {% else %}
+                    <span style="color: var(--verity-text-light); font-size: 0.8rem;">—</span>
+                {% endif %}
+            </td>
+
+            <!-- API role badge -->
+            <td><span class="verity-badge verity-badge-candidate">{{ p.api_role or '—' }}</span></td>
+
+            <!-- Governance tier with color coding -->
             <td>
                 {% if p.governance_tier == 'behavioural' %}
                     <span class="verity-badge verity-badge-high">behavioural</span>
                 {% elif p.governance_tier == 'contextual' %}
                     <span class="verity-badge verity-badge-medium">contextual</span>
+                {% elif p.governance_tier == 'formatting' %}
+                    <span class="verity-badge verity-badge-low">formatting</span>
                 {% else %}
-                    <span class="verity-badge verity-badge-low">{{ p.governance_tier or '—' }}</span>
+                    <span class="verity-badge verity-badge-draft">{{ p.governance_tier or '—' }}</span>
                 {% endif %}
             </td>
+
+            <!-- Latest version number -->
             <td>v{{ p.latest_version or 0 }}</td>
+
+            <!-- Lifecycle state -->
             <td><span class="verity-badge verity-badge-{{ p.lifecycle_state or 'draft' }}">{{ p.lifecycle_state or 'draft' }}</span></td>
-            <td>{{ p.author_name or '—' }}</td>
         </tr>
         {% endfor %}
     </tbody>

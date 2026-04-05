@@ -14,7 +14,7 @@
 
 {% block breadcrumbs %}
     <span class="separator">›</span>
-    <a href="/verity/admin/decisions">Decision Log</a>
+    <a href="/admin/decisions">Decision Log</a>
     <span class="separator">›</span>
     <span>{{ decision.id|string|truncate(8, True, '') }}</span>
 {% endblock %}
@@ -72,7 +72,7 @@
             {% if decision.submission_id %}
             <div class="verity-detail-label">Submission</div>
             <div class="verity-detail-value">
-                <a href="/verity/admin/audit-trail/{{ decision.submission_id }}">{{ decision.submission_id }}</a>
+                <a href="/admin/audit-trail/{{ decision.submission_id }}">{{ decision.submission_id }}</a>
             </div>
             {% endif %}
 

@@ -86,11 +86,20 @@
                 <span class="verity-nav-icon">⟿</span> Pipelines
             </a>
 
-            <!-- GOVERNANCE section — lifecycle, testing, compliance -->
-            <div class="verity-nav-section" style="margin-top: 16px;">Governance</div>
+            <!-- EXECUTION section — runs, decisions, overrides -->
+            <div class="verity-nav-section" style="margin-top: 16px;">Execution</div>
+            <a href="/admin/pipeline-runs" class="verity-nav-link {% if active_page == 'pipeline_runs' %}active{% endif %}">
+                <span class="verity-nav-icon">⟿</span> Pipeline Runs
+            </a>
             <a href="/admin/decisions" class="verity-nav-link {% if active_page == 'decisions' %}active{% endif %}">
                 <span class="verity-nav-icon">◉</span> Decision Log
             </a>
+            <a href="/admin/overrides" class="verity-nav-link {% if active_page == 'overrides' %}active{% endif %}">
+                <span class="verity-nav-icon">⚠</span> Overrides
+            </a>
+
+            <!-- GOVERNANCE section — compliance, lifecycle, testing -->
+            <div class="verity-nav-section" style="margin-top: 16px;">Governance</div>
             <a href="/admin/model-inventory" class="verity-nav-link {% if active_page == 'model_inventory' %}active{% endif %}">
                 <span class="verity-nav-icon">☰</span> Model Inventory
             </a>

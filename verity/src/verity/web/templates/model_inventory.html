@@ -49,8 +49,8 @@
         </thead>
         <tbody>
             {% for a in agents %}
-            <tr class="clickable" onclick="window.location='/verity/admin/agents/{{ a.name }}'">
-                <td><a href="/verity/admin/agents/{{ a.name }}">{{ a.display_name }}</a></td>
+            <tr class="clickable" onclick="window.location='/admin/agents/{{ a.name }}'">
+                <td><a href="/admin/agents/{{ a.name }}">{{ a.display_name }}</a></td>
                 <td><span class="verity-badge verity-badge-{{ a.materiality_tier }}">{{ a.materiality_tier }}</span></td>
                 <td><span class="verity-badge verity-badge-champion">{{ a.champion_version }}</span></td>
                 <td>{{ a.inference_config_name }}</td>
@@ -106,8 +106,8 @@
         </thead>
         <tbody>
             {% for t in tasks %}
-            <tr class="clickable" onclick="window.location='/verity/admin/tasks/{{ t.name }}'">
-                <td><a href="/verity/admin/tasks/{{ t.name }}">{{ t.display_name }}</a></td>
+            <tr class="clickable" onclick="window.location='/admin/tasks/{{ t.name }}'">
+                <td><a href="/admin/tasks/{{ t.name }}">{{ t.display_name }}</a></td>
                 <td><span class="verity-badge verity-badge-task">{{ t.capability_type }}</span></td>
                 <td><span class="verity-badge verity-badge-{{ t.materiality_tier }}">{{ t.materiality_tier }}</span></td>
                 <td><span class="verity-badge verity-badge-champion">{{ t.champion_version }}</span></td>

@@ -99,7 +99,7 @@ async def main():
         await seed_decisions(verity, agent_versions, task_versions)
 
         print("\n✓ Seed complete. All demo data loaded.")
-        print("  Open http://localhost:8000/verity/admin/ to see the data.")
+        print("  Open http://localhost:8000/admin/ to see the data.")
 
     finally:
         await verity.close()

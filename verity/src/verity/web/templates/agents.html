@@ -1,10 +1,6 @@
 <!--
   AGENTS LIST PAGE — Browse all registered agents
 
-  Shows a table of all agents with their champion version,
-  materiality tier, inference config, and lifecycle state.
-  Click any row to see the agent's detail page.
-
   DATA PASSED BY ROUTE:
   - agents: list of dicts from registry.list_agents()
 -->
@@ -25,29 +21,35 @@
 <table class="verity-table">
     <thead>
         <tr>
-            <th>Name</th>
-            <th>Display Name</th>
+            <th>Agent</th>
             <th>Materiality</th>
-            <th>Champion Version</th>
+            <th>Champion</th>
             <th>Inference Config</th>
-            <th>Domain</th>
+            <th>Description</th>
         </tr>
     </thead>
     <tbody>
         {% for agent in agents %}
-        <tr class="clickable" onclick="window.location='/verity/admin/agents/{{ agent.name }}'">
-            <td><a href="/verity/admin/agents/{{ agent.name }}">{{ agent.name }}</a></td>
-            <td>{{ agent.display_name }}</td>
+        <tr class="clickable" onclick="window.location='/admin/agents/{{ agent.name }}'">
+            <!-- Display name as the primary identifier, linked to detail -->
+            <td>
+                <a href="/admin/agents/{{ agent.name }}" style="font-weight: 600;">{{ agent.display_name }}</a>
+                <div style="font-size: 0.7rem; color: var(--verity-text-light); font-family: monospace;">{{ agent.name }}</div>
+            </td>
             <td><span class="verity-badge verity-badge-{{ agent.materiality_tier }}">{{ agent.materiality_tier }}</span></td>
             <td>
                 {% if agent.champion_version %}
-                    <span class="verity-badge verity-badge-champion">{{ agent.champion_version }}</span>
+                    <span class="verity-badge verity-badge-champion">v{{ agent.champion_version }}</span>
                 {% else %}
                     <span class="verity-badge verity-badge-draft">no champion</span>
                 {% endif %}
             </td>
-            <td>{{ agent.inference_config_name or '—' }}</td>
-            <td>{{ agent.domain or 'underwriting' }}</td>
+            <td>
+                <div>{{ agent.inference_config_name or '—' }}</div>
+            </td>
+            <td style="max-width: 350px; font-size: 0.8rem; color: var(--verity-text-light);">
+                {{ agent.description[:120] }}{% if agent.description|length > 120 %}...{% endif %}
+            </td>
         </tr>
         {% endfor %}
     </tbody>

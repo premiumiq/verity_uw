@@ -1,8 +1,12 @@
 <!--
-  TOOLS PAGE — Browse all registered callable tools
+  TOOLS PAGE — Browse all tools with cross-references
+
+  Shows which agents/tasks are authorized to call each tool,
+  so you can answer "which tools are used where."
 
   DATA PASSED BY ROUTE:
   - tools: list of dicts from registry.list_tools()
+  - tool_usage: dict mapping tool_id → list of agent/task names that use it
 -->
 {% extends "base.html" %}
 
@@ -21,23 +25,43 @@
 <table class="verity-table">
     <thead>
         <tr>
-            <th>Name</th>
-            <th>Display Name</th>
-            <th>Write Op</th>
-            <th>Mock Mode</th>
-            <th>Data Classification</th>
-            <th>Implementation</th>
+            <th>Tool</th>
+            <th>Used By</th>
+            <th>Write</th>
+            <th>Mock</th>
+            <th>Classification</th>
         </tr>
     </thead>
     <tbody>
         {% for t in tools %}
         <tr>
-            <td style="font-weight: 600;">{{ t.name }}</td>
-            <td>{{ t.display_name }}</td>
+            <!-- Tool name with description -->
+            <td>
+                <div style="font-weight: 600;">{{ t.display_name }}</div>
+                <div style="font-size: 0.7rem; color: var(--verity-text-light); font-family: monospace;">{{ t.name }}</div>
+                <div style="font-size: 0.75rem; color: var(--verity-text-light); margin-top: 2px;">
+                    {{ t.description[:100] }}{% if t.description|length > 100 %}...{% endif %}
+                </div>
+            </td>
+
+            <!-- Which agents/tasks use this tool -->
+            <td>
+                {% set usage = tool_usage.get(t.id|string, []) if tool_usage else [] %}
+                {% if usage %}
+                    {% for u in usage %}
+                    <div style="font-size: 0.8rem;">
+                        <span class="verity-badge verity-badge-{{ u.entity_type }}" style="font-size: 0.6rem;">{{ u.entity_type }}</span>
+                        {{ u.entity_name }}
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <span style="color: var(--verity-text-light); font-size: 0.8rem;">—</span>
+                {% endif %}
+            </td>
+
             <td>{{ '✓' if t.is_write_operation else '—' }}</td>
             <td>{{ '✓' if t.mock_mode_enabled else '—' }}</td>
-            <td>{{ t.data_classification_max }}</td>
-            <td style="font-family: monospace; font-size: 0.75rem;">{{ t.implementation_path }}</td>
+            <td style="font-size: 0.8rem;">{{ t.data_classification_max }}</td>
         </tr>
         {% endfor %}
     </tbody>
