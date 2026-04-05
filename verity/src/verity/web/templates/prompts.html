@@ -30,6 +30,7 @@
             <th>Governance</th>
             <th>Version</th>
             <th>State</th>
+            <th>Applications</th>
         </tr>
     </thead>
     <tbody>
@@ -75,6 +76,9 @@
 
             <!-- Lifecycle state -->
             <td><span class="verity-badge verity-badge-{{ p.lifecycle_state or 'draft' }}">{{ p.lifecycle_state or 'draft' }}</span></td>
+
+            <!-- Applications -->
+            <td style="font-size: 0.8rem;">{{ entity_apps.get(('prompt', p.id|string), '—') if entity_apps else '—' }}</td>
         </tr>
         {% endfor %}
     </tbody>

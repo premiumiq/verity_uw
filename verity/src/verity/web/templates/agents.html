@@ -3,10 +3,12 @@
 
   DATA PASSED BY ROUTE:
   - agents: list of dicts from registry.list_agents()
+  - entity_apps: dict mapping (entity_type, entity_id) → application display names
+  - agent_summaries: dict mapping agent_id → {prompt_names, tool_names}
 -->
 {% extends "base.html" %}
 
-{% block title %}Agents — Verity Admin{% endblock %}
+{% block title %}Agents — Verity{% endblock %}
 
 {% block breadcrumbs %}
     <span class="separator">›</span>
@@ -24,32 +26,51 @@
             <th>Agent</th>
             <th>Materiality</th>
             <th>Champion</th>
-            <th>Inference Config</th>
-            <th>Description</th>
+            <th>Config</th>
+            <th>Prompts</th>
+            <th>Tools</th>
+            <th>Applications</th>
         </tr>
     </thead>
     <tbody>
         {% for agent in agents %}
+        {% set summary = agent_summaries.get(agent.id|string, {}) if agent_summaries else {} %}
+        {% set apps = entity_apps.get(('agent', agent.id|string), '') if entity_apps else '' %}
         <tr class="clickable" onclick="window.location='/admin/agents/{{ agent.name }}'">
-            <!-- Display name as the primary identifier, linked to detail -->
+
+            <!-- Display name + machine name -->
             <td>
                 <a href="/admin/agents/{{ agent.name }}" style="font-weight: 600;">{{ agent.display_name }}</a>
-                <div style="font-size: 0.7rem; color: var(--verity-text-light); font-family: monospace;">{{ agent.name }}</div>
+                <div style="font-size: 0.65rem; color: var(--verity-text-light); font-family: monospace;">{{ agent.name }}</div>
             </td>
+
+            <!-- Materiality -->
             <td><span class="verity-badge verity-badge-{{ agent.materiality_tier }}">{{ agent.materiality_tier }}</span></td>
+
+            <!-- Champion version -->
             <td>
                 {% if agent.champion_version %}
                     <span class="verity-badge verity-badge-champion">v{{ agent.champion_version }}</span>
                 {% else %}
-                    <span class="verity-badge verity-badge-draft">no champion</span>
+                    <span class="verity-badge verity-badge-draft">none</span>
                 {% endif %}
             </td>
-            <td>
-                <div>{{ agent.inference_config_name or '—' }}</div>
+
+            <!-- Inference config -->
+            <td style="font-size: 0.8rem;">{{ agent.inference_config_name or '—' }}</td>
+
+            <!-- Prompts used (comma-separated names) -->
+            <td style="font-size: 0.75rem; max-width: 150px; color: var(--verity-text-light);">
+                {{ summary.get('prompt_names', '—') if summary else '—' }}
             </td>
-            <td style="max-width: 350px; font-size: 0.8rem; color: var(--verity-text-light);">
-                {{ agent.description[:120] }}{% if agent.description|length > 120 %}...{% endif %}
+
+            <!-- Tools used (comma-separated names) -->
+            <td style="font-size: 0.75rem; max-width: 150px; color: var(--verity-text-light);">
+                {{ summary.get('tool_names', '—') if summary else '—' }}
             </td>
+
+            <!-- Applications -->
+            <td style="font-size: 0.8rem;">{{ apps or '—' }}</td>
         </tr>
         {% endfor %}
     </tbody>

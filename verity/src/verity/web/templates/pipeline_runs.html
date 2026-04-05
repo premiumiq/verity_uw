@@ -32,7 +32,7 @@
             <th>Run ID</th>
             <th>Application</th>
             <th>Steps</th>
-            <th>Entities</th>
+            <th>Assets</th>
             <th>Status</th>
             <th>Duration</th>
             <th>When</th>
@@ -45,7 +45,15 @@
             <td style="font-family: monospace; font-size: 0.8rem;">{{ run.pipeline_run_id|string|truncate(12, True, '') }}</td>
             <td>{{ run.application or 'default' }}</td>
             <td>{{ run.step_count }}</td>
-            <td style="font-size: 0.8rem;">{{ run.entities }}</td>
+            <td style="font-size: 0.75rem;">
+                {% if run.entities %}
+                    {% for entity_name in run.entities.split(', ') %}
+                        <span class="verity-badge verity-badge-agent" style="font-size: 0.6rem; margin: 1px;">{{ entity_name }}</span>
+                    {% endfor %}
+                {% else %}
+                    —
+                {% endif %}
+            </td>
             <td>
                 {% if run.has_failures %}
                     <span class="verity-badge verity-badge-failed">has failures</span>

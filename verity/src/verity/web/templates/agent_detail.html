@@ -85,9 +85,10 @@
                 <th>Version</th>
                 <th>State</th>
                 <th>Inference Config</th>
+                <th>Valid From</th>
+                <th>Valid To</th>
                 <th>Change Summary</th>
                 <th>Developer</th>
-                <th>Created</th>
             </tr>
         </thead>
         <tbody>
@@ -96,9 +97,10 @@
                 <td>{{ v.version_label }}</td>
                 <td><span class="verity-badge verity-badge-{{ v.lifecycle_state }}">{{ v.lifecycle_state }}</span></td>
                 <td>{{ v.inference_config_name }} (temp={{ v.temperature }})</td>
+                <td>{{ v.valid_from.strftime('%Y-%m-%d %H:%M') if v.valid_from else '—' }}</td>
+                <td>{{ v.valid_to.strftime('%Y-%m-%d') if v.valid_to and v.valid_to.year < 2999 else ('active' if v.valid_to else '—') }}</td>
                 <td>{{ v.change_summary or '—' }}</td>
                 <td>{{ v.developer_name or '—' }}</td>
-                <td>{{ v.created_at.strftime('%Y-%m-%d') if v.created_at else '—' }}</td>
             </tr>
             {% endfor %}
         </tbody>

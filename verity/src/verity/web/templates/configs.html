@@ -3,14 +3,15 @@
 
   DATA PASSED BY ROUTE:
   - configs: list of dicts from registry.list_inference_configs()
+  - entity_apps: dict mapping (entity_type, entity_id) → application display names
 -->
 {% extends "base.html" %}
 
-{% block title %}Inference Configs — Verity Admin{% endblock %}
+{% block title %}Configs — Verity{% endblock %}
 
 {% block breadcrumbs %}
     <span class="separator">›</span>
-    <span>Inference Configs</span>
+    <span>Configs</span>
 {% endblock %}
 
 {% block page_title %}Inference Configs{% endblock %}
@@ -35,7 +36,7 @@
             <td>{{ c.model_name }}</td>
             <td>{{ c.temperature if c.temperature is not none else 'default' }}</td>
             <td>{{ c.max_tokens or 'default' }}</td>
-            <td>{{ c.intended_use }}</td>
+            <td style="font-size: 0.8rem;">{{ c.intended_use }}</td>
         </tr>
         {% endfor %}
     </tbody>

@@ -455,6 +455,46 @@ WHERE ae.application_id = %(application_id)s::uuid
 ORDER BY ae.entity_type, entity_display_name;
 
 
+-- name: get_entity_applications
+-- For every entity, which applications use it. Returns entity_id → app display names.
+SELECT
+    ae.entity_type,
+    ae.entity_id::text,
+    STRING_AGG(app.display_name, ', ' ORDER BY app.display_name) AS application_names
+FROM application_entity ae
+JOIN application app ON app.id = ae.application_id
+GROUP BY ae.entity_type, ae.entity_id;
+
+
+-- name: get_agent_prompts_and_tools_summary
+-- For each agent (champion version), comma-separated prompt names and tool names.
+SELECT
+    a.id::text AS agent_id,
+    STRING_AGG(DISTINCT p.name, ', ') AS prompt_names,
+    STRING_AGG(DISTINCT t.display_name, ', ') AS tool_names
+FROM agent a
+JOIN agent_version av ON av.id = a.current_champion_version_id
+LEFT JOIN entity_prompt_assignment epa ON epa.entity_type = 'agent' AND epa.entity_version_id = av.id
+LEFT JOIN prompt_version pvr ON pvr.id = epa.prompt_version_id
+LEFT JOIN prompt p ON p.id = pvr.prompt_id
+LEFT JOIN agent_version_tool avt ON avt.agent_version_id = av.id AND avt.authorized = TRUE
+LEFT JOIN tool t ON t.id = avt.tool_id
+GROUP BY a.id;
+
+
+-- name: get_task_prompts_summary
+-- For each task (champion version), comma-separated prompt names.
+SELECT
+    t.id::text AS task_id,
+    STRING_AGG(DISTINCT p.name, ', ') AS prompt_names
+FROM task t
+JOIN task_version tv ON tv.id = t.current_champion_version_id
+LEFT JOIN entity_prompt_assignment epa ON epa.entity_type = 'task' AND epa.entity_version_id = tv.id
+LEFT JOIN prompt_version pvr ON pvr.id = epa.prompt_version_id
+LEFT JOIN prompt p ON p.id = pvr.prompt_id
+GROUP BY t.id;
+
+
 -- name: get_execution_context
 SELECT * FROM execution_context WHERE id = %(context_id)s::uuid;
 

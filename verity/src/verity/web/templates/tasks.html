@@ -3,10 +3,12 @@
 
   DATA PASSED BY ROUTE:
   - tasks: list of dicts from registry.list_tasks()
+  - entity_apps: dict mapping (entity_type, entity_id) → application display names
+  - task_summaries: dict mapping task_id → {prompt_names}
 -->
 {% extends "base.html" %}
 
-{% block title %}Tasks — Verity Admin{% endblock %}
+{% block title %}Tasks — Verity{% endblock %}
 
 {% block breadcrumbs %}
     <span class="separator">›</span>
@@ -25,31 +27,40 @@
             <th>Capability</th>
             <th>Materiality</th>
             <th>Champion</th>
-            <th>Inference Config</th>
-            <th>Description</th>
+            <th>Config</th>
+            <th>Prompts</th>
+            <th>Applications</th>
         </tr>
     </thead>
     <tbody>
         {% for task in tasks %}
+        {% set summary = task_summaries.get(task.id|string, {}) if task_summaries else {} %}
+        {% set apps = entity_apps.get(('task', task.id|string), '') if entity_apps else '' %}
         <tr class="clickable" onclick="window.location='/admin/tasks/{{ task.name }}'">
-            <!-- Display name as primary identifier -->
+
             <td>
                 <a href="/admin/tasks/{{ task.name }}" style="font-weight: 600;">{{ task.display_name }}</a>
-                <div style="font-size: 0.7rem; color: var(--verity-text-light); font-family: monospace;">{{ task.name }}</div>
+                <div style="font-size: 0.65rem; color: var(--verity-text-light); font-family: monospace;">{{ task.name }}</div>
             </td>
+
             <td><span class="verity-badge verity-badge-task">{{ task.capability_type }}</span></td>
             <td><span class="verity-badge verity-badge-{{ task.materiality_tier }}">{{ task.materiality_tier }}</span></td>
+
             <td>
                 {% if task.champion_version %}
                     <span class="verity-badge verity-badge-champion">v{{ task.champion_version }}</span>
                 {% else %}
-                    <span class="verity-badge verity-badge-draft">no champion</span>
+                    <span class="verity-badge verity-badge-draft">none</span>
                 {% endif %}
             </td>
-            <td>{{ task.inference_config_name or '—' }}</td>
-            <td style="max-width: 350px; font-size: 0.8rem; color: var(--verity-text-light);">
-                {{ task.description[:120] }}{% if task.description|length > 120 %}...{% endif %}
+
+            <td style="font-size: 0.8rem;">{{ task.inference_config_name or '—' }}</td>
+
+            <td style="font-size: 0.75rem; max-width: 150px; color: var(--verity-text-light);">
+                {{ summary.get('prompt_names', '—') if summary else '—' }}
             </td>
+
+            <td style="font-size: 0.8rem;">{{ apps or '—' }}</td>
         </tr>
         {% endfor %}
     </tbody>

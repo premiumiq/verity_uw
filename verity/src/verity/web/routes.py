@@ -67,6 +67,26 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
     # Register the enumval filter (for explicit use: {{ x | enumval }})
     templates.env.filters["enumval"] = _enum_value
 
+    # ── SHARED DATA LOADERS ───────────────────────────────────
+    # These load cross-reference data used by multiple pages.
+
+    async def _load_entity_apps() -> dict:
+        """Load entity_id → application display names map.
+        Returns {(entity_type, entity_id_str): "App1, App2"}
+        """
+        rows = await verity.db.fetch_all("get_entity_applications")
+        return {(r["entity_type"], r["entity_id"]): r["application_names"] for r in rows}
+
+    async def _load_agent_summaries() -> dict:
+        """Load agent_id → {prompt_names, tool_names} for cross-reference columns."""
+        rows = await verity.db.fetch_all("get_agent_prompts_and_tools_summary")
+        return {r["agent_id"]: r for r in rows}
+
+    async def _load_task_summaries() -> dict:
+        """Load task_id → {prompt_names} for cross-reference columns."""
+        rows = await verity.db.fetch_all("get_task_prompts_summary")
+        return {r["task_id"]: r for r in rows}
+
     # ALSO set finalize on the Jinja2 environment — this automatically
     # converts enums to their .value whenever they're rendered in {{ }}.
     # Without this, templates show "EntityType.AGENT" instead of "agent".
@@ -95,12 +115,16 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
 
     @router.get("/agents", response_class=HTMLResponse)
     async def agents_list(request: Request):
-        """List all registered agents."""
+        """List all registered agents with cross-references."""
         await verity.ensure_connected()
         agents = await verity.list_agents()
+        entity_apps = await _load_entity_apps()
+        agent_summaries = await _load_agent_summaries()
         return _render(templates, request, "agents.html",
             active_page="agents",
             agents=agents,
+            entity_apps=entity_apps,
+            agent_summaries=agent_summaries,
         )
 
     @router.get("/agents/{agent_name}", response_class=HTMLResponse)
@@ -147,9 +171,13 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
     async def tasks_list(request: Request):
         await verity.ensure_connected()
         tasks = await verity.list_tasks()
+        entity_apps = await _load_entity_apps()
+        task_summaries = await _load_task_summaries()
         return _render(templates, request, "tasks.html",
             active_page="tasks",
             tasks=tasks,
+            entity_apps=entity_apps,
+            task_summaries=task_summaries,
         )
 
     @router.get("/tasks/{task_name}", response_class=HTMLResponse)
@@ -195,9 +223,11 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
     async def prompts_list(request: Request):
         await verity.ensure_connected()
         prompts = await verity.list_prompts()
+        entity_apps = await _load_entity_apps()
         return _render(templates, request, "prompts.html",
             active_page="prompts",
             prompts=prompts,
+            entity_apps=entity_apps,
         )
 
     # ── INFERENCE CONFIGS ─────────────────────────────────────
@@ -206,9 +236,11 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
     async def configs_list(request: Request):
         await verity.ensure_connected()
         configs = await verity.list_inference_configs()
+        entity_apps = await _load_entity_apps()
         return _render(templates, request, "configs.html",
             active_page="configs",
             configs=configs,
+            entity_apps=entity_apps,
         )
 
     # ── TOOLS ─────────────────────────────────────────────────
