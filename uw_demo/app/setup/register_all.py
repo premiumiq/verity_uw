@@ -549,13 +549,14 @@ async def seed_prompt_versions(verity: Verity, prompts: dict) -> dict:
     """
     pv = {}
 
-    async def _register_and_promote(prompt_id, version_number, content, api_role, governance_tier,
+    async def _register_and_promote(prompt_id, major, minor, patch, content, api_role, governance_tier,
                                      change_summary, sensitivity_level, author_name, key):
         """Helper: register a prompt version as draft, then promote to champion."""
         r = await verity.registry.register_prompt_version(
-            prompt_id=prompt_id, version_number=version_number,
+            prompt_id=prompt_id,
+            major_version=major, minor_version=minor, patch_version=patch,
             content=content, api_role=api_role, governance_tier=governance_tier,
-            lifecycle_state="draft",  # Always start as draft
+            lifecycle_state="draft",
             change_summary=change_summary, sensitivity_level=sensitivity_level,
             author_name=author_name,
         )
@@ -570,7 +571,7 @@ async def seed_prompt_versions(verity: Verity, prompts: dict) -> dict:
 
     # ── Triage agent system prompt — v1 promoted then superseded by v2
     await _register_and_promote(
-        prompts["triage_agent_system"], 1,
+        prompts["triage_agent_system"], 1, 0, 0,
         "You are a risk assessment assistant. Given a submission, evaluate the risk level and provide a Green/Amber/Red score with brief reasoning.",
         "system", "behavioural",
         "Initial basic system prompt", "high", "Dev Team",
@@ -578,7 +579,7 @@ async def seed_prompt_versions(verity: Verity, prompts: dict) -> dict:
     )
     # v2 promotion auto-deprecates v1
     await _register_and_promote(
-        prompts["triage_agent_system"], 2,
+        prompts["triage_agent_system"], 2, 0, 0,
         """You are a specialist underwriting risk triage agent for commercial lines insurance (D&O and GL). Your role is to synthesise submission data, account enrichment, loss history, and underwriting guidelines into a structured risk assessment.
 
 You MUST call the available tools to retrieve all relevant context before making your assessment. Do not assess based on partial information.
@@ -605,7 +606,7 @@ Consider these dimensions:
 
     # ── Triage agent context template
     await _register_and_promote(
-        prompts["triage_agent_context"], 1,
+        prompts["triage_agent_context"], 1, 0, 0,
         "Please assess the following submission. Use the available tools to retrieve full context before making your assessment.\n\nSubmission ID: {{submission_id}}\nLine of Business: {{lob}}\nNamed Insured: {{named_insured}}",
         "user", "contextual",
         "Initial context template with submission identifiers", "medium", "Dev Team",
@@ -614,7 +615,7 @@ Consider these dimensions:
 
     # ── Appetite agent system prompt
     await _register_and_promote(
-        prompts["appetite_agent_system"], 1,
+        prompts["appetite_agent_system"], 1, 0, 0,
         """You are an underwriting appetite assessment agent. Your role is to determine whether a submission falls within the company's underwriting appetite by comparing the submission's characteristics against the relevant underwriting guidelines document.
 
 You MUST:
@@ -636,7 +637,7 @@ Your output must be valid JSON with these fields:
 
     # ── Appetite agent context template
     await _register_and_promote(
-        prompts["appetite_agent_context"], 1,
+        prompts["appetite_agent_context"], 1, 0, 0,
         "Please assess the appetite for the following submission.\n\nSubmission ID: {{submission_id}}\nLine of Business: {{lob}}\nNamed Insured: {{named_insured}}",
         "user", "contextual",
         "Initial context template", "medium", "Dev Team",
@@ -645,14 +646,14 @@ Your output must be valid JSON with these fields:
 
     # ── Document classifier instruction — v1 promoted then superseded by v2
     await _register_and_promote(
-        prompts["doc_classifier_instruction"], 1,
+        prompts["doc_classifier_instruction"], 1, 0, 0,
         "Classify the document into one of: acord_855, acord_125, loss_runs, supplemental_do, supplemental_gl, other. Return JSON with document_type and confidence.",
         "system", "behavioural",
         "Initial simple classifier instruction", "high", "Dev Team",
         ("doc_classifier_instruction", 1),
     )
     await _register_and_promote(
-        prompts["doc_classifier_instruction"], 2,
+        prompts["doc_classifier_instruction"], 2, 0, 0,
         "You are an insurance document classifier. Classify the provided document into exactly one of these types: acord_855, acord_125, loss_runs, supplemental_do, supplemental_gl, financial_statements, board_resolution, other. Return only valid JSON with document_type, confidence (0.0-1.0), and classification_notes. Base classification only on document content — never on filename.",
         "system", "behavioural",
         "Added financial_statements and board_resolution types, explicit instruction to ignore filename", "high", "James Okafor",
@@ -661,7 +662,7 @@ Your output must be valid JSON with these fields:
 
     # ── Document classifier input template
     await _register_and_promote(
-        prompts["doc_classifier_input"], 1,
+        prompts["doc_classifier_input"], 1, 0, 0,
         "Document text:\n{{document_text}}",
         "user", "formatting",
         "Simple document text input wrapper", "low", "Dev Team",
@@ -670,7 +671,7 @@ Your output must be valid JSON with these fields:
 
     # ── Field extractor system prompt
     await _register_and_promote(
-        prompts["field_extractor_instruction"], 1,
+        prompts["field_extractor_instruction"], 1, 0, 0,
         "You are a specialist extraction system for D&O insurance applications (ACORD 855 form). Extract the following fields: named_insured, fein, entity_type, state_of_incorporation, annual_revenue, employee_count, board_size, independent_directors, effective_date, expiration_date, limits_requested, retention_requested, prior_carrier, prior_premium, securities_class_action_history, regulatory_investigation_history, merger_acquisition_activity, ipo_planned, going_concern_opinion, non_renewed_by_carrier. For each field: extract the value exactly as stated, assign confidence (0.0-1.0), and if not found, set to null with confidence 0.0. Never invent values. Return only valid JSON.",
         "system", "behavioural",
         "Initial extraction instruction with 20-field schema", "high", "James Okafor",
@@ -679,7 +680,7 @@ Your output must be valid JSON with these fields:
 
     # ── Field extractor input template
     await _register_and_promote(
-        prompts["field_extractor_input"], 1,
+        prompts["field_extractor_input"], 1, 0, 0,
         "ACORD 855 document text:\n{{document_text}}",
         "user", "formatting",
         "Simple ACORD 855 text input wrapper", "low", "Dev Team",

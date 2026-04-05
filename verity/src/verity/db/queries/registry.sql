@@ -25,7 +25,7 @@ SELECT
     av.shadow_traffic_pct,
     av.challenger_traffic_pct,
     ic.id AS inference_config_id,
-    ic.name AS inference_config_name,
+    ic.display_name AS inference_config_name,
     ic.model_name,
     ic.temperature,
     ic.max_tokens,
@@ -51,7 +51,7 @@ SELECT
     av.output_schema, av.authority_thresholds, av.mock_mode_enabled,
     av.shadow_traffic_pct, av.challenger_traffic_pct,
     av.valid_from, av.valid_to,
-    ic.id AS inference_config_id, ic.name AS inference_config_name,
+    ic.id AS inference_config_id, ic.display_name AS inference_config_name,
     ic.model_name, ic.temperature, ic.max_tokens, ic.top_p, ic.top_k,
     ic.stop_sequences, ic.extended_params
 FROM agent a
@@ -75,7 +75,7 @@ SELECT
     av.output_schema, av.authority_thresholds, av.mock_mode_enabled,
     av.shadow_traffic_pct, av.challenger_traffic_pct,
     av.valid_from, av.valid_to,
-    ic.id AS inference_config_id, ic.name AS inference_config_name,
+    ic.id AS inference_config_id, ic.display_name AS inference_config_name,
     ic.model_name, ic.temperature, ic.max_tokens, ic.top_p, ic.top_k,
     ic.stop_sequences, ic.extended_params
 FROM agent_version av
@@ -93,7 +93,7 @@ SELECT
     tv.id AS task_version_id, tv.version_label, tv.lifecycle_state,
     tv.output_schema AS version_output_schema, tv.mock_mode_enabled,
     tv.valid_from, tv.valid_to,
-    ic.id AS inference_config_id, ic.name AS inference_config_name,
+    ic.id AS inference_config_id, ic.display_name AS inference_config_name,
     ic.model_name, ic.temperature, ic.max_tokens, ic.top_p, ic.top_k,
     ic.stop_sequences, ic.extended_params
 FROM task t
@@ -116,7 +116,7 @@ SELECT
     tv.id AS task_version_id, tv.version_label, tv.lifecycle_state,
     tv.output_schema AS version_output_schema, tv.mock_mode_enabled,
     tv.valid_from, tv.valid_to,
-    ic.id AS inference_config_id, ic.name AS inference_config_name,
+    ic.id AS inference_config_id, ic.display_name AS inference_config_name,
     ic.model_name, ic.temperature, ic.max_tokens, ic.top_p, ic.top_k,
     ic.stop_sequences, ic.extended_params
 FROM task_version tv
@@ -148,7 +148,7 @@ SELECT
     a.domain,
     av.version_label AS champion_version,
     av.lifecycle_state AS champion_state,
-    ic.name AS inference_config_name,
+    ic.display_name AS inference_config_name,
     a.created_at
 FROM agent a
 LEFT JOIN agent_version av ON av.id = a.current_champion_version_id
@@ -159,7 +159,7 @@ ORDER BY a.name;
 -- name: list_agent_versions
 SELECT
     av.*,
-    ic.name AS inference_config_name,
+    ic.display_name AS inference_config_name,
     ic.model_name,
     ic.temperature
 FROM agent_version av
@@ -178,7 +178,8 @@ SELECT
     epa.is_required,
     epa.condition_logic,
     pv.id AS prompt_version_id,
-    pv.version_number AS prompt_version_number,
+    pv.major_version AS prompt_version_number,
+    pv.version_label AS prompt_version_label,
     pv.content,
     pv.lifecycle_state AS prompt_lifecycle_state,
     p.name AS prompt_name,
@@ -262,7 +263,7 @@ SELECT
     tv.output_schema AS version_output_schema,
     tv.mock_mode_enabled,
     ic.id AS inference_config_id,
-    ic.name AS inference_config_name,
+    ic.display_name AS inference_config_name,
     ic.model_name,
     ic.temperature,
     ic.max_tokens,
@@ -300,7 +301,7 @@ SELECT
     t.domain,
     tv.version_label AS champion_version,
     tv.lifecycle_state AS champion_state,
-    ic.name AS inference_config_name,
+    ic.display_name AS inference_config_name,
     t.created_at
 FROM task t
 LEFT JOIN task_version tv ON tv.id = t.current_champion_version_id
@@ -311,7 +312,7 @@ ORDER BY t.name;
 -- name: list_task_versions
 SELECT
     tv.*,
-    ic.name AS inference_config_name,
+    ic.display_name AS inference_config_name,
     ic.model_name,
     ic.temperature
 FROM task_version tv
@@ -332,7 +333,7 @@ SELECT
         WHEN 'agent' THEN (SELECT display_name FROM agent WHERE id = p.primary_entity_id)
         WHEN 'task' THEN (SELECT display_name FROM task WHERE id = p.primary_entity_id)
     END AS primary_entity_display_name,
-    pv.version_number AS latest_version,
+    pv.version_label AS latest_version,
     pv.governance_tier,
     pv.api_role,
     pv.lifecycle_state,
@@ -346,20 +347,20 @@ LEFT JOIN LATERAL (
     SELECT *
     FROM prompt_version
     WHERE prompt_id = p.id
-    ORDER BY version_number DESC
+    ORDER BY major_version DESC, minor_version DESC, patch_version DESC
     LIMIT 1
 ) pv ON TRUE
 ORDER BY p.name;
 
 
 -- name: get_prompt_by_name
-SELECT p.*, pv.version_number AS latest_version
+SELECT p.*, pv.version_label AS latest_version
 FROM prompt p
 LEFT JOIN LATERAL (
     SELECT version_number
     FROM prompt_version
     WHERE prompt_id = p.id
-    ORDER BY version_number DESC
+    ORDER BY major_version DESC, minor_version DESC, patch_version DESC
     LIMIT 1
 ) pv ON TRUE
 WHERE p.name = %(prompt_name)s;
@@ -369,7 +370,7 @@ WHERE p.name = %(prompt_name)s;
 SELECT pv.*
 FROM prompt_version pv
 WHERE pv.prompt_id = %(prompt_id)s
-ORDER BY pv.version_number DESC;
+ORDER BY pv.major_version DESC, pv.minor_version DESC, pv.patch_version DESC;
 
 
 -- name: list_inference_configs
@@ -500,7 +501,7 @@ GROUP BY ae.entity_type, ae.entity_id;
 -- For each agent (champion version), comma-separated prompt names and tool names.
 SELECT
     a.id::text AS agent_id,
-    STRING_AGG(DISTINCT p.name, ', ') AS prompt_names,
+    STRING_AGG(DISTINCT p.display_name, ', ') AS prompt_names,
     STRING_AGG(DISTINCT t.display_name, ', ') AS tool_names
 FROM agent a
 JOIN agent_version av ON av.id = a.current_champion_version_id
@@ -516,7 +517,7 @@ GROUP BY a.id;
 -- For each task (champion version), comma-separated prompt names.
 SELECT
     t.id::text AS task_id,
-    STRING_AGG(DISTINCT p.name, ', ') AS prompt_names
+    STRING_AGG(DISTINCT p.display_name, ', ') AS prompt_names
 FROM task t
 JOIN task_version tv ON tv.id = t.current_champion_version_id
 LEFT JOIN entity_prompt_assignment epa ON epa.entity_type = 'task' AND epa.entity_version_id = tv.id

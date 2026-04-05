@@ -69,7 +69,7 @@
             </td>
 
             <!-- Latest version number -->
-            <td>v{{ p.latest_version or 0 }}</td>
+            <td>{{ p.latest_version or '—' }}</td>
 
             <!-- Lifecycle state -->
             <td><span class="verity-badge verity-badge-{{ p.lifecycle_state or 'draft' }}">{{ p.lifecycle_state or 'draft' }}</span></td>

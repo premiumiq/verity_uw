@@ -292,7 +292,15 @@ CREATE TABLE prompt (
 CREATE TABLE prompt_version (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     prompt_id           UUID NOT NULL REFERENCES prompt(id),
-    version_number      INTEGER NOT NULL,
+
+    -- 3-part versioning — consistent with agent_version and task_version
+    major_version       INTEGER NOT NULL DEFAULT 1,
+    minor_version       INTEGER NOT NULL DEFAULT 0,
+    patch_version       INTEGER NOT NULL DEFAULT 0,
+    version_label       VARCHAR(20) GENERATED ALWAYS AS
+                        (major_version::text || '.' ||
+                         minor_version::text || '.' ||
+                         patch_version::text) STORED,
 
     content             TEXT NOT NULL,
     api_role            api_role NOT NULL DEFAULT 'system',
@@ -320,7 +328,7 @@ CREATE TABLE prompt_version (
 
     created_at          TIMESTAMP DEFAULT NOW(),
 
-    CONSTRAINT uq_prompt_version UNIQUE (prompt_id, version_number)
+    CONSTRAINT uq_prompt_version UNIQUE (prompt_id, major_version, minor_version, patch_version)
 );
 
 CREATE INDEX idx_pv_prompt ON prompt_version(prompt_id);

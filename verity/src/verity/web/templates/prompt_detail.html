@@ -73,7 +73,7 @@
         <tbody>
             {% for v in versions %}
             <tr>
-                <td>v{{ v.version_number }}</td>
+                <td>{{ v.version_label }}</td>
                 <td><span class="verity-badge verity-badge-{{ v.lifecycle_state }}">{{ v.lifecycle_state }}</span></td>
                 <td><span class="verity-badge verity-badge-candidate">{{ v.api_role }}</span></td>
                 <td>
@@ -86,7 +86,7 @@
                     {% endif %}
                 </td>
                 <td>{{ v.valid_from.strftime('%Y-%m-%d %H:%M') if v.valid_from else '—' }}</td>
-                <td>{{ v.valid_to.strftime('%Y-%m-%d') if v.valid_to and v.valid_to.year < 2999 else ('active' if v.valid_to else '—') }}</td>
+                <td>{{ v.valid_to.strftime('%Y-%m-%d') if v.valid_to and v.valid_to.year < 2999 else '—' }}</td>
                 <td>{{ v.author_name or '—' }}</td>
                 <td style="font-size: 0.8rem;">{{ v.change_summary or '—' }}</td>
             </tr>
@@ -98,7 +98,7 @@
     {% for v in versions %}
     <div class="verity-card" style="margin-top: 12px; margin-bottom: 12px;">
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-            <span style="font-weight: 600;">v{{ v.version_number }}</span>
+            <span style="font-weight: 600;">{{ v.version_label }}</span>
             <span class="verity-badge verity-badge-{{ v.lifecycle_state }}">{{ v.lifecycle_state }}</span>
             <span class="verity-badge verity-badge-candidate">{{ v.api_role }}</span>
             {% if v.approved_by %}
