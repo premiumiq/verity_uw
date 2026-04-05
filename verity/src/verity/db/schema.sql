@@ -80,6 +80,7 @@ CREATE TYPE metric_type AS ENUM (
 CREATE TABLE inference_config (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name            VARCHAR(100) UNIQUE NOT NULL,
+    display_name    VARCHAR(200) NOT NULL,
     description     TEXT NOT NULL,
     intended_use    TEXT NOT NULL,
 
@@ -281,6 +282,7 @@ CREATE INDEX idx_tv_state ON task_version(lifecycle_state);
 CREATE TABLE prompt (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name            VARCHAR(200) UNIQUE NOT NULL,
+    display_name    VARCHAR(300) NOT NULL,
     description     TEXT NOT NULL,
     primary_entity_type  entity_type,
     primary_entity_id    UUID,

@@ -324,12 +324,20 @@ ORDER BY tv.major_version DESC, tv.minor_version DESC, tv.patch_version DESC;
 SELECT
     p.id,
     p.name,
+    p.display_name,
     p.description,
     p.primary_entity_type,
+    -- Resolve the display name of the entity this prompt is primarily used by
+    CASE p.primary_entity_type
+        WHEN 'agent' THEN (SELECT display_name FROM agent WHERE id = p.primary_entity_id)
+        WHEN 'task' THEN (SELECT display_name FROM task WHERE id = p.primary_entity_id)
+    END AS primary_entity_display_name,
     pv.version_number AS latest_version,
     pv.governance_tier,
     pv.api_role,
     pv.lifecycle_state,
+    pv.valid_from,
+    pv.valid_to,
     pv.author_name,
     pv.approved_by,
     p.created_at
@@ -446,7 +454,7 @@ SELECT
     CASE ae.entity_type
         WHEN 'agent' THEN (SELECT display_name FROM agent WHERE id = ae.entity_id)
         WHEN 'task' THEN (SELECT display_name FROM task WHERE id = ae.entity_id)
-        WHEN 'prompt' THEN (SELECT name FROM prompt WHERE id = ae.entity_id)
+        WHEN 'prompt' THEN (SELECT display_name FROM prompt WHERE id = ae.entity_id)
         WHEN 'tool' THEN (SELECT display_name FROM tool WHERE id = ae.entity_id)
         WHEN 'pipeline' THEN (SELECT display_name FROM pipeline WHERE id = ae.entity_id)
     END AS entity_display_name

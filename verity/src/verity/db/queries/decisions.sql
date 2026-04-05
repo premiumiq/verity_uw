@@ -66,7 +66,7 @@ SELECT
     adl.status,
     adl.hitl_required,
     adl.created_at,
-    COALESCE(a.name, t.name) AS entity_name,
+    COALESCE(a.display_name, t.display_name) AS entity_name,
     COALESCE(a.display_name, t.display_name) AS entity_display_name,
     COALESCE(av.version_label, tv.version_label) AS version_label
 FROM agent_decision_log adl
@@ -107,7 +107,7 @@ SELECT
     adl.hitl_completed,
     adl.status,
     adl.created_at,
-    COALESCE(a.name, t.name) AS entity_name,
+    COALESCE(a.display_name, t.display_name) AS entity_name,
     COALESCE(a.display_name, t.display_name) AS entity_display_name,
     COALESCE(av.version_label, tv.version_label) AS version_label,
     t.capability_type
@@ -158,7 +158,7 @@ SELECT
     adl.status,
     adl.duration_ms,
     adl.created_at,
-    COALESCE(a.name, t.name) AS entity_name,
+    COALESCE(a.display_name, t.display_name) AS entity_name,
     COALESCE(av.version_label, tv.version_label) AS version_label
 FROM agent_decision_log adl
 LEFT JOIN agent_version av ON av.id = adl.entity_version_id AND adl.entity_type = 'agent'
@@ -198,7 +198,7 @@ SELECT
     adl.hitl_completed,
     adl.status,
     adl.created_at,
-    COALESCE(a.name, t.name) AS entity_name,
+    COALESCE(a.display_name, t.display_name) AS entity_name,
     COALESCE(a.display_name, t.display_name) AS entity_display_name,
     COALESCE(av.version_label, tv.version_label) AS version_label,
     t.capability_type
@@ -226,7 +226,7 @@ SELECT
     adl.application,
     adl.status,
     adl.created_at,
-    COALESCE(a.name, t.name) AS entity_name,
+    COALESCE(a.display_name, t.display_name) AS entity_name,
     COALESCE(a.display_name, t.display_name) AS entity_display_name,
     COALESCE(av.version_label, tv.version_label) AS version_label
 FROM agent_decision_log adl
@@ -267,7 +267,7 @@ SELECT
     ol.*,
     adl.output_summary AS original_output_summary,
     adl.confidence_score AS original_confidence,
-    COALESCE(a.name, t.name) AS entity_name,
+    COALESCE(a.display_name, t.display_name) AS entity_name,
     COALESCE(a.display_name, t.display_name) AS entity_display_name,
     COALESCE(av.version_label, tv.version_label) AS version_label
 FROM override_log ol

@@ -36,20 +36,17 @@
     <tbody>
         {% for p in prompts %}
         <tr>
-            <!-- Prompt name with description -->
+            <!-- Display name + machine name -->
             <td>
-                <div style="font-weight: 600;">{{ p.name }}</div>
-                <div style="font-size: 0.7rem; color: var(--verity-text-light);">{{ p.description[:80] if p.description else '' }}{% if p.description and p.description|length > 80 %}...{% endif %}</div>
+                <div style="font-weight: 600;">{{ p.display_name or p.name }}</div>
+                <div style="font-size: 0.65rem; color: var(--verity-text-light); font-family: monospace;">{{ p.name }}</div>
             </td>
 
-            <!-- Which entity uses this prompt — links to that entity's detail page -->
+            <!-- Which entity uses this prompt -->
             <td>
                 {% if p.primary_entity_type and p.primary_entity_type in ['agent', 'task'] %}
                     <span class="verity-badge verity-badge-{{ p.primary_entity_type }}">{{ p.primary_entity_type }}</span>
-                    <span style="font-size: 0.8rem;">
-                        <!-- The prompt name encodes the entity: triage_agent_system → triage_agent -->
-                        {{ p.name.replace('_system', '').replace('_context', '').replace('_instruction', '').replace('_input', '') }}
-                    </span>
+                    <span style="font-size: 0.8rem;">{{ p.primary_entity_display_name or '—' }}</span>
                 {% else %}
                     <span style="color: var(--verity-text-light); font-size: 0.8rem;">—</span>
                 {% endif %}

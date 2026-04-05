@@ -32,7 +32,10 @@
     <tbody>
         {% for c in configs %}
         <tr>
-            <td style="font-weight: 600;">{{ c.name }}</td>
+            <td>
+                <div style="font-weight: 600;">{{ c.display_name or c.name }}</div>
+                <div style="font-size: 0.65rem; color: var(--verity-text-light); font-family: monospace;">{{ c.name }}</div>
+            </td>
             <td>{{ c.model_name }}</td>
             <td>{{ c.temperature if c.temperature is not none else 'default' }}</td>
             <td>{{ c.max_tokens or 'default' }}</td>

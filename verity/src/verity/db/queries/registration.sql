@@ -5,11 +5,11 @@
 
 -- name: insert_inference_config
 INSERT INTO inference_config (
-    name, description, intended_use, model_name,
+    name, display_name, description, intended_use, model_name,
     temperature, max_tokens, top_p, top_k, stop_sequences, extended_params
 )
 VALUES (
-    %(name)s, %(description)s, %(intended_use)s, %(model_name)s,
+    %(name)s, %(display_name)s, %(description)s, %(intended_use)s, %(model_name)s,
     %(temperature)s, %(max_tokens)s, %(top_p)s, %(top_k)s, %(stop_sequences)s,
     %(extended_params)s
 )
@@ -75,8 +75,8 @@ RETURNING id, version_label, created_at;
 
 
 -- name: insert_prompt
-INSERT INTO prompt (name, description, primary_entity_type, primary_entity_id)
-VALUES (%(name)s, %(description)s, %(primary_entity_type)s, %(primary_entity_id)s)
+INSERT INTO prompt (name, display_name, description, primary_entity_type, primary_entity_id)
+VALUES (%(name)s, %(display_name)s, %(description)s, %(primary_entity_type)s, %(primary_entity_id)s)
 RETURNING id, created_at;
 
 

@@ -118,6 +118,7 @@ async def seed_inference_configs(verity: Verity) -> dict:
     configs_data = [
         {
             "name": "classification_strict",
+            "display_name": "Classification Strict",
             "description": "Fully deterministic for classification tasks",
             "intended_use": "Document classification, appetite classification, routing decisions",
             "model_name": "claude-sonnet-4-20250514",
@@ -128,6 +129,7 @@ async def seed_inference_configs(verity: Verity) -> dict:
         },
         {
             "name": "extraction_deterministic",
+            "display_name": "Extraction Deterministic",
             "description": "Deterministic for field extraction",
             "intended_use": "ACORD form extraction, loss run parsing, entity matching",
             "model_name": "claude-sonnet-4-20250514",
@@ -138,6 +140,7 @@ async def seed_inference_configs(verity: Verity) -> dict:
         },
         {
             "name": "triage_balanced",
+            "display_name": "Triage Balanced",
             "description": "Low temperature for consistent risk assessment",
             "intended_use": "Triage agent, appetite agent — requires consistency not creativity",
             "model_name": "claude-sonnet-4-20250514",
@@ -148,6 +151,7 @@ async def seed_inference_configs(verity: Verity) -> dict:
         },
         {
             "name": "generation_narrative",
+            "display_name": "Generation Narrative",
             "description": "Moderate temperature for professional narrative generation",
             "intended_use": "Quote letters, referral memos, renewal analysis narratives",
             "model_name": "claude-sonnet-4-20250514",
@@ -158,6 +162,7 @@ async def seed_inference_configs(verity: Verity) -> dict:
         },
         {
             "name": "renewal_analytical",
+            "display_name": "Renewal Analytical",
             "description": "Low temperature for comparative analysis",
             "intended_use": "Renewal agent — structured comparison of prior vs current",
             "model_name": "claude-sonnet-4-20250514",
@@ -373,22 +378,30 @@ async def seed_prompts(verity: Verity, agents: dict, tasks: dict) -> dict:
     """Register 8 prompt entities (no versions yet). Returns {name: id}."""
     prompts_data = [
         # Agent prompts
-        {"name": "triage_agent_system", "description": "System prompt for the triage agent defining risk assessment behaviour",
+        {"name": "triage_agent_system", "display_name": "Triage Agent System Prompt",
+         "description": "System prompt for the triage agent defining risk assessment behaviour",
          "primary_entity_type": "agent", "primary_entity_id": agents["triage_agent"]["id"]},
-        {"name": "triage_agent_context", "description": "User message template for triage agent with submission context variables",
+        {"name": "triage_agent_context", "display_name": "Triage Agent Context Template",
+         "description": "User message template for triage agent with submission context variables",
          "primary_entity_type": "agent", "primary_entity_id": agents["triage_agent"]["id"]},
-        {"name": "appetite_agent_system", "description": "System prompt for appetite agent defining guidelines assessment behaviour",
+        {"name": "appetite_agent_system", "display_name": "Appetite Agent System Prompt",
+         "description": "System prompt for appetite agent defining guidelines assessment behaviour",
          "primary_entity_type": "agent", "primary_entity_id": agents["appetite_agent"]["id"]},
-        {"name": "appetite_agent_context", "description": "User message template for appetite agent with submission and guidelines variables",
+        {"name": "appetite_agent_context", "display_name": "Appetite Agent Context Template",
+         "description": "User message template for appetite agent with submission and guidelines variables",
          "primary_entity_type": "agent", "primary_entity_id": agents["appetite_agent"]["id"]},
         # Task prompts
-        {"name": "doc_classifier_instruction", "description": "System instruction for document classification task",
+        {"name": "doc_classifier_instruction", "display_name": "Document Classifier Instruction",
+         "description": "System instruction for document classification task",
          "primary_entity_type": "task", "primary_entity_id": tasks["document_classifier"]["id"]},
-        {"name": "doc_classifier_input", "description": "User message template for document classifier input",
+        {"name": "doc_classifier_input", "display_name": "Document Classifier Input Template",
+         "description": "User message template for document classifier input",
          "primary_entity_type": "task", "primary_entity_id": tasks["document_classifier"]["id"]},
-        {"name": "field_extractor_instruction", "description": "System instruction for ACORD 855 field extraction task",
+        {"name": "field_extractor_instruction", "display_name": "Field Extractor Instruction",
+         "description": "System instruction for ACORD 855 field extraction task",
          "primary_entity_type": "task", "primary_entity_id": tasks["field_extractor"]["id"]},
-        {"name": "field_extractor_input", "description": "User message template for field extractor input",
+        {"name": "field_extractor_input", "display_name": "Field Extractor Input Template",
+         "description": "User message template for field extractor input",
          "primary_entity_type": "task", "primary_entity_id": tasks["field_extractor"]["id"]},
     ]
 
