@@ -1,0 +1,148 @@
+<!--
+  BASE TEMPLATE — Verity Admin Web UI
+
+  This is the master layout that all pages extend. It provides:
+  - Left sidebar navigation (Databricks-style)
+  - Top bar with navigable breadcrumbs
+  - Main content area
+
+  EXTENDING THIS TEMPLATE:
+  Pages override these Jinja2 blocks:
+  - block title        — Browser tab title
+  - block breadcrumbs  — Breadcrumb navigation items
+  - block page_title   — H1 heading below breadcrumbs
+  - block content      — Main page content
+
+  FONTS: Poppins via Google Fonts CDN
+  CSS:   Tailwind via CDN (layout utilities) + verity.css (branding)
+  JS:    HTMX via CDN (dynamic page updates without writing JavaScript)
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Verity Admin{% endblock %}</title>
+
+    <!-- Poppins font from Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Tailwind CSS — utility classes for layout (flexbox, spacing, grid) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- HTMX — dynamic page updates without writing JavaScript -->
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+
+    <!-- Verity custom CSS — PremiumIQ brand colors and component styles -->
+    <link rel="stylesheet" href="/admin/static/verity.css">
+</head>
+<body>
+
+<!-- ============================================================
+     PAGE LAYOUT: Sidebar (fixed left) + Main Content (right)
+     ============================================================ -->
+<div class="verity-layout">
+
+    <!-- ── LEFT SIDEBAR ─────────────────────────────────────── -->
+    <nav class="verity-sidebar">
+
+        <!-- Brand / Logo area -->
+        <div class="verity-sidebar-brand">
+            <img src="/admin/static/images/premiumiq_white_logo.png"
+                 alt="PremiumIQ"
+                 style="height: 28px; margin-bottom: 4px;">
+            <div class="verity-subtitle">Verity</div>
+        </div>
+
+        <!-- Navigation links -->
+        <div class="verity-sidebar-nav">
+
+            <!-- OVERVIEW section -->
+            <div class="verity-nav-section">Overview</div>
+            <a href="/admin/" class="verity-nav-link {% if active_page == 'dashboard' %}active{% endif %}">
+                <span class="verity-nav-icon">◫</span> Dashboard
+            </a>
+
+            <!-- REGISTRY section — browse all governed entities -->
+            <div class="verity-nav-section" style="margin-top: 16px;">Registry</div>
+            <a href="/admin/agents" class="verity-nav-link {% if active_page == 'agents' %}active{% endif %}">
+                <span class="verity-nav-icon">⬡</span> Agents
+            </a>
+            <a href="/admin/tasks" class="verity-nav-link {% if active_page == 'tasks' %}active{% endif %}">
+                <span class="verity-nav-icon">☐</span> Tasks
+            </a>
+            <a href="/admin/prompts" class="verity-nav-link {% if active_page == 'prompts' %}active{% endif %}">
+                <span class="verity-nav-icon">¶</span> Prompts
+            </a>
+            <a href="/admin/configs" class="verity-nav-link {% if active_page == 'configs' %}active{% endif %}">
+                <span class="verity-nav-icon">⚙</span> Inference Configs
+            </a>
+            <a href="/admin/tools" class="verity-nav-link {% if active_page == 'tools' %}active{% endif %}">
+                <span class="verity-nav-icon">⚒</span> Tools
+            </a>
+            <a href="/admin/pipelines" class="verity-nav-link {% if active_page == 'pipelines' %}active{% endif %}">
+                <span class="verity-nav-icon">⟿</span> Pipelines
+            </a>
+
+            <!-- GOVERNANCE section — lifecycle, testing, compliance -->
+            <div class="verity-nav-section" style="margin-top: 16px;">Governance</div>
+            <a href="/admin/decisions" class="verity-nav-link {% if active_page == 'decisions' %}active{% endif %}">
+                <span class="verity-nav-icon">◉</span> Decision Log
+            </a>
+            <a href="/admin/model-inventory" class="verity-nav-link {% if active_page == 'model_inventory' %}active{% endif %}">
+                <span class="verity-nav-icon">☰</span> Model Inventory
+            </a>
+            <a href="/admin/lifecycle" class="verity-nav-link {% if active_page == 'lifecycle' %}active{% endif %}">
+                <span class="verity-nav-icon">↗</span> Lifecycle
+            </a>
+            <a href="/admin/test-results" class="verity-nav-link {% if active_page == 'test_results' %}active{% endif %}">
+                <span class="verity-nav-icon">✓</span> Test Results
+            </a>
+
+        </div><!-- end sidebar-nav -->
+
+        <!-- Sidebar footer — link to UW business app + version info -->
+        <div style="padding: 12px 16px; border-top: 1px solid rgba(255,255,255,0.15);">
+            <a href="http://localhost:8001/"
+               style="color: rgba(255,255,255,0.6); font-size: 0.75rem; text-decoration: none;"
+               onmouseover="this.style.color='#8FAADC'"
+               onmouseout="this.style.color='rgba(255,255,255,0.6)'">
+                UW Demo →
+            </a>
+            <div style="font-size: 0.6rem; color: rgba(255,255,255,0.3); margin-top: 4px;">
+                Verity v0.1.0
+            </div>
+        </div>
+
+    </nav><!-- end sidebar -->
+
+
+    <!-- ── MAIN CONTENT AREA ────────────────────────────────── -->
+    <main class="verity-main">
+
+        <!-- Top bar: breadcrumbs + page title -->
+        <div class="verity-topbar">
+
+            <!-- Breadcrumbs — navigable path (e.g., Verity > Agents > triage_agent) -->
+            <div class="verity-breadcrumbs">
+                <a href="/">Verity</a>
+                {% block breadcrumbs %}{% endblock %}
+            </div>
+
+            <!-- Page title -->
+            <h1 class="verity-page-title">{% block page_title %}Dashboard{% endblock %}</h1>
+        </div>
+
+        <!-- Page content -->
+        <div class="verity-content">
+            {% block content %}{% endblock %}
+        </div>
+
+    </main><!-- end main -->
+
+</div><!-- end layout -->
+
+</body>
+</html>

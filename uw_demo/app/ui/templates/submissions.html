@@ -1,0 +1,95 @@
+<!--
+  SUBMISSIONS LIST PAGE — Browse all insurance submissions
+
+  Shows a table of submissions with risk status badges,
+  line of business, named insured, and pipeline completion.
+
+  DATA PASSED BY ROUTE:
+  - submissions: list of dicts with submission metadata and status
+-->
+{% extends "uw_base.html" %}
+
+{% block title %}Submissions — UW Demo{% endblock %}
+
+{% block page_title %}Submissions{% endblock %}
+
+{% block content %}
+
+<div style="margin-bottom: 16px; font-size: 0.85rem; color: var(--verity-text-light);">
+    {{ submissions|length }} submissions
+</div>
+
+<table class="verity-table">
+    <thead>
+        <tr>
+            <th>Submission</th>
+            <th>Named Insured</th>
+            <th>Line of Business</th>
+            <th>Risk Score</th>
+            <th>Appetite</th>
+            <th>Pipeline</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for sub in submissions %}
+        <tr class="clickable" onclick="window.location='/submissions/{{ sub.id }}'">
+
+            <!-- Short submission ID -->
+            <td style="font-family: monospace; font-size: 0.8rem;">
+                {{ sub.id[:8] }}...
+            </td>
+
+            <!-- Named insured -->
+            <td style="font-weight: 500;">{{ sub.named_insured }}</td>
+
+            <!-- Line of business badge -->
+            <td>
+                <span class="verity-badge verity-badge-agent">{{ sub.lob }}</span>
+            </td>
+
+            <!-- Risk score badge (RAG colors) -->
+            <td>
+                {% if sub.risk_score == 'Green' %}
+                    <span class="verity-badge verity-badge-champion">Green</span>
+                {% elif sub.risk_score == 'Amber' %}
+                    <span class="verity-badge verity-badge-shadow">Amber</span>
+                {% elif sub.risk_score == 'Red' %}
+                    <span class="verity-badge verity-badge-high">Red</span>
+                {% else %}
+                    <span class="verity-badge verity-badge-draft">—</span>
+                {% endif %}
+            </td>
+
+            <!-- Appetite determination -->
+            <td>
+                {% if sub.appetite == 'within_appetite' %}
+                    <span class="verity-badge verity-badge-champion">within</span>
+                {% elif sub.appetite == 'borderline' %}
+                    <span class="verity-badge verity-badge-shadow">borderline</span>
+                {% elif sub.appetite == 'outside_appetite' %}
+                    <span class="verity-badge verity-badge-high">outside</span>
+                {% else %}
+                    <span class="verity-badge verity-badge-draft">—</span>
+                {% endif %}
+            </td>
+
+            <!-- Pipeline step count -->
+            <td>
+                {% if sub.has_override %}
+                    {{ sub.steps_complete }}/4 ⚠
+                {% else %}
+                    {{ sub.steps_complete }}/4
+                {% endif %}
+            </td>
+
+            <!-- View button -->
+            <td>
+                <a href="/submissions/{{ sub.id }}" class="verity-btn verity-btn-secondary verity-btn-sm">View</a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% endblock %}

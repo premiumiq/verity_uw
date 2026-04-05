@@ -1,0 +1,80 @@
+<!--
+  PIPELINES PAGE — Browse registered pipelines and their steps
+
+  DATA PASSED BY ROUTE:
+  - pipelines: list of dicts from registry.list_pipelines()
+-->
+{% extends "base.html" %}
+
+{% block title %}Pipelines — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <span>Pipelines</span>
+{% endblock %}
+
+{% block page_title %}Pipelines{% endblock %}
+
+{% block content %}
+
+{% if pipelines %}
+    {% for pipeline in pipelines %}
+    <div class="verity-section">
+        <div class="verity-card">
+            <!-- Pipeline header -->
+            <div class="flex items-center gap-3 mb-3">
+                <span style="font-size: 1.1rem; font-weight: 600;">{{ pipeline.display_name }}</span>
+                {% if pipeline.champion_version %}
+                    <span class="verity-badge verity-badge-champion">v{{ pipeline.champion_version }}</span>
+                {% endif %}
+            </div>
+            <div style="font-size: 0.85rem; color: var(--verity-text-light); margin-bottom: 16px;">
+                {{ pipeline.description or '' }}
+            </div>
+
+            <!-- Pipeline steps visualization -->
+            {% if pipeline.steps %}
+            <table class="verity-table">
+                <thead>
+                    <tr>
+                        <th>Order</th>
+                        <th>Step Name</th>
+                        <th>Entity Type</th>
+                        <th>Entity Name</th>
+                        <th>Parallel Group</th>
+                        <th>Depends On</th>
+                        <th>Error Policy</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for step in pipeline.steps %}
+                    <tr>
+                        <td>{{ step.step_order if step.step_order is defined else step.get('step_order', '—') }}</td>
+                        <td style="font-weight: 600;">{{ step.step_name if step.step_name is defined else step.get('step_name', '—') }}</td>
+                        <td>
+                            {% set etype = step.entity_type if step.entity_type is defined else step.get('entity_type', '') %}
+                            <span class="verity-badge verity-badge-{{ etype }}">{{ etype }}</span>
+                        </td>
+                        <td>{{ step.entity_name if step.entity_name is defined else step.get('entity_name', '—') }}</td>
+                        <td>{{ (step.parallel_group if step.parallel_group is defined else step.get('parallel_group')) or '—' }}</td>
+                        <td style="font-size: 0.8rem;">
+                            {% set deps = step.depends_on if step.depends_on is defined else step.get('depends_on', []) %}
+                            {{ deps | join(', ') if deps else '—' }}
+                        </td>
+                        <td>{{ step.error_policy if step.error_policy is defined else step.get('error_policy', 'fail_pipeline') }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+<div class="verity-empty">
+    <div style="font-size: 2rem; opacity: 0.3;">⟿</div>
+    <div class="verity-empty-message">No pipelines registered yet.</div>
+</div>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,202 @@
+<!--
+  SUBMISSION DETAIL PAGE — View one submission with AI results
+
+  Shows submission metadata at top, then each AI step's output
+  as a card (classifier, extractor, triage, appetite).
+  Includes override display if any human overrides exist.
+  Links to Verity admin for full audit trail.
+
+  DATA PASSED BY ROUTE:
+  - sub: dict with submission metadata
+  - trail: list of AuditTrailEntry from verity.get_audit_trail()
+  - overrides: list of override records (if any)
+-->
+{% extends "uw_base.html" %}
+
+{% block title %}{{ sub.named_insured }} — UW Demo{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/">Submissions</a>
+    <span class="separator">›</span>
+    <span>{{ sub.named_insured }}</span>
+{% endblock %}
+
+{% block page_title %}{{ sub.named_insured }}{% endblock %}
+
+{% block content %}
+
+<!-- ── SUBMISSION INFO CARD ───────────────────────────────── -->
+<div class="verity-card" style="margin-bottom: 24px;">
+    <div class="verity-detail-grid">
+        <div class="verity-detail-label">Named Insured</div>
+        <div class="verity-detail-value" style="font-weight: 600;">{{ sub.named_insured }}</div>
+
+        <div class="verity-detail-label">Line of Business</div>
+        <div class="verity-detail-value">
+            <span class="verity-badge verity-badge-agent">{{ sub.lob }}</span>
+        </div>
+
+        <div class="verity-detail-label">Risk Score</div>
+        <div class="verity-detail-value">
+            {% if sub.risk_score == 'Green' %}
+                <span class="verity-badge verity-badge-champion">Green</span>
+            {% elif sub.risk_score == 'Amber' %}
+                <span class="verity-badge verity-badge-shadow">Amber</span>
+            {% elif sub.risk_score == 'Red' %}
+                <span class="verity-badge verity-badge-high">Red</span>
+            {% endif %}
+        </div>
+
+        <div class="verity-detail-label">Revenue</div>
+        <div class="verity-detail-value">{{ sub.revenue }}</div>
+
+        <div class="verity-detail-label">Employees</div>
+        <div class="verity-detail-value">{{ sub.employees }}</div>
+
+        <div class="verity-detail-label">Pipeline Status</div>
+        <div class="verity-detail-value">{{ trail|length }} steps completed</div>
+    </div>
+
+    <!-- Action buttons -->
+    <div style="margin-top: 16px; display: flex; gap: 8px;">
+        <a href="/submissions/{{ sub.id }}/pipeline" class="verity-btn verity-btn-primary">
+            Run Pipeline
+        </a>
+        {% if sub.last_pipeline_run_id %}
+        <a href="http://localhost:8000/admin/audit-trail/run/{{ sub.last_pipeline_run_id }}" class="verity-btn verity-btn-secondary" target="_blank">
+            View in Verity ↗
+        </a>
+        {% else %}
+        <a href="http://localhost:8000/admin/audit-trail/{{ sub.id }}" class="verity-btn verity-btn-secondary" target="_blank">
+            View in Verity ↗
+        </a>
+        {% endif %}
+    </div>
+</div>
+
+
+<!-- ── AI RESULTS ─────────────────────────────────────────── -->
+<div class="verity-section">
+    <h2 class="verity-section-title">AI Analysis Results</h2>
+
+    {% if trail %}
+        {% for entry in trail %}
+        <!-- One card per pipeline step -->
+        <div class="verity-card" style="margin-bottom: 12px; border-left: 3px solid {% if entry.entity_type == 'agent' %}var(--verity-blue-dark){% else %}var(--verity-blue){% endif %};">
+
+            <!-- Step header -->
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                <!-- Entity type badge -->
+                <span class="verity-badge verity-badge-{{ entry.entity_type }}">{{ entry.entity_type }}</span>
+
+                <!-- Step name and entity name -->
+                <span style="font-weight: 600;">
+                    {% if entry.step_name %}{{ entry.step_name }}{% else %}{{ entry.entity_display_name }}{% endif %}
+                </span>
+                <span style="color: var(--verity-text-light); font-size: 0.8rem;">
+                    {{ entry.entity_name }} v{{ entry.version_label }}
+                </span>
+
+                <!-- Status + confidence on the right -->
+                <span style="margin-left: auto; display: flex; gap: 6px; align-items: center;">
+                    {% if entry.confidence_score is not none %}
+                        <span style="font-size: 0.8rem; color: var(--verity-text-light);">
+                            {{ "%.0f"|format(entry.confidence_score * 100) }}% confidence
+                        </span>
+                    {% endif %}
+                    {% if entry.duration_ms %}
+                        <span style="font-size: 0.75rem; color: var(--verity-text-light);">
+                            {{ entry.duration_ms }}ms
+                        </span>
+                    {% endif %}
+                </span>
+            </div>
+
+            <!-- Output summary / key results -->
+            {% if entry.output_summary %}
+                {% set output = entry.output_summary %}
+
+                <!-- Try to show structured output nicely -->
+                {% if 'document_type' in output %}
+                    <!-- Classifier output -->
+                    <div class="verity-code" style="font-size: 0.85rem;">{{ output }}</div>
+
+                {% elif 'risk_score' in output %}
+                    <!-- Triage output — show risk score prominently -->
+                    <div class="verity-code" style="font-size: 0.85rem;">{{ output }}</div>
+
+                {% elif 'determination' in output %}
+                    <!-- Appetite output -->
+                    <div class="verity-code" style="font-size: 0.85rem;">{{ output }}</div>
+
+                {% else %}
+                    <!-- Generic output -->
+                    <div class="verity-code" style="font-size: 0.85rem;">{{ output }}</div>
+                {% endif %}
+            {% endif %}
+
+            <!-- Reasoning text (if available, for agents) -->
+            {% if entry.reasoning_text and entry.entity_type == 'agent' %}
+                <div style="margin-top: 8px; font-size: 0.85rem; color: var(--verity-text);">
+                    <strong>Reasoning:</strong> {{ entry.reasoning_text[:500] }}{% if entry.reasoning_text|length > 500 %}...{% endif %}
+                </div>
+            {% endif %}
+
+            <!-- Link to full decision in Verity -->
+            <div style="margin-top: 8px;">
+                <a href="/verity/admin/decisions/{{ entry.decision_id }}"
+                   style="font-size: 0.75rem; color: var(--verity-blue-deep);"
+                   target="_blank">
+                    Full decision detail ↗
+                </a>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <!-- No AI results yet -->
+        <div class="verity-empty">
+            <div style="font-size: 2rem; opacity: 0.3;">⟿</div>
+            <div class="verity-empty-message">
+                No AI analysis yet. Click "Run Pipeline" to process this submission.
+            </div>
+        </div>
+    {% endif %}
+</div>
+
+
+<!-- ── OVERRIDES (if any) ─────────────────────────────────── -->
+{% if overrides %}
+<div class="verity-section">
+    <h2 class="verity-section-title">Human Overrides</h2>
+
+    {% for ov in overrides %}
+    <div class="verity-card" style="margin-bottom: 12px; border-left: 3px solid var(--verity-amber);">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+            <span class="verity-badge verity-badge-shadow">override</span>
+            <span style="font-weight: 600;">{{ ov.overrider_name }}</span>
+            <span style="color: var(--verity-text-light); font-size: 0.8rem;">{{ ov.overrider_role }}</span>
+        </div>
+
+        <div class="verity-detail-grid" style="margin-bottom: 8px;">
+            <div class="verity-detail-label">Reason</div>
+            <div class="verity-detail-value">{{ ov.override_reason_code | replace('_', ' ') | title }}</div>
+
+            <div class="verity-detail-label">AI Recommendation</div>
+            <div class="verity-detail-value verity-code" style="padding: 6px;">{{ ov.ai_recommendation }}</div>
+
+            <div class="verity-detail-label">Human Decision</div>
+            <div class="verity-detail-value verity-code" style="padding: 6px;">{{ ov.human_decision }}</div>
+        </div>
+
+        {% if ov.override_notes %}
+        <div style="font-size: 0.85rem; color: var(--verity-text); margin-top: 4px;">
+            <strong>Notes:</strong> {{ ov.override_notes }}
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% endblock %}

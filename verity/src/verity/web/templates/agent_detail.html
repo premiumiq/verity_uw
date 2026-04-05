@@ -1,0 +1,244 @@
+<!--
+  AGENT DETAIL PAGE — Full view of a single agent
+
+  Shows the agent's metadata, champion version details,
+  all version history, assigned prompts, authorized tools,
+  and model card (if exists).
+
+  DATA PASSED BY ROUTE:
+  - agent: dict from registry.get_agent_by_name()
+  - versions: list of dicts from registry.list_agent_versions()
+  - prompts: list of PromptAssignment (for champion version)
+  - tools: list of ToolAuthorization (for champion version)
+  - model_cards: list of model cards (for champion version)
+  - validation: latest ValidationRun (for champion version)
+-->
+{% extends "base.html" %}
+
+{% block title %}{{ agent.display_name }} — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/verity/admin/agents">Agents</a>
+    <span class="separator">›</span>
+    <span>{{ agent.name }}</span>
+{% endblock %}
+
+{% block page_title %}{{ agent.display_name }}{% endblock %}
+
+{% block content %}
+
+<!-- ── AGENT METADATA ───────────────────────────────────────── -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Agent Details</h2>
+    <div class="verity-card">
+        <div class="verity-detail-grid">
+            <div class="verity-detail-label">Name</div>
+            <div class="verity-detail-value">{{ agent.name }}</div>
+
+            <div class="verity-detail-label">Materiality Tier</div>
+            <div class="verity-detail-value">
+                <span class="verity-badge verity-badge-{{ agent.materiality_tier }}">{{ agent.materiality_tier }}</span>
+            </div>
+
+            <div class="verity-detail-label">Champion Version</div>
+            <div class="verity-detail-value">
+                {% if agent.champion_version_label %}
+                    <span class="verity-badge verity-badge-champion">{{ agent.champion_version_label }}</span>
+                {% else %}
+                    <span class="verity-badge verity-badge-draft">no champion</span>
+                {% endif %}
+            </div>
+
+            <div class="verity-detail-label">Inference Config</div>
+            <div class="verity-detail-value">{{ agent.champion_inference_config_name or '—' }}</div>
+
+            <div class="verity-detail-label">Domain</div>
+            <div class="verity-detail-value">{{ agent.domain or 'underwriting' }}</div>
+
+            <div class="verity-detail-label">Owner</div>
+            <div class="verity-detail-value">{{ agent.owner_name }}</div>
+
+            <div class="verity-detail-label">Description</div>
+            <div class="verity-detail-value">{{ agent.description }}</div>
+
+            <div class="verity-detail-label">Purpose</div>
+            <div class="verity-detail-value">{{ agent.purpose }}</div>
+
+            {% if agent.known_limitations %}
+            <div class="verity-detail-label">Known Limitations</div>
+            <div class="verity-detail-value">{{ agent.known_limitations }}</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+
+<!-- ── VERSION HISTORY ──────────────────────────────────────── -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Version History</h2>
+
+    {% if versions %}
+    <table class="verity-table">
+        <thead>
+            <tr>
+                <th>Version</th>
+                <th>State</th>
+                <th>Inference Config</th>
+                <th>Change Summary</th>
+                <th>Developer</th>
+                <th>Created</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for v in versions %}
+            <tr>
+                <td>{{ v.version_label }}</td>
+                <td><span class="verity-badge verity-badge-{{ v.lifecycle_state }}">{{ v.lifecycle_state }}</span></td>
+                <td>{{ v.inference_config_name }} (temp={{ v.temperature }})</td>
+                <td>{{ v.change_summary or '—' }}</td>
+                <td>{{ v.developer_name or '—' }}</td>
+                <td>{{ v.created_at.strftime('%Y-%m-%d') if v.created_at else '—' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="verity-empty">
+        <div class="verity-empty-message">No versions found.</div>
+    </div>
+    {% endif %}
+</div>
+
+
+<!-- ── ASSIGNED PROMPTS ──────────────────────────────────────
+     Shows which prompt versions are active for the champion version. -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Prompts (Champion Version)</h2>
+
+    {% if prompts %}
+    {% for p in prompts %}
+    <div class="verity-card" style="margin-bottom: 12px;">
+        <div class="flex items-center gap-2 mb-2">
+            <span class="verity-badge verity-badge-{{ p.api_role if p.api_role != 'assistant_prefill' else 'draft' }}">{{ p.api_role }}</span>
+            <span class="verity-badge" style="background: var(--verity-blue-pale); color: var(--verity-blue-deep);">{{ p.governance_tier }}</span>
+            <span style="font-weight: 600;">{{ p.prompt_name }}</span>
+            <span style="color: var(--verity-text-light); font-size: 0.8rem;">v{{ p.version_number }}</span>
+        </div>
+        <div class="verity-code">{{ p.content }}</div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="verity-empty">
+        <div class="verity-empty-message">No prompts assigned to champion version.</div>
+    </div>
+    {% endif %}
+</div>
+
+
+<!-- ── AUTHORIZED TOOLS ───────────────────────────────────── -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Authorized Tools (Champion Version)</h2>
+
+    {% if tools %}
+    <table class="verity-table">
+        <thead>
+            <tr>
+                <th>Tool Name</th>
+                <th>Description</th>
+                <th>Write Op</th>
+                <th>Mock Enabled</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for t in tools %}
+            <tr>
+                <td>{{ t.name }}</td>
+                <td style="max-width: 400px;">{{ t.description[:120] }}{% if t.description|length > 120 %}...{% endif %}</td>
+                <td>{{ '✓' if t.is_write_operation else '—' }}</td>
+                <td>{{ '✓' if t.mock_mode_enabled else '—' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="verity-empty">
+        <div class="verity-empty-message">No tools authorized for champion version.</div>
+    </div>
+    {% endif %}
+</div>
+
+
+<!-- ── VALIDATION STATUS ───────────────────────────────────── -->
+{% if validation %}
+<div class="verity-section">
+    <h2 class="verity-section-title">Latest Validation</h2>
+    <div class="verity-card">
+        <div class="verity-detail-grid">
+            <div class="verity-detail-label">Passed</div>
+            <div class="verity-detail-value">
+                <span class="verity-badge verity-badge-{{ 'complete' if validation.passed else 'failed' }}">
+                    {{ 'PASSED' if validation.passed else 'FAILED' }}
+                </span>
+            </div>
+
+            {% if validation.f1_score is not none %}
+            <div class="verity-detail-label">F1 Score</div>
+            <div class="verity-detail-value">{{ "%.4f"|format(validation.f1_score) }}</div>
+            {% endif %}
+
+            {% if validation.precision_score is not none %}
+            <div class="verity-detail-label">Precision</div>
+            <div class="verity-detail-value">{{ "%.4f"|format(validation.precision_score) }}</div>
+            {% endif %}
+
+            {% if validation.recall_score is not none %}
+            <div class="verity-detail-label">Recall</div>
+            <div class="verity-detail-value">{{ "%.4f"|format(validation.recall_score) }}</div>
+            {% endif %}
+
+            <div class="verity-detail-label">Run By</div>
+            <div class="verity-detail-value">{{ validation.run_by }}</div>
+
+            <div class="verity-detail-label">Run At</div>
+            <div class="verity-detail-value">{{ validation.run_at.strftime('%Y-%m-%d %H:%M') if validation.run_at else '—' }}</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+
+<!-- ── MODEL CARD ──────────────────────────────────────────── -->
+{% if model_cards %}
+{% set mc = model_cards[0] %}
+<div class="verity-section">
+    <h2 class="verity-section-title">Model Card (SR 11-7)</h2>
+    <div class="verity-card">
+        <div class="verity-detail-grid">
+            <div class="verity-detail-label">Purpose</div>
+            <div class="verity-detail-value">{{ mc.purpose }}</div>
+
+            <div class="verity-detail-label">Design Rationale</div>
+            <div class="verity-detail-value">{{ mc.design_rationale }}</div>
+
+            <div class="verity-detail-label">Known Limitations</div>
+            <div class="verity-detail-value">{{ mc.known_limitations }}</div>
+
+            <div class="verity-detail-label">Conditions of Use</div>
+            <div class="verity-detail-value">{{ mc.conditions_of_use }}</div>
+
+            <div class="verity-detail-label">Status</div>
+            <div class="verity-detail-value">
+                <span class="verity-badge verity-badge-{{ mc.lifecycle_state }}">{{ mc.lifecycle_state }}</span>
+            </div>
+
+            {% if mc.approved_by %}
+            <div class="verity-detail-label">Approved By</div>
+            <div class="verity-detail-value">{{ mc.approved_by }}</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}

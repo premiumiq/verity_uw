@@ -1,0 +1,87 @@
+<!--
+  AUDIT TRAIL PAGE — Full decision chain for a submission
+
+  Shows every task and agent that ran for a specific submission,
+  in execution order. This is the regulatory audit view.
+
+  DATA PASSED BY ROUTE:
+  - submission_id: UUID of the submission
+  - trail: list of AuditTrailEntry
+-->
+{% extends "base.html" %}
+
+{% block title %}Audit Trail — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/verity/admin/decisions">Decision Log</a>
+    <span class="separator">›</span>
+    <span>Audit Trail</span>
+{% endblock %}
+
+{% block page_title %}Audit Trail{% endblock %}
+
+{% block content %}
+
+<div style="margin-bottom: 16px; font-size: 0.85rem; color: var(--verity-text-light);">
+    Submission: <span style="font-family: monospace;">{{ submission_id }}</span>
+    — {{ trail|length }} steps executed
+</div>
+
+{% if trail %}
+    {% for entry in trail %}
+    <div class="verity-card" style="margin-bottom: 12px; border-left: 3px solid {% if entry.entity_type == 'agent' %}var(--verity-blue-dark){% else %}var(--verity-blue){% endif %};">
+
+        <!-- Step header: type badge + name + version + step name -->
+        <div class="flex items-center gap-2 mb-2">
+            <span class="verity-badge verity-badge-{{ entry.entity_type }}">{{ entry.entity_type }}</span>
+            <span style="font-weight: 600;">{{ entry.entity_display_name }}</span>
+            <span style="color: var(--verity-text-light); font-size: 0.8rem;">v{{ entry.version_label }}</span>
+            {% if entry.step_name %}
+                <span style="color: var(--verity-text-light); font-size: 0.75rem;">| {{ entry.step_name }}</span>
+            {% endif %}
+            <span class="verity-badge verity-badge-{{ entry.status }}" style="margin-left: auto;">{{ entry.status }}</span>
+        </div>
+
+        <!-- Output summary -->
+        {% if entry.output_summary %}
+        <div style="font-size: 0.85rem; margin-bottom: 8px;">
+            {{ entry.output_summary[:300] }}{% if entry.output_summary|length > 300 %}...{% endif %}
+        </div>
+        {% endif %}
+
+        <!-- Metadata row -->
+        <div class="flex gap-4" style="font-size: 0.75rem; color: var(--verity-text-light);">
+            {% if entry.confidence_score is not none %}
+                <span>Confidence: {{ "%.2f"|format(entry.confidence_score) }}</span>
+            {% endif %}
+            {% if entry.duration_ms %}
+                <span>{{ entry.duration_ms }}ms</span>
+            {% endif %}
+            {% if entry.capability_type %}
+                <span>{{ entry.capability_type }}</span>
+            {% endif %}
+            {% if entry.hitl_required %}
+                <span class="verity-badge verity-badge-medium" style="font-size: 0.65rem;">HITL Required</span>
+            {% endif %}
+            {% if entry.tool_calls_made %}
+                <span>{{ entry.tool_calls_made|length }} tool calls</span>
+            {% endif %}
+        </div>
+
+        <!-- Link to full decision detail -->
+        <div style="margin-top: 8px;">
+            <a href="/verity/admin/decisions/{{ entry.decision_id }}" class="verity-btn verity-btn-secondary verity-btn-sm">
+                View Full Decision
+            </a>
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+<div class="verity-empty">
+    <div style="font-size: 2rem; opacity: 0.3;">◉</div>
+    <div class="verity-empty-message">No decisions found for this submission.</div>
+</div>
+{% endif %}
+
+{% endblock %}

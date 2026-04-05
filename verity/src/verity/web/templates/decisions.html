@@ -1,0 +1,68 @@
+<!--
+  DECISION LOG PAGE — Searchable list of all AI invocations
+
+  Every Claude call (agent or task) creates a decision log entry.
+  This page shows them most-recent-first with key metadata.
+  Click any row to see the full decision detail.
+
+  DATA PASSED BY ROUTE:
+  - decisions: list of DecisionLog entries
+  - total: total count of decisions
+-->
+{% extends "base.html" %}
+
+{% block title %}Decision Log — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <span>Decision Log</span>
+{% endblock %}
+
+{% block page_title %}Decision Log{% endblock %}
+
+{% block content %}
+
+<!-- Total count -->
+<div style="margin-bottom: 16px; font-size: 0.85rem; color: var(--verity-text-light);">
+    {{ total }} total decisions logged
+</div>
+
+{% if decisions %}
+<table class="verity-table">
+    <thead>
+        <tr>
+            <th>Entity</th>
+            <th>Type</th>
+            <th>Version</th>
+            <th>Step</th>
+            <th>Submission</th>
+            <th>Status</th>
+            <th>Tokens</th>
+            <th>Duration</th>
+            <th>When</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for d in decisions %}
+        <tr class="clickable" onclick="window.location='/verity/admin/decisions/{{ d.id }}'">
+            <td><a href="/verity/admin/decisions/{{ d.id }}">{{ d.entity_name or '—' }}</a></td>
+            <td><span class="verity-badge verity-badge-{{ d.entity_type }}">{{ d.entity_type }}</span></td>
+            <td>{{ d.version_label or '—' }}</td>
+            <td>{{ d.step_name or '—' }}</td>
+            <td>{{ d.submission_id|string|truncate(8, True, '') if d.submission_id else '—' }}</td>
+            <td><span class="verity-badge verity-badge-{{ d.status }}">{{ d.status }}</span></td>
+            <td>{{ (d.input_tokens or 0) + (d.output_tokens or 0) }}</td>
+            <td>{{ d.duration_ms or 0 }}ms</td>
+            <td>{{ d.created_at.strftime('%m-%d %H:%M') if d.created_at else '—' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="verity-empty">
+    <div style="font-size: 2rem; opacity: 0.3;">◉</div>
+    <div class="verity-empty-message">No decisions logged yet.</div>
+</div>
+{% endif %}
+
+{% endblock %}

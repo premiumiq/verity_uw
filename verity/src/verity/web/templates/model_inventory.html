@@ -1,0 +1,137 @@
+<!--
+  MODEL INVENTORY PAGE — Regulatory report view
+
+  Shows all champion agents and tasks with their validation status,
+  override rates, and model card status. This is the SR 11-7
+  compliance report that CIOs see in the demo.
+
+  DATA PASSED BY ROUTE:
+  - agents: list of ModelInventoryAgent
+  - tasks: list of ModelInventoryTask
+-->
+{% extends "base.html" %}
+
+{% block title %}Model Inventory — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <span>Model Inventory</span>
+{% endblock %}
+
+{% block page_title %}Model Inventory Report{% endblock %}
+
+{% block content %}
+
+<!-- Report header -->
+<div style="margin-bottom: 20px; font-size: 0.85rem; color: var(--verity-text-light);">
+    SR 11-7 Model Inventory — All champion agents and tasks with governance status
+</div>
+
+<!-- ── CHAMPION AGENTS ────────────────────────────────────── -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Agents ({{ agents|length }})</h2>
+
+    {% if agents %}
+    <table class="verity-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Materiality</th>
+                <th>Version</th>
+                <th>Config</th>
+                <th>F1</th>
+                <th>Kappa</th>
+                <th>Model Card</th>
+                <th>Overrides (30d)</th>
+                <th>Decisions (30d)</th>
+                <th>Incidents</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for a in agents %}
+            <tr class="clickable" onclick="window.location='/verity/admin/agents/{{ a.name }}'">
+                <td><a href="/verity/admin/agents/{{ a.name }}">{{ a.display_name }}</a></td>
+                <td><span class="verity-badge verity-badge-{{ a.materiality_tier }}">{{ a.materiality_tier }}</span></td>
+                <td><span class="verity-badge verity-badge-champion">{{ a.champion_version }}</span></td>
+                <td>{{ a.inference_config_name }}</td>
+                <td>{{ "%.3f"|format(a.f1_score) if a.f1_score else '—' }}</td>
+                <td>{{ "%.3f"|format(a.cohens_kappa) if a.cohens_kappa else '—' }}</td>
+                <td>
+                    {% if a.model_card_status == 'approved' %}
+                        <span class="verity-badge verity-badge-champion">approved</span>
+                    {% elif a.model_card_status %}
+                        <span class="verity-badge verity-badge-draft">{{ a.model_card_status }}</span>
+                    {% else %}
+                        <span class="verity-badge verity-badge-failed">missing</span>
+                    {% endif %}
+                </td>
+                <td>{{ a.override_count_30d }}</td>
+                <td>{{ a.decision_count_30d }}</td>
+                <td>
+                    {% if a.active_incidents > 0 %}
+                        <span class="verity-badge verity-badge-failed">{{ a.active_incidents }}</span>
+                    {% else %}
+                        0
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="verity-empty">
+        <div class="verity-empty-message">No champion agents.</div>
+    </div>
+    {% endif %}
+</div>
+
+
+<!-- ── CHAMPION TASKS ─────────────────────────────────────── -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Tasks ({{ tasks|length }})</h2>
+
+    {% if tasks %}
+    <table class="verity-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Capability</th>
+                <th>Materiality</th>
+                <th>Version</th>
+                <th>Config</th>
+                <th>F1</th>
+                <th>Model Card</th>
+                <th>Decisions (30d)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for t in tasks %}
+            <tr class="clickable" onclick="window.location='/verity/admin/tasks/{{ t.name }}'">
+                <td><a href="/verity/admin/tasks/{{ t.name }}">{{ t.display_name }}</a></td>
+                <td><span class="verity-badge verity-badge-task">{{ t.capability_type }}</span></td>
+                <td><span class="verity-badge verity-badge-{{ t.materiality_tier }}">{{ t.materiality_tier }}</span></td>
+                <td><span class="verity-badge verity-badge-champion">{{ t.champion_version }}</span></td>
+                <td>{{ t.inference_config_name }}</td>
+                <td>{{ "%.3f"|format(t.f1_score) if t.f1_score else '—' }}</td>
+                <td>
+                    {% if t.model_card_status == 'approved' %}
+                        <span class="verity-badge verity-badge-champion">approved</span>
+                    {% elif t.model_card_status %}
+                        <span class="verity-badge verity-badge-draft">{{ t.model_card_status }}</span>
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+                <td>{{ t.decision_count_30d }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="verity-empty">
+        <div class="verity-empty-message">No champion tasks.</div>
+    </div>
+    {% endif %}
+</div>
+
+{% endblock %}

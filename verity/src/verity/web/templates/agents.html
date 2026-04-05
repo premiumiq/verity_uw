@@ -1,0 +1,62 @@
+<!--
+  AGENTS LIST PAGE — Browse all registered agents
+
+  Shows a table of all agents with their champion version,
+  materiality tier, inference config, and lifecycle state.
+  Click any row to see the agent's detail page.
+
+  DATA PASSED BY ROUTE:
+  - agents: list of dicts from registry.list_agents()
+-->
+{% extends "base.html" %}
+
+{% block title %}Agents — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <span>Agents</span>
+{% endblock %}
+
+{% block page_title %}Agents{% endblock %}
+
+{% block content %}
+
+{% if agents %}
+<table class="verity-table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Display Name</th>
+            <th>Materiality</th>
+            <th>Champion Version</th>
+            <th>Inference Config</th>
+            <th>Domain</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for agent in agents %}
+        <tr class="clickable" onclick="window.location='/verity/admin/agents/{{ agent.name }}'">
+            <td><a href="/verity/admin/agents/{{ agent.name }}">{{ agent.name }}</a></td>
+            <td>{{ agent.display_name }}</td>
+            <td><span class="verity-badge verity-badge-{{ agent.materiality_tier }}">{{ agent.materiality_tier }}</span></td>
+            <td>
+                {% if agent.champion_version %}
+                    <span class="verity-badge verity-badge-champion">{{ agent.champion_version }}</span>
+                {% else %}
+                    <span class="verity-badge verity-badge-draft">no champion</span>
+                {% endif %}
+            </td>
+            <td>{{ agent.inference_config_name or '—' }}</td>
+            <td>{{ agent.domain or 'underwriting' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="verity-empty">
+    <div style="font-size: 2rem; opacity: 0.3;">⬡</div>
+    <div class="verity-empty-message">No agents registered yet.</div>
+</div>
+{% endif %}
+
+{% endblock %}

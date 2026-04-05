@@ -1,0 +1,154 @@
+<!--
+  DECISION DETAIL PAGE — Full drill-down into a single AI invocation
+
+  Shows everything about one decision: entity info, prompts used,
+  inference config snapshot, input/output, tool calls, reasoning.
+  This is the "reconstruct every decision" audit view.
+
+  DATA PASSED BY ROUTE:
+  - decision: DecisionLogDetail
+-->
+{% extends "base.html" %}
+
+{% block title %}Decision Detail — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/verity/admin/decisions">Decision Log</a>
+    <span class="separator">›</span>
+    <span>{{ decision.id|string|truncate(8, True, '') }}</span>
+{% endblock %}
+
+{% block page_title %}Decision Detail{% endblock %}
+
+{% block content %}
+
+<!-- ── ENTITY & EXECUTION INFO ────────────────────────────── -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Execution Summary</h2>
+    <div class="verity-card">
+        <div class="verity-detail-grid">
+            <div class="verity-detail-label">Decision ID</div>
+            <div class="verity-detail-value" style="font-family: monospace; font-size: 0.8rem;">{{ decision.id }}</div>
+
+            <div class="verity-detail-label">Entity</div>
+            <div class="verity-detail-value">
+                <span class="verity-badge verity-badge-{{ decision.entity_type }}">{{ decision.entity_type }}</span>
+                {{ decision.agent_name or decision.task_name or '—' }}
+            </div>
+
+            <div class="verity-detail-label">Version</div>
+            <div class="verity-detail-value">{{ decision.version_label or '—' }}</div>
+
+            {% if decision.step_name %}
+            <div class="verity-detail-label">Pipeline Step</div>
+            <div class="verity-detail-value">{{ decision.step_name }}</div>
+            {% endif %}
+
+            <div class="verity-detail-label">Status</div>
+            <div class="verity-detail-value">
+                <span class="verity-badge verity-badge-{{ decision.status }}">{{ decision.status }}</span>
+            </div>
+
+            <div class="verity-detail-label">Channel</div>
+            <div class="verity-detail-value">{{ decision.channel }}</div>
+
+            <div class="verity-detail-label">Duration</div>
+            <div class="verity-detail-value">{{ decision.duration_ms or 0 }}ms</div>
+
+            <div class="verity-detail-label">Tokens</div>
+            <div class="verity-detail-value">
+                Input: {{ decision.input_tokens or 0 }} / Output: {{ decision.output_tokens or 0 }}
+            </div>
+
+            <div class="verity-detail-label">Model</div>
+            <div class="verity-detail-value">{{ decision.model_used or '—' }}</div>
+
+            {% if decision.confidence_score is not none %}
+            <div class="verity-detail-label">Confidence</div>
+            <div class="verity-detail-value">{{ "%.2f"|format(decision.confidence_score) }}</div>
+            {% endif %}
+
+            {% if decision.submission_id %}
+            <div class="verity-detail-label">Submission</div>
+            <div class="verity-detail-value">
+                <a href="/verity/admin/audit-trail/{{ decision.submission_id }}">{{ decision.submission_id }}</a>
+            </div>
+            {% endif %}
+
+            <div class="verity-detail-label">Logged At</div>
+            <div class="verity-detail-value">{{ decision.created_at.strftime('%Y-%m-%d %H:%M:%S') if decision.created_at else '—' }}</div>
+        </div>
+    </div>
+</div>
+
+
+<!-- ── INFERENCE CONFIG SNAPSHOT ──────────────────────────── -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Inference Config Snapshot</h2>
+    <div class="verity-code">{{ decision.inference_config_snapshot | tojson(indent=2) }}</div>
+</div>
+
+
+<!-- ── REASONING ──────────────────────────────────────────── -->
+{% if decision.reasoning_text %}
+<div class="verity-section">
+    <h2 class="verity-section-title">Reasoning</h2>
+    <div class="verity-card">
+        <div style="white-space: pre-wrap;">{{ decision.reasoning_text }}</div>
+    </div>
+</div>
+{% endif %}
+
+
+<!-- ── OUTPUT ─────────────────────────────────────────────── -->
+{% if decision.output_json %}
+<div class="verity-section">
+    <h2 class="verity-section-title">Output</h2>
+    <div class="verity-code">{{ decision.output_json | tojson(indent=2) }}</div>
+</div>
+{% endif %}
+
+
+<!-- ── TOOL CALLS ────────────────────────────────────────── -->
+{% if decision.tool_calls_made %}
+<div class="verity-section">
+    <h2 class="verity-section-title">Tool Calls ({{ decision.tool_calls_made|length }})</h2>
+
+    {% for tc in decision.tool_calls_made %}
+    <div class="verity-card" style="margin-bottom: 8px;">
+        <div style="font-weight: 600; margin-bottom: 6px;">
+            #{{ tc.call_order }} — {{ tc.tool_name }}
+            {% if tc.get('mock_mode') %}<span class="verity-badge verity-badge-draft">mock</span>{% endif %}
+            {% if tc.get('error') %}<span class="verity-badge verity-badge-failed">error</span>{% endif %}
+        </div>
+        <div style="font-size: 0.75rem; color: var(--verity-text-light); margin-bottom: 4px;">Input:</div>
+        <div class="verity-code" style="margin-bottom: 8px;">{{ tc.input_data | tojson(indent=2) if tc.input_data else '—' }}</div>
+        <div style="font-size: 0.75rem; color: var(--verity-text-light); margin-bottom: 4px;">Output:</div>
+        <div class="verity-code">{{ tc.output_data | tojson(indent=2) if tc.output_data else '—' }}</div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+
+<!-- ── INPUT ──────────────────────────────────────────────── -->
+{% if decision.input_json %}
+<div class="verity-section">
+    <h2 class="verity-section-title">Input</h2>
+    <div class="verity-code">{{ decision.input_json | tojson(indent=2) }}</div>
+</div>
+{% endif %}
+
+
+<!-- ── ERROR ──────────────────────────────────────────────── -->
+{% if decision.error_message %}
+<div class="verity-section">
+    <h2 class="verity-section-title">Error</h2>
+    <div class="verity-card" style="border-color: var(--verity-red); background: var(--verity-red-light);">
+        {{ decision.error_message }}
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}

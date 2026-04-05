@@ -1,0 +1,49 @@
+<!--
+  INFERENCE CONFIGS PAGE — Browse all named LLM parameter sets
+
+  DATA PASSED BY ROUTE:
+  - configs: list of dicts from registry.list_inference_configs()
+-->
+{% extends "base.html" %}
+
+{% block title %}Inference Configs — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <span>Inference Configs</span>
+{% endblock %}
+
+{% block page_title %}Inference Configs{% endblock %}
+
+{% block content %}
+
+{% if configs %}
+<table class="verity-table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Model</th>
+            <th>Temperature</th>
+            <th>Max Tokens</th>
+            <th>Intended Use</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for c in configs %}
+        <tr>
+            <td style="font-weight: 600;">{{ c.name }}</td>
+            <td>{{ c.model_name }}</td>
+            <td>{{ c.temperature if c.temperature is not none else 'default' }}</td>
+            <td>{{ c.max_tokens or 'default' }}</td>
+            <td>{{ c.intended_use }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="verity-empty">
+    <div class="verity-empty-message">No inference configs registered yet.</div>
+</div>
+{% endif %}
+
+{% endblock %}

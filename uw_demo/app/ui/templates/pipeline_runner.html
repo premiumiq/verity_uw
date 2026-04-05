@@ -1,0 +1,161 @@
+<!--
+  PIPELINE RUNNER PAGE — Execute AI pipeline on a submission
+
+  Shows the pipeline steps with progress indicators.
+  Mock mode: instant results from pre-built outputs.
+  Live mode: calls Claude API for real AI reasoning.
+
+  DATA PASSED BY ROUTE:
+  - sub: dict with submission metadata
+  - result: PipelineResult (if pipeline was just run)
+  - mode: "mock" or "live" (which button was clicked)
+-->
+{% extends "uw_base.html" %}
+
+{% block title %}Pipeline — {{ sub.named_insured }}{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/">Submissions</a>
+    <span class="separator">›</span>
+    <a href="/submissions/{{ sub.id }}">{{ sub.named_insured }}</a>
+    <span class="separator">›</span>
+    <span>Pipeline</span>
+{% endblock %}
+
+{% block page_title %}Pipeline Execution{% endblock %}
+
+{% block content %}
+
+<!-- Submission context -->
+<div class="verity-card" style="margin-bottom: 24px;">
+    <div style="display: flex; align-items: center; gap: 12px;">
+        <span style="font-weight: 600;">{{ sub.named_insured }}</span>
+        <span class="verity-badge verity-badge-agent">{{ sub.lob }}</span>
+        <span style="color: var(--verity-text-light); font-size: 0.85rem;">
+            Pipeline: uw_submission_pipeline
+        </span>
+    </div>
+</div>
+
+<!-- Run buttons (only show if pipeline hasn't been run yet on this page load) -->
+{% if not result %}
+<div style="margin-bottom: 24px; display: flex; gap: 8px;">
+    <!-- Mock pipeline — instant, no Claude API call -->
+    <form method="POST" action="/submissions/{{ sub.id }}/pipeline?mode=mock">
+        <button type="submit" class="verity-btn verity-btn-primary">
+            ▶ Run Pipeline (Mock)
+        </button>
+    </form>
+
+    <!-- Live pipeline — calls Claude API, costs ~$0.05, takes ~15-30 seconds -->
+    <form method="POST" action="/submissions/{{ sub.id }}/pipeline?mode=live">
+        <button type="submit" class="verity-btn verity-btn-secondary"
+                onclick="this.disabled=true; this.innerText='Running... (calling Claude API)'; this.form.submit();">
+            ▶ Run Pipeline (Live — calls Claude)
+        </button>
+    </form>
+</div>
+{% endif %}
+
+
+<!-- ── PIPELINE RESULTS ───────────────────────────────────── -->
+{% if result %}
+
+    <!-- Overall status -->
+    <div style="margin-bottom: 16px; display: flex; align-items: center; gap: 12px;">
+        {% if result.status == 'complete' %}
+            <span class="verity-badge verity-badge-champion" style="font-size: 0.85rem; padding: 4px 12px;">
+                Pipeline Complete
+            </span>
+        {% elif result.status == 'partial' %}
+            <span class="verity-badge verity-badge-shadow" style="font-size: 0.85rem; padding: 4px 12px;">
+                Pipeline Partial
+            </span>
+        {% else %}
+            <span class="verity-badge verity-badge-high" style="font-size: 0.85rem; padding: 4px 12px;">
+                Pipeline Failed
+            </span>
+        {% endif %}
+
+        <span style="font-size: 0.85rem; color: var(--verity-text-light);">
+            {{ result.duration_ms }}ms total
+            · {{ result.steps_completed|length }} completed
+            {% if result.steps_failed|length > 0 %}· {{ result.steps_failed|length }} failed{% endif %}
+            {% if result.steps_skipped|length > 0 %}· {{ result.steps_skipped|length }} skipped{% endif %}
+            · Mode: {{ mode }}
+        </span>
+    </div>
+
+    <!-- Step-by-step results -->
+    {% for step in result.all_steps %}
+    <div class="verity-card" style="margin-bottom: 8px; border-left: 3px solid
+        {% if step.status == 'complete' %}var(--verity-green)
+        {% elif step.status == 'failed' %}var(--verity-red)
+        {% else %}var(--verity-border){% endif %};">
+
+        <!-- Step header: order + name + type + status -->
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <!-- Step number -->
+            <span style="font-size: 0.75rem; color: var(--verity-text-light); width: 20px;">
+                {{ loop.index }}
+            </span>
+
+            <!-- Entity type badge -->
+            <span class="verity-badge verity-badge-{{ step.entity_type }}">{{ step.entity_type }}</span>
+
+            <!-- Step name -->
+            <span style="font-weight: 600;">{{ step.step_name }}</span>
+
+            <!-- Entity name -->
+            <span style="font-size: 0.8rem; color: var(--verity-text-light);">{{ step.entity_name }}</span>
+
+            <!-- Status + duration on the right -->
+            <span style="margin-left: auto; display: flex; gap: 8px; align-items: center;">
+                <span style="font-size: 0.8rem; color: var(--verity-text-light);">{{ step.duration_ms }}ms</span>
+
+                {% if step.status == 'complete' %}
+                    <span style="color: var(--verity-green); font-weight: 600;">✓</span>
+                {% elif step.status == 'failed' %}
+                    <span style="color: var(--verity-red); font-weight: 600;">✗</span>
+                {% else %}
+                    <span style="color: var(--verity-text-light);">○</span>
+                {% endif %}
+            </span>
+        </div>
+
+        <!-- Step output (collapsed by default, expandable) -->
+        {% if step.execution_result and step.execution_result.output %}
+        <details style="margin-top: 8px;">
+            <summary style="font-size: 0.8rem; color: var(--verity-blue-deep); cursor: pointer;">
+                Show output
+                {% if step.execution_result.confidence_score is not none %}
+                    · {{ "%.0f"|format(step.execution_result.confidence_score * 100) }}% confidence
+                {% endif %}
+            </summary>
+            <div class="verity-code" style="margin-top: 6px; font-size: 0.8rem;">{{ step.execution_result.output }}</div>
+        </details>
+        {% endif %}
+
+        <!-- Error message if failed -->
+        {% if step.error_message %}
+        <div style="margin-top: 6px; font-size: 0.85rem; color: var(--verity-red);">
+            Error: {{ step.error_message }}
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+
+    <!-- Actions after pipeline run -->
+    <div style="margin-top: 16px; display: flex; gap: 8px;">
+        <a href="/submissions/{{ sub.id }}" class="verity-btn verity-btn-primary">
+            ← View Submission
+        </a>
+        <a href="http://localhost:8000/admin/audit-trail/{{ sub.id }}" class="verity-btn verity-btn-secondary" target="_blank">
+            View Audit Trail in Verity ↗
+        </a>
+    </div>
+
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,61 @@
+"""Prompt and PromptVersion models."""
+
+from datetime import datetime
+from typing import Any, Optional
+from uuid import UUID
+
+from pydantic import BaseModel
+
+from verity.models.lifecycle import (
+    ApiRole,
+    EntityType,
+    GovernanceTier,
+    LifecycleState,
+)
+
+
+class Prompt(BaseModel):
+    id: UUID
+    name: str
+    description: str
+    primary_entity_type: Optional[EntityType] = None
+    primary_entity_id: Optional[UUID] = None
+    created_at: Optional[datetime] = None
+
+
+class PromptVersion(BaseModel):
+    id: UUID
+    prompt_id: UUID
+    version_number: int
+    content: str
+    api_role: ApiRole
+    governance_tier: GovernanceTier
+    lifecycle_state: LifecycleState = LifecycleState.DRAFT
+    change_summary: str
+    sensitivity_level: str = "high"
+    author_name: Optional[str] = None
+    approved_by: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    test_required: Optional[bool] = None
+    staging_tests_passed: Optional[bool] = None
+    created_at: Optional[datetime] = None
+
+    # Joined fields
+    prompt_name: Optional[str] = None
+    prompt_description: Optional[str] = None
+
+
+class PromptAssignment(BaseModel):
+    """A prompt version assigned to an agent_version or task_version."""
+    assignment_id: Optional[UUID] = None
+    prompt_version_id: UUID
+    prompt_name: str
+    prompt_description: Optional[str] = None
+    version_number: int
+    content: str
+    api_role: ApiRole
+    governance_tier: GovernanceTier
+    execution_order: int = 1
+    is_required: bool = True
+    condition_logic: Optional[dict[str, Any]] = None
+    lifecycle_state: Optional[LifecycleState] = None

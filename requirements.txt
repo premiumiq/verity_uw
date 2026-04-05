@@ -1,0 +1,14 @@
+# Verity package (installed from local path in Dockerfile)
+# -e ./verity
+
+# Additional dependencies for the UW demo app
+psycopg[binary]>=3.1,<4
+psycopg_pool>=3.1,<4
+pydantic>=2.0,<3
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+jinja2>=3.1,<4
+anthropic>=0.40,<1
+httpx>=0.27,<1
+minio>=7.2,<8
+python-multipart>=0.0.9

@@ -1,0 +1,51 @@
+<!--
+  TOOLS PAGE — Browse all registered callable tools
+
+  DATA PASSED BY ROUTE:
+  - tools: list of dicts from registry.list_tools()
+-->
+{% extends "base.html" %}
+
+{% block title %}Tools — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <span>Tools</span>
+{% endblock %}
+
+{% block page_title %}Tools{% endblock %}
+
+{% block content %}
+
+{% if tools %}
+<table class="verity-table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Display Name</th>
+            <th>Write Op</th>
+            <th>Mock Mode</th>
+            <th>Data Classification</th>
+            <th>Implementation</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for t in tools %}
+        <tr>
+            <td style="font-weight: 600;">{{ t.name }}</td>
+            <td>{{ t.display_name }}</td>
+            <td>{{ '✓' if t.is_write_operation else '—' }}</td>
+            <td>{{ '✓' if t.mock_mode_enabled else '—' }}</td>
+            <td>{{ t.data_classification_max }}</td>
+            <td style="font-family: monospace; font-size: 0.75rem;">{{ t.implementation_path }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="verity-empty">
+    <div class="verity-empty-message">No tools registered yet.</div>
+</div>
+{% endif %}
+
+{% endblock %}

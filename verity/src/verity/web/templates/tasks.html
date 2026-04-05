@@ -1,0 +1,58 @@
+<!--
+  TASKS LIST PAGE — Browse all registered tasks
+
+  DATA PASSED BY ROUTE:
+  - tasks: list of dicts from registry.list_tasks()
+-->
+{% extends "base.html" %}
+
+{% block title %}Tasks — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <span>Tasks</span>
+{% endblock %}
+
+{% block page_title %}Tasks{% endblock %}
+
+{% block content %}
+
+{% if tasks %}
+<table class="verity-table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Display Name</th>
+            <th>Capability</th>
+            <th>Materiality</th>
+            <th>Champion Version</th>
+            <th>Inference Config</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for task in tasks %}
+        <tr class="clickable" onclick="window.location='/verity/admin/tasks/{{ task.name }}'">
+            <td><a href="/verity/admin/tasks/{{ task.name }}">{{ task.name }}</a></td>
+            <td>{{ task.display_name }}</td>
+            <td><span class="verity-badge verity-badge-task">{{ task.capability_type }}</span></td>
+            <td><span class="verity-badge verity-badge-{{ task.materiality_tier }}">{{ task.materiality_tier }}</span></td>
+            <td>
+                {% if task.champion_version %}
+                    <span class="verity-badge verity-badge-champion">{{ task.champion_version }}</span>
+                {% else %}
+                    <span class="verity-badge verity-badge-draft">no champion</span>
+                {% endif %}
+            </td>
+            <td>{{ task.inference_config_name or '—' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="verity-empty">
+    <div style="font-size: 2rem; opacity: 0.3;">☐</div>
+    <div class="verity-empty-message">No tasks registered yet.</div>
+</div>
+{% endif %}
+
+{% endblock %}

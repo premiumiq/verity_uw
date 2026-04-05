@@ -1,0 +1,115 @@
+<!--
+  BASE TEMPLATE — UW Demo Business Application
+
+  This is the master layout for the underwriting workflow UI.
+  It has its own sidebar (separate from Verity admin) with
+  business-focused navigation.
+
+  EXTENDING THIS TEMPLATE:
+  Pages override these Jinja2 blocks:
+  - block title        — Browser tab title
+  - block breadcrumbs  — Breadcrumb navigation items
+  - block page_title   — H1 heading below breadcrumbs
+  - block content      — Main page content
+
+  SHARED WITH VERITY ADMIN:
+  - Same PremiumIQ logo and branding
+  - Same Poppins font, Tailwind, HTMX
+  - Same verity.css color palette
+  - Link to Verity admin in sidebar footer
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}UW Demo{% endblock %}</title>
+
+    <!-- Poppins font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+
+    <!-- PremiumIQ brand CSS (same palette as Verity) -->
+    <link rel="stylesheet" href="/static/verity.css">
+</head>
+<body>
+
+<div class="verity-layout">
+
+    <!-- ── LEFT SIDEBAR (UW-specific navigation) ────────────── -->
+    <nav class="verity-sidebar">
+
+        <!-- Brand / Logo area — same PremiumIQ branding -->
+        <div class="verity-sidebar-brand">
+            <img src="/static/images/premiumiq_white_logo.png"
+                 alt="PremiumIQ"
+                 style="height: 28px; margin-bottom: 4px;">
+            <div class="verity-subtitle">UW Demo</div>
+        </div>
+
+        <!-- UW navigation links -->
+        <div class="verity-sidebar-nav">
+
+            <!-- UNDERWRITING section -->
+            <div class="verity-nav-section">Underwriting</div>
+            <a href="/" class="verity-nav-link {% if active_page == 'submissions' %}active{% endif %}">
+                <span class="verity-nav-icon">📋</span> Submissions
+            </a>
+
+            <!-- Future sections (greyed out placeholders) -->
+            <div class="verity-nav-section" style="margin-top: 16px;">Coming Soon</div>
+            <span class="verity-nav-link" style="opacity: 0.35; cursor: default;">
+                <span class="verity-nav-icon">💰</span> Quotes
+            </span>
+            <span class="verity-nav-link" style="opacity: 0.35; cursor: default;">
+                <span class="verity-nav-icon">📄</span> Policies
+            </span>
+
+        </div><!-- end sidebar-nav -->
+
+        <!-- Sidebar footer — link to Verity admin -->
+        <div style="padding: 12px 16px; border-top: 1px solid rgba(255,255,255,0.15);">
+            <a href="http://localhost:8000/admin/"
+               style="color: rgba(255,255,255,0.6); font-size: 0.75rem; text-decoration: none;"
+               onmouseover="this.style.color='#8FAADC'"
+               onmouseout="this.style.color='rgba(255,255,255,0.6)'">
+                Verity Admin →
+            </a>
+            <div style="font-size: 0.6rem; color: rgba(255,255,255,0.3); margin-top: 2px;">
+                Powered by Verity v0.1.0
+            </div>
+        </div>
+
+    </nav><!-- end sidebar -->
+
+
+    <!-- ── MAIN CONTENT AREA ────────────────────────────────── -->
+    <main class="verity-main">
+
+        <!-- Top bar: breadcrumbs + page title -->
+        <div class="verity-topbar">
+            <div class="verity-breadcrumbs">
+                <a href="/">UW Demo</a>
+                {% block breadcrumbs %}{% endblock %}
+            </div>
+            <h1 class="verity-page-title">{% block page_title %}Submissions{% endblock %}</h1>
+        </div>
+
+        <!-- Page content -->
+        <div class="verity-content">
+            {% block content %}{% endblock %}
+        </div>
+
+    </main>
+
+</div>
+
+</body>
+</html>

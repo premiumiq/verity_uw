@@ -1,0 +1,59 @@
+<!--
+  PROMPTS PAGE — Browse all registered prompts with governance tiers
+
+  DATA PASSED BY ROUTE:
+  - prompts: list of dicts from registry.list_prompts()
+-->
+{% extends "base.html" %}
+
+{% block title %}Prompts — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <span>Prompts</span>
+{% endblock %}
+
+{% block page_title %}Prompts{% endblock %}
+
+{% block content %}
+
+{% if prompts %}
+<table class="verity-table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Role</th>
+            <th>Governance Tier</th>
+            <th>Latest Version</th>
+            <th>State</th>
+            <th>Author</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for p in prompts %}
+        <tr>
+            <td style="font-weight: 600;">{{ p.name }}</td>
+            <td><span class="verity-badge verity-badge-agent">{{ p.api_role or '—' }}</span></td>
+            <td>
+                {% if p.governance_tier == 'behavioural' %}
+                    <span class="verity-badge verity-badge-high">behavioural</span>
+                {% elif p.governance_tier == 'contextual' %}
+                    <span class="verity-badge verity-badge-medium">contextual</span>
+                {% else %}
+                    <span class="verity-badge verity-badge-low">{{ p.governance_tier or '—' }}</span>
+                {% endif %}
+            </td>
+            <td>v{{ p.latest_version or 0 }}</td>
+            <td><span class="verity-badge verity-badge-{{ p.lifecycle_state or 'draft' }}">{{ p.lifecycle_state or 'draft' }}</span></td>
+            <td>{{ p.author_name or '—' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="verity-empty">
+    <div class="verity-empty-message">No prompts registered yet.</div>
+</div>
+{% endif %}
+
+{% endblock %}

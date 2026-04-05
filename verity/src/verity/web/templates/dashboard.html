@@ -1,0 +1,125 @@
+<!--
+  DASHBOARD PAGE — Verity Admin Overview
+
+  Shows at-a-glance counts of all governed entities and recent decisions.
+  This is the landing page at /verity/admin/
+
+  DATA PASSED BY ROUTE:
+  - counts: DashboardCounts (agent_count, task_count, prompt_count, etc.)
+  - recent_decisions: list of recent DecisionLog entries
+-->
+{% extends "base.html" %}
+
+{% block title %}Dashboard — Verity Admin{% endblock %}
+
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+
+<!-- ── ENTITY COUNT CARDS ──────────────────────────────────────
+     Grid of cards showing how many agents, tasks, prompts, etc.
+     are registered in Verity. -->
+<div class="verity-stats-grid">
+
+    <!-- Agents card -->
+    <div class="verity-card">
+        <div class="verity-card-header">Agents</div>
+        <div class="verity-card-value">{{ counts.agent_count }}</div>
+        <div class="verity-card-footer">Goal-directed AI systems</div>
+    </div>
+
+    <!-- Tasks card -->
+    <div class="verity-card">
+        <div class="verity-card-header">Tasks</div>
+        <div class="verity-card-value">{{ counts.task_count }}</div>
+        <div class="verity-card-footer">Bounded AI operations</div>
+    </div>
+
+    <!-- Prompts card -->
+    <div class="verity-card">
+        <div class="verity-card-header">Prompts</div>
+        <div class="verity-card-value">{{ counts.prompt_count }}</div>
+        <div class="verity-card-footer">Governed prompt versions</div>
+    </div>
+
+    <!-- Inference Configs card -->
+    <div class="verity-card">
+        <div class="verity-card-header">Inference Configs</div>
+        <div class="verity-card-value">{{ counts.config_count }}</div>
+        <div class="verity-card-footer">Named LLM parameter sets</div>
+    </div>
+
+    <!-- Tools card -->
+    <div class="verity-card">
+        <div class="verity-card-header">Tools</div>
+        <div class="verity-card-value">{{ counts.tool_count }}</div>
+        <div class="verity-card-footer">Registered callable tools</div>
+    </div>
+
+    <!-- Decisions card -->
+    <div class="verity-card">
+        <div class="verity-card-header">Decisions Logged</div>
+        <div class="verity-card-value">{{ counts.total_decisions }}</div>
+        <div class="verity-card-footer">Total AI invocations</div>
+    </div>
+
+    <!-- Overrides card -->
+    <div class="verity-card">
+        <div class="verity-card-header">Overrides</div>
+        <div class="verity-card-value">{{ counts.total_overrides }}</div>
+        <div class="verity-card-footer">Human corrections to AI</div>
+    </div>
+
+    <!-- Open Incidents card -->
+    <div class="verity-card">
+        <div class="verity-card-header">Open Incidents</div>
+        <div class="verity-card-value">{{ counts.open_incidents }}</div>
+        <div class="verity-card-footer">Active issues</div>
+    </div>
+
+</div>
+
+
+<!-- ── RECENT DECISIONS TABLE ──────────────────────────────────
+     Shows the most recent AI invocations logged in Verity.
+     Clicking a row navigates to the full decision detail. -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Recent Decisions</h2>
+
+    {% if recent_decisions %}
+    <table class="verity-table">
+        <thead>
+            <tr>
+                <th>Entity</th>
+                <th>Type</th>
+                <th>Version</th>
+                <th>Step</th>
+                <th>Status</th>
+                <th>Duration</th>
+                <th>When</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for d in recent_decisions %}
+            <tr class="clickable" onclick="window.location='/verity/admin/decisions/{{ d.id }}'">
+                <td>{{ d.entity_name or '—' }}</td>
+                <td><span class="verity-badge verity-badge-{{ d.entity_type }}">{{ d.entity_type }}</span></td>
+                <td>{{ d.version_label or '—' }}</td>
+                <td>{{ d.step_name or '—' }}</td>
+                <td><span class="verity-badge verity-badge-{{ d.status }}">{{ d.status }}</span></td>
+                <td>{{ d.duration_ms or 0 }}ms</td>
+                <td>{{ d.created_at.strftime('%Y-%m-%d %H:%M') if d.created_at else '—' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <!-- Empty state when no decisions have been logged yet -->
+    <div class="verity-empty">
+        <div style="font-size: 2rem; opacity: 0.3;">◉</div>
+        <div class="verity-empty-message">No decisions logged yet. Run an agent or task to see activity here.</div>
+    </div>
+    {% endif %}
+</div>
+
+{% endblock %}
