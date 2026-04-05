@@ -94,15 +94,15 @@ class Verity:
 
     # ── REGISTRY (runtime config resolution) ──────────────────
 
-    async def get_agent_config(self, agent_name: str):
-        """Resolve the full champion config for a named agent."""
+    async def get_agent_config(self, agent_name: str, effective_date=None, version_id=None):
+        """Resolve agent config. Default=current champion. Pass effective_date for date-pinning or version_id for direct lookup."""
         await self.ensure_connected()
-        return await self.registry.get_agent_config(agent_name)
+        return await self.registry.get_agent_config(agent_name, effective_date=effective_date, version_id=version_id)
 
-    async def get_task_config(self, task_name: str):
-        """Resolve the full champion config for a named task."""
+    async def get_task_config(self, task_name: str, effective_date=None, version_id=None):
+        """Resolve task config. Default=current champion. Pass effective_date for date-pinning or version_id for direct lookup."""
         await self.ensure_connected()
-        return await self.registry.get_task_config(task_name)
+        return await self.registry.get_task_config(task_name, effective_date=effective_date, version_id=version_id)
 
     # ── EXECUTION (agent + task + pipeline invocation) ──────────
 

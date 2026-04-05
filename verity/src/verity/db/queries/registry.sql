@@ -39,6 +39,92 @@ JOIN inference_config ic ON ic.id = av.inference_config_id
 WHERE a.name = %(agent_name)s;
 
 
+-- name: get_agent_champion_at_date
+-- Resolve the champion version that was active at a specific date.
+-- SCD Type 2: valid_from <= effective_date AND valid_to > effective_date
+-- Active champions have valid_to = 9999-12-31 (sentinel). No NULL checks needed.
+SELECT
+    a.id AS agent_id, a.name, a.display_name, a.description,
+    a.materiality_tier, a.purpose, a.domain,
+    a.business_context, a.known_limitations,
+    av.id AS agent_version_id, av.version_label, av.lifecycle_state,
+    av.output_schema, av.authority_thresholds, av.mock_mode_enabled,
+    av.shadow_traffic_pct, av.challenger_traffic_pct,
+    av.valid_from, av.valid_to,
+    ic.id AS inference_config_id, ic.name AS inference_config_name,
+    ic.model_name, ic.temperature, ic.max_tokens, ic.top_p, ic.top_k,
+    ic.stop_sequences, ic.extended_params
+FROM agent a
+JOIN agent_version av ON av.agent_id = a.id
+    AND av.lifecycle_state IN ('champion', 'deprecated')
+    AND av.valid_from IS NOT NULL
+    AND av.valid_from <= %(effective_date)s
+    AND av.valid_to > %(effective_date)s
+JOIN inference_config ic ON ic.id = av.inference_config_id
+WHERE a.name = %(agent_name)s
+LIMIT 1;
+
+
+-- name: get_agent_version_by_id
+-- Direct version lookup for version-pinned execution.
+SELECT
+    a.id AS agent_id, a.name, a.display_name, a.description,
+    a.materiality_tier, a.purpose, a.domain,
+    a.business_context, a.known_limitations,
+    av.id AS agent_version_id, av.version_label, av.lifecycle_state,
+    av.output_schema, av.authority_thresholds, av.mock_mode_enabled,
+    av.shadow_traffic_pct, av.challenger_traffic_pct,
+    av.valid_from, av.valid_to,
+    ic.id AS inference_config_id, ic.name AS inference_config_name,
+    ic.model_name, ic.temperature, ic.max_tokens, ic.top_p, ic.top_k,
+    ic.stop_sequences, ic.extended_params
+FROM agent_version av
+JOIN agent a ON a.id = av.agent_id
+JOIN inference_config ic ON ic.id = av.inference_config_id
+WHERE av.id = %(version_id)s::uuid;
+
+
+-- name: get_task_champion_at_date
+SELECT
+    t.id AS task_id, t.name, t.display_name, t.description,
+    t.capability_type, t.materiality_tier, t.purpose, t.domain,
+    t.input_schema AS task_input_schema, t.output_schema AS task_output_schema,
+    t.business_context, t.known_limitations,
+    tv.id AS task_version_id, tv.version_label, tv.lifecycle_state,
+    tv.output_schema AS version_output_schema, tv.mock_mode_enabled,
+    tv.valid_from, tv.valid_to,
+    ic.id AS inference_config_id, ic.name AS inference_config_name,
+    ic.model_name, ic.temperature, ic.max_tokens, ic.top_p, ic.top_k,
+    ic.stop_sequences, ic.extended_params
+FROM task t
+JOIN task_version tv ON tv.task_id = t.id
+    AND tv.lifecycle_state IN ('champion', 'deprecated')
+    AND tv.valid_from IS NOT NULL
+    AND tv.valid_from <= %(effective_date)s
+    AND tv.valid_to > %(effective_date)s
+JOIN inference_config ic ON ic.id = tv.inference_config_id
+WHERE t.name = %(task_name)s
+LIMIT 1;
+
+
+-- name: get_task_version_by_id
+SELECT
+    t.id AS task_id, t.name, t.display_name, t.description,
+    t.capability_type, t.materiality_tier, t.purpose, t.domain,
+    t.input_schema AS task_input_schema, t.output_schema AS task_output_schema,
+    t.business_context, t.known_limitations,
+    tv.id AS task_version_id, tv.version_label, tv.lifecycle_state,
+    tv.output_schema AS version_output_schema, tv.mock_mode_enabled,
+    tv.valid_from, tv.valid_to,
+    ic.id AS inference_config_id, ic.name AS inference_config_name,
+    ic.model_name, ic.temperature, ic.max_tokens, ic.top_p, ic.top_k,
+    ic.stop_sequences, ic.extended_params
+FROM task_version tv
+JOIN task t ON t.id = tv.task_id
+JOIN inference_config ic ON ic.id = tv.inference_config_id
+WHERE tv.id = %(version_id)s::uuid;
+
+
 -- name: get_agent_by_name
 SELECT
     a.*,

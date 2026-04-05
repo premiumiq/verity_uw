@@ -131,27 +131,84 @@ This requires the system prompt to be passed as a list of content blocks rather 
 
 ---
 
-## FC-8: Version-Pinned Execution
+## FC-8: Version Management, Date Pinning & Version-Pinned Execution
 
-**Gap:** `get_agent_config()` and `get_task_config()` always resolve the current champion version. There is no way to execute a specific prior version — needed for audit reproducibility ("re-run this decision using the same agent version that originally produced it").
+**STATUS: IMPLEMENTING NOW**
 
-**Design:** Add `get_agent_config_by_version(version_id)` and `get_task_config_by_version(version_id)` to the registry. The execution engine gains an optional `version_id` parameter:
+### Problem
+
+1. `get_agent_config()` resolves via `current_champion_version_id` pointer — ignores dates entirely. No temporal awareness.
+2. No SCD Type 2 treatment: when a new champion is promoted, the old champion's `valid_to` is not always set correctly. Multiple champions could theoretically coexist.
+3. No way to execute a specific prior version for audit reproducibility.
+4. `prompt_version` has no `valid_from`/`valid_to` fields.
+5. UI shows only the current champion — no way to browse all versions with their validity periods.
+
+### Design
+
+**SCD Type 2 temporal management for all versioned assets:**
+
+- `valid_from` = timestamp when this version became champion
+- `valid_to` = timestamp when this version was superseded (NULL = currently active)
+- At any point in time, exactly ONE champion version has `valid_to IS NULL`
+- Lifecycle `promote()` enforces this: sets `valid_from=NOW()` on new champion, `valid_to=NOW()` on old champion
+
+**Date-based resolution (version pinning is really date pinning):**
 
 ```python
-# Run triage_agent at version 1.0.0 (not current champion)
-result = await verity.execute_agent(
-    agent_name="triage_agent",
-    context={...},
-    version_id=prior_decision.entity_version_id,  # Pin to this version
-    mock=MockContext.from_decision_log(prior, mock_llm=False, mock_tools=True),
-)
+# Default: resolve champion as of NOW
+config = await verity.get_agent_config("triage_agent")
+
+# Date-pinned: resolve champion as of a specific date
+config = await verity.get_agent_config("triage_agent", effective_date=datetime(2026, 3, 15))
+
+# Version-pinned: resolve a specific version by ID (bypasses date logic)
+config = await verity.get_agent_config_by_version(version_id)
 ```
 
-This resolves the pinned version's prompts, tools, and inference config — not the current champion's. Combined with `MockContext.from_decision_log(mock_llm=False)`, this enables full audit re-testing: "run the exact same version with the exact same tool data, let Claude reason fresh, compare output."
+**SQL resolution logic:**
+```sql
+-- Current champion (effective_date = NOW)
+WHERE a.name = %(agent_name)s
+  AND av.lifecycle_state = 'champion'
+  AND av.valid_from <= %(effective_date)s
+  AND (av.valid_to IS NULL OR av.valid_to > %(effective_date)s)
 
-**Schema support:** No changes needed — version IDs already exist. Registry just needs a second lookup path that takes `version_id` instead of resolving champion.
+-- Direct version lookup (no date logic)
+WHERE av.id = %(version_id)s
+```
 
-**Priority:** High — required for regulatory audit reproducibility (SR 11-7).
+**Schema changes:**
+- Add `valid_from`, `valid_to` to `prompt_version` (agent_version and task_version already have them)
+- Ensure lifecycle promotion functions correctly manage `valid_from`/`valid_to` on all versioned tables
+- Pipeline_version already has `valid_from`/`valid_to`
+
+**Execution engine changes:**
+- `execute_agent()`, `execute_task()` gain optional `effective_date` and `version_id` parameters
+- `effective_date` resolves the champion that was active at that date
+- `version_id` resolves a specific version directly (for audit replay)
+- Both pass through to registry resolution
+
+**UI changes:**
+- All version tables show `valid_from` and `valid_to` columns
+- Version history pages show the full temporal timeline
+- Detail pages show which version was active at any given date
+
+**Audit reproducibility workflow:**
+```python
+# 1. Get a prior decision
+prior = await verity.get_decision(decision_id)
+
+# 2. Re-run using the SAME version that originally produced it
+result = await verity.execute_agent(
+    agent_name="triage_agent",
+    context=original_context,
+    version_id=prior.entity_version_id,  # Pin to exact version
+    mock=MockContext.from_decision_log(prior, mock_llm=False, mock_tools=True),
+)
+# Claude runs fresh with the old prompt, old config, old tools — same controlled data
+```
+
+**Priority:** High — required for regulatory audit reproducibility (SR 11-7), and foundational for all UI version browsing.
 
 ---
 
@@ -251,3 +308,96 @@ The `agent_decision_log.pipeline_run_id` groups steps within one run. The `execu
 This is the key governance demo moment: "let me show you how we promote a new model version with human-in-the-loop approval gates."
 
 **Priority:** Medium — high demo value for CIO audiences, but the SDK methods already work (used by seed script).
+
+---
+
+## FC-12: Version Composition Immutability
+
+**Gap:** Nothing currently prevents mutation of an agent version's composition (prompt assignments, tool authorizations, inference config) after creation. The schema allows someone to change which prompts are assigned to agent v1.0.0 even after it has been promoted to champion. This violates the governance principle that a champion version is a fully validated, frozen snapshot.
+
+**Governance Rationale:**
+
+An agent version is not just a version number — it is a **complete, frozen composition** of:
+- Prompt versions (system + user, specific version numbers)
+- Inference configuration (model, temperature, max_tokens)
+- Tool authorizations (which tools, with what permissions)
+- Authority thresholds (HITL triggers, confidence thresholds)
+- Output schema
+
+Any change to any of these components **is a new version**. If you want to use a different prompt, you create agent v1.1.0 that references the new prompt version, and promote it through the lifecycle (draft → candidate → staging → champion). This ensures:
+
+1. Every production change is tested before deployment
+2. The audit trail can reconstruct exactly what ran — the agent version ID resolves to a frozen composition
+3. Version pinning and date pinning work correctly — the composition at any point in time is deterministic
+4. SR 11-7 compliance: "the model that was validated is the model that runs in production"
+
+**Design:**
+
+1. **Enforce immutability in the SDK:** Once an agent_version or task_version leaves `draft` state (i.e., is promoted to `candidate` or beyond), reject any attempt to modify its prompt assignments, tool authorizations, or inference config reference.
+
+```python
+# In registry.py assign_prompt():
+version = await self._get_version(entity_type, entity_version_id)
+if version["lifecycle_state"] != "draft":
+    raise ValueError(
+        f"Cannot modify prompt assignments for version in '{version['lifecycle_state']}' state. "
+        f"Create a new version to change prompts."
+    )
+
+# Same check in authorize_agent_tool(), authorize_task_tool()
+```
+
+2. **Database constraint (optional additional safety):** Add a trigger that prevents UPDATE/INSERT on `entity_prompt_assignment` and `agent_version_tool` when the referenced version is not in `draft` state. This provides defense-in-depth beyond the SDK check.
+
+3. **UI enforcement:** The lifecycle management UI should not offer prompt reassignment or tool changes for any version beyond `draft`. The "Edit" controls should be disabled/hidden for candidate, staging, shadow, challenger, and champion versions.
+
+**Audit Replay Under This Model:**
+
+When replaying a prior decision for audit:
+1. Pin the agent version (by ID or by date) — resolves the frozen composition
+2. The prompt versions, inference config, and tools are exactly what was validated
+3. Mock the tools with `MockContext.from_decision_log(prior, mock_llm=False, mock_tools=True)` — feed the same data
+4. Claude runs fresh with the original prompts and config
+5. Compare output to the original — verifies reproducibility
+6. The `prompt_version_ids` stored in the decision log serves as evidence of which exact prompts were used
+
+**Priority:** High — foundational for audit integrity. Should be implemented before any production use.
+
+---
+
+## FC-13: Tool Versioning
+
+**Gap:** Tools currently have no version table. The `tool` table represents the current state only. There is no `tool_version` table analogous to `agent_version` or `task_version`. This means:
+- Tool changes are not tracked (no version history)
+- Tool implementations cannot be version-pinned
+- The version composition immutability principle (FC-12) cannot extend to tools
+- Audit replay cannot verify that the same tool implementation was used
+
+**Design:** Add `tool_version` table following the same pattern as `agent_version`:
+
+```sql
+CREATE TABLE tool_version (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tool_id             UUID NOT NULL REFERENCES tool(id),
+    major_version       INTEGER NOT NULL DEFAULT 1,
+    minor_version       INTEGER NOT NULL DEFAULT 0,
+    patch_version       INTEGER NOT NULL DEFAULT 0,
+    version_label       VARCHAR(20) GENERATED ALWAYS AS
+                        (major_version::text || '.' || minor_version::text || '.' || patch_version::text) STORED,
+    lifecycle_state     lifecycle_state NOT NULL DEFAULT 'draft',
+    implementation_path VARCHAR(500) NOT NULL,
+    input_schema        JSONB NOT NULL,
+    output_schema       JSONB NOT NULL,
+    mock_responses      JSONB DEFAULT '{}',
+    valid_from          TIMESTAMP,
+    valid_to            TIMESTAMP,
+    change_summary      TEXT,
+    developer_name      VARCHAR(200),
+    created_at          TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT uq_tool_version UNIQUE (tool_id, major_version, minor_version, patch_version)
+);
+```
+
+Agent/task version tool authorizations would then reference `tool_version_id` instead of `tool_id`, completing the frozen composition model.
+
+**Priority:** Medium — needed for full version-pinned execution and audit completeness. Not blocking for demo.

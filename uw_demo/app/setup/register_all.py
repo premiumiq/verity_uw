@@ -405,14 +405,20 @@ async def seed_prompts(verity: Verity, agents: dict, tasks: dict) -> dict:
 # ══════════════════════════════════════════════════════════════
 
 async def seed_agent_versions(verity: Verity, agents: dict, configs: dict) -> dict:
-    """Register agent versions. Returns {(name, version_label): id}."""
+    """Register agent versions. Returns {(name, version_label): id}.
+
+    All versions start as draft. Promotions go through lifecycle functions.
+    v0.9.0 is promoted to champion first, then v1.0.0 is promoted which
+    auto-deprecates v0.9.0 (setting its valid_to via lifecycle).
+    No hardcoded dates. No raw SQL. All temporal fields managed by lifecycle.
+    """
     versions = {}
 
-    # Triage agent v0.9.0 (deprecated) — gives version history
+    # ── Triage agent v0.9.0 — created as draft, will be promoted then superseded
     r = await verity.registry.register_agent_version(
         agent_id=agents["triage_agent"]["id"],
         major_version=0, minor_version=9, patch_version=0,
-        lifecycle_state="deprecated", channel="production",
+        lifecycle_state="draft", channel="development",
         inference_config_id=configs["triage_balanced"],
         output_schema=None, authority_thresholds=json.dumps({"requires_hitl_above_premium": 500000}),
         mock_mode_enabled=False,
@@ -420,9 +426,16 @@ async def seed_agent_versions(verity: Verity, agents: dict, configs: dict) -> di
         change_type="major_redesign",
     )
     versions[("triage_agent", "0.9.0")] = r["id"]
-    print(f"  + triage_agent v0.9.0 (deprecated)")
+    print(f"  + triage_agent v0.9.0 (draft)")
 
-    # Triage agent v1.0.0 (will be promoted to champion)
+    # Promote v0.9.0: draft → candidate → champion (lifecycle sets valid_from, valid_to=2999)
+    await verity.promote(entity_type="agent", entity_version_id=versions[("triage_agent", "0.9.0")],
+        target_state="candidate", approver_name="Dev Team", rationale="Development complete")
+    await verity.promote(entity_type="agent", entity_version_id=versions[("triage_agent", "0.9.0")],
+        target_state="champion", approver_name="Dev Team", rationale="Initial champion")
+    print(f"  + triage_agent v0.9.0 → champion")
+
+    # ── Triage agent v1.0.0 — will supersede v0.9.0
     r = await verity.registry.register_agent_version(
         agent_id=agents["triage_agent"]["id"],
         major_version=1, minor_version=0, patch_version=0,
@@ -435,9 +448,9 @@ async def seed_agent_versions(verity: Verity, agents: dict, configs: dict) -> di
         change_type="new_capability",
     )
     versions[("triage_agent", "1.0.0")] = r["id"]
-    print(f"  + triage_agent v1.0.0 (draft → will promote)")
+    print(f"  + triage_agent v1.0.0 (draft)")
 
-    # Appetite agent v1.0.0
+    # ── Appetite agent v1.0.0
     r = await verity.registry.register_agent_version(
         agent_id=agents["appetite_agent"]["id"],
         major_version=1, minor_version=0, patch_version=0,
@@ -450,29 +463,36 @@ async def seed_agent_versions(verity: Verity, agents: dict, configs: dict) -> di
         change_type="major_redesign",
     )
     versions[("appetite_agent", "1.0.0")] = r["id"]
-    print(f"  + appetite_agent v1.0.0 (draft → will promote)")
+    print(f"  + appetite_agent v1.0.0 (draft)")
 
     return versions
 
 
 async def seed_task_versions(verity: Verity, tasks: dict, configs: dict) -> dict:
-    """Register task versions. Returns {(name, version_label): id}."""
+    """Register task versions. Same pattern: v0.9.0 promoted first, then v1.0.0 supersedes it."""
     versions = {}
 
-    # Document classifier v0.9.0 (deprecated)
+    # ── Document classifier v0.9.0 — draft, then promoted to champion
     r = await verity.registry.register_task_version(
         task_id=tasks["document_classifier"]["id"],
         major_version=0, minor_version=9, patch_version=0,
-        lifecycle_state="deprecated", channel="production",
+        lifecycle_state="draft", channel="development",
         inference_config_id=configs["classification_strict"],
         output_schema=None, mock_mode_enabled=False,
         developer_name="Dev Team", change_summary="Initial classifier with 6 document types",
         change_type="major_redesign",
     )
     versions[("document_classifier", "0.9.0")] = r["id"]
-    print(f"  + document_classifier v0.9.0 (deprecated)")
+    print(f"  + document_classifier v0.9.0 (draft)")
 
-    # Document classifier v1.0.0
+    # Promote v0.9.0 to champion
+    await verity.promote(entity_type="task", entity_version_id=versions[("document_classifier", "0.9.0")],
+        target_state="candidate", approver_name="Dev Team", rationale="Development complete")
+    await verity.promote(entity_type="task", entity_version_id=versions[("document_classifier", "0.9.0")],
+        target_state="champion", approver_name="Dev Team", rationale="Initial champion")
+    print(f"  + document_classifier v0.9.0 → champion")
+
+    # ── Document classifier v1.0.0 — will supersede v0.9.0
     r = await verity.registry.register_task_version(
         task_id=tasks["document_classifier"]["id"],
         major_version=1, minor_version=0, patch_version=0,
@@ -484,9 +504,9 @@ async def seed_task_versions(verity: Verity, tasks: dict, configs: dict) -> dict
         change_type="new_capability",
     )
     versions[("document_classifier", "1.0.0")] = r["id"]
-    print(f"  + document_classifier v1.0.0 (draft → will promote)")
+    print(f"  + document_classifier v1.0.0 (draft)")
 
-    # Field extractor v1.0.0
+    # ── Field extractor v1.0.0
     r = await verity.registry.register_task_version(
         task_id=tasks["field_extractor"]["id"],
         major_version=1, minor_version=0, patch_version=0,
@@ -498,7 +518,7 @@ async def seed_task_versions(verity: Verity, tasks: dict, configs: dict) -> dict
         change_type="major_redesign",
     )
     versions[("field_extractor", "1.0.0")] = r["id"]
-    print(f"  + field_extractor v1.0.0 (draft → will promote)")
+    print(f"  + field_extractor v1.0.0 (draft)")
 
     return versions
 
@@ -508,21 +528,45 @@ async def seed_task_versions(verity: Verity, tasks: dict, configs: dict) -> dict
 # ══════════════════════════════════════════════════════════════
 
 async def seed_prompt_versions(verity: Verity, prompts: dict) -> dict:
-    """Register prompt versions. Returns {(prompt_name, version_number): id}."""
+    """Register prompt versions and promote through lifecycle.
+
+    All versions start as draft. Promotions go through lifecycle functions.
+    For prompts with 2 versions: v1 is promoted to champion first, then v2
+    is promoted which auto-deprecates v1.
+    """
     pv = {}
 
-    # ── Triage agent system prompt — 2 versions (deprecated + current)
-    r = await verity.registry.register_prompt_version(
-        prompt_id=prompts["triage_agent_system"], version_number=1,
-        content="You are a risk assessment assistant. Given a submission, evaluate the risk level and provide a Green/Amber/Red score with brief reasoning.",
-        api_role="system", governance_tier="behavioural", lifecycle_state="deprecated",
-        change_summary="Initial basic system prompt", sensitivity_level="high", author_name="Dev Team",
-    )
-    pv[("triage_agent_system", 1)] = r["id"]
+    async def _register_and_promote(prompt_id, version_number, content, api_role, governance_tier,
+                                     change_summary, sensitivity_level, author_name, key):
+        """Helper: register a prompt version as draft, then promote to champion."""
+        r = await verity.registry.register_prompt_version(
+            prompt_id=prompt_id, version_number=version_number,
+            content=content, api_role=api_role, governance_tier=governance_tier,
+            lifecycle_state="draft",  # Always start as draft
+            change_summary=change_summary, sensitivity_level=sensitivity_level,
+            author_name=author_name,
+        )
+        version_id = r["id"]
+        pv[key] = version_id
+        # Promote: draft → candidate → champion
+        await verity.promote(entity_type="prompt", entity_version_id=version_id,
+            target_state="candidate", approver_name="Dev Team", rationale="Development complete")
+        await verity.promote(entity_type="prompt", entity_version_id=version_id,
+            target_state="champion", approver_name=author_name, rationale=change_summary)
+        return version_id
 
-    r = await verity.registry.register_prompt_version(
-        prompt_id=prompts["triage_agent_system"], version_number=2,
-        content="""You are a specialist underwriting risk triage agent for commercial lines insurance (D&O and GL). Your role is to synthesise submission data, account enrichment, loss history, and underwriting guidelines into a structured risk assessment.
+    # ── Triage agent system prompt — v1 promoted then superseded by v2
+    await _register_and_promote(
+        prompts["triage_agent_system"], 1,
+        "You are a risk assessment assistant. Given a submission, evaluate the risk level and provide a Green/Amber/Red score with brief reasoning.",
+        "system", "behavioural",
+        "Initial basic system prompt", "high", "Dev Team",
+        ("triage_agent_system", 1),
+    )
+    # v2 promotion auto-deprecates v1
+    await _register_and_promote(
+        prompts["triage_agent_system"], 2,
+        """You are a specialist underwriting risk triage agent for commercial lines insurance (D&O and GL). Your role is to synthesise submission data, account enrichment, loss history, and underwriting guidelines into a structured risk assessment.
 
 You MUST call the available tools to retrieve all relevant context before making your assessment. Do not assess based on partial information.
 
@@ -541,25 +585,24 @@ Consider these dimensions:
 4. Corporate governance (board composition, D&O history)
 5. Regulatory exposure (investigations, enforcement actions)
 6. Market conditions (competitive landscape, rate adequacy)""",
-        api_role="system", governance_tier="behavioural", lifecycle_state="champion",
-        change_summary="Comprehensive system prompt with multi-factor assessment framework, structured output schema, and tool-use instructions",
-        sensitivity_level="high", author_name="Sarah Chen",
+        "system", "behavioural",
+        "Comprehensive system prompt with multi-factor assessment framework", "high", "Sarah Chen",
+        ("triage_agent_system", 2),
     )
-    pv[("triage_agent_system", 2)] = r["id"]
 
     # ── Triage agent context template
-    r = await verity.registry.register_prompt_version(
-        prompt_id=prompts["triage_agent_context"], version_number=1,
-        content="Please assess the following submission. Use the available tools to retrieve full context before making your assessment.\n\nSubmission ID: {{submission_id}}\nLine of Business: {{lob}}\nNamed Insured: {{named_insured}}",
-        api_role="user", governance_tier="contextual", lifecycle_state="champion",
-        change_summary="Initial context template with submission identifiers", sensitivity_level="medium", author_name="Dev Team",
+    await _register_and_promote(
+        prompts["triage_agent_context"], 1,
+        "Please assess the following submission. Use the available tools to retrieve full context before making your assessment.\n\nSubmission ID: {{submission_id}}\nLine of Business: {{lob}}\nNamed Insured: {{named_insured}}",
+        "user", "contextual",
+        "Initial context template with submission identifiers", "medium", "Dev Team",
+        ("triage_agent_context", 1),
     )
-    pv[("triage_agent_context", 1)] = r["id"]
 
     # ── Appetite agent system prompt
-    r = await verity.registry.register_prompt_version(
-        prompt_id=prompts["appetite_agent_system"], version_number=1,
-        content="""You are an underwriting appetite assessment agent. Your role is to determine whether a submission falls within the company's underwriting appetite by comparing the submission's characteristics against the relevant underwriting guidelines document.
+    await _register_and_promote(
+        prompts["appetite_agent_system"], 1,
+        """You are an underwriting appetite assessment agent. Your role is to determine whether a submission falls within the company's underwriting appetite by comparing the submission's characteristics against the relevant underwriting guidelines document.
 
 You MUST:
 1. Call get_underwriting_guidelines to retrieve the relevant guidelines
@@ -573,66 +616,64 @@ Your output must be valid JSON with these fields:
 - reasoning: Plain language explanation
 - guideline_citations: Array of {section, criterion, submission_value, meets_criterion}
 - exceptions_needed: Array of guideline exceptions that would need approval""",
-        api_role="system", governance_tier="behavioural", lifecycle_state="champion",
-        change_summary="Initial system prompt with guidelines citation framework", sensitivity_level="high", author_name="Sarah Chen",
+        "system", "behavioural",
+        "Initial system prompt with guidelines citation framework", "high", "Sarah Chen",
+        ("appetite_agent_system", 1),
     )
-    pv[("appetite_agent_system", 1)] = r["id"]
 
     # ── Appetite agent context template
-    r = await verity.registry.register_prompt_version(
-        prompt_id=prompts["appetite_agent_context"], version_number=1,
-        content="Please assess the appetite for the following submission.\n\nSubmission ID: {{submission_id}}\nLine of Business: {{lob}}\nNamed Insured: {{named_insured}}",
-        api_role="user", governance_tier="contextual", lifecycle_state="champion",
-        change_summary="Initial context template", sensitivity_level="medium", author_name="Dev Team",
+    await _register_and_promote(
+        prompts["appetite_agent_context"], 1,
+        "Please assess the appetite for the following submission.\n\nSubmission ID: {{submission_id}}\nLine of Business: {{lob}}\nNamed Insured: {{named_insured}}",
+        "user", "contextual",
+        "Initial context template", "medium", "Dev Team",
+        ("appetite_agent_context", 1),
     )
-    pv[("appetite_agent_context", 1)] = r["id"]
 
-    # ── Document classifier system prompt — 2 versions
-    r = await verity.registry.register_prompt_version(
-        prompt_id=prompts["doc_classifier_instruction"], version_number=1,
-        content="Classify the document into one of: acord_855, acord_125, loss_runs, supplemental_do, supplemental_gl, other. Return JSON with document_type and confidence.",
-        api_role="system", governance_tier="behavioural", lifecycle_state="deprecated",
-        change_summary="Initial simple classifier instruction", sensitivity_level="high", author_name="Dev Team",
+    # ── Document classifier instruction — v1 promoted then superseded by v2
+    await _register_and_promote(
+        prompts["doc_classifier_instruction"], 1,
+        "Classify the document into one of: acord_855, acord_125, loss_runs, supplemental_do, supplemental_gl, other. Return JSON with document_type and confidence.",
+        "system", "behavioural",
+        "Initial simple classifier instruction", "high", "Dev Team",
+        ("doc_classifier_instruction", 1),
     )
-    pv[("doc_classifier_instruction", 1)] = r["id"]
-
-    r = await verity.registry.register_prompt_version(
-        prompt_id=prompts["doc_classifier_instruction"], version_number=2,
-        content="You are an insurance document classifier. Classify the provided document into exactly one of these types: acord_855, acord_125, loss_runs, supplemental_do, supplemental_gl, financial_statements, board_resolution, other. Return only valid JSON with document_type, confidence (0.0-1.0), and classification_notes. Base classification only on document content — never on filename.",
-        api_role="system", governance_tier="behavioural", lifecycle_state="champion",
-        change_summary="Added financial_statements and board_resolution types, explicit instruction to ignore filename, added classification_notes field",
-        sensitivity_level="high", author_name="James Okafor",
+    await _register_and_promote(
+        prompts["doc_classifier_instruction"], 2,
+        "You are an insurance document classifier. Classify the provided document into exactly one of these types: acord_855, acord_125, loss_runs, supplemental_do, supplemental_gl, financial_statements, board_resolution, other. Return only valid JSON with document_type, confidence (0.0-1.0), and classification_notes. Base classification only on document content — never on filename.",
+        "system", "behavioural",
+        "Added financial_statements and board_resolution types, explicit instruction to ignore filename", "high", "James Okafor",
+        ("doc_classifier_instruction", 2),
     )
-    pv[("doc_classifier_instruction", 2)] = r["id"]
 
     # ── Document classifier input template
-    r = await verity.registry.register_prompt_version(
-        prompt_id=prompts["doc_classifier_input"], version_number=1,
-        content="Document text:\n{{document_text}}",
-        api_role="user", governance_tier="formatting", lifecycle_state="champion",
-        change_summary="Simple document text input wrapper", sensitivity_level="low", author_name="Dev Team",
+    await _register_and_promote(
+        prompts["doc_classifier_input"], 1,
+        "Document text:\n{{document_text}}",
+        "user", "formatting",
+        "Simple document text input wrapper", "low", "Dev Team",
+        ("doc_classifier_input", 1),
     )
-    pv[("doc_classifier_input", 1)] = r["id"]
 
     # ── Field extractor system prompt
-    r = await verity.registry.register_prompt_version(
-        prompt_id=prompts["field_extractor_instruction"], version_number=1,
-        content="You are a specialist extraction system for D&O insurance applications (ACORD 855 form). Extract the following fields: named_insured, fein, entity_type, state_of_incorporation, annual_revenue, employee_count, board_size, independent_directors, effective_date, expiration_date, limits_requested, retention_requested, prior_carrier, prior_premium, securities_class_action_history, regulatory_investigation_history, merger_acquisition_activity, ipo_planned, going_concern_opinion, non_renewed_by_carrier. For each field: extract the value exactly as stated, assign confidence (0.0-1.0), and if not found, set to null with confidence 0.0. Never invent values. Return only valid JSON.",
-        api_role="system", governance_tier="behavioural", lifecycle_state="champion",
-        change_summary="Initial extraction instruction with 20-field schema", sensitivity_level="high", author_name="James Okafor",
+    await _register_and_promote(
+        prompts["field_extractor_instruction"], 1,
+        "You are a specialist extraction system for D&O insurance applications (ACORD 855 form). Extract the following fields: named_insured, fein, entity_type, state_of_incorporation, annual_revenue, employee_count, board_size, independent_directors, effective_date, expiration_date, limits_requested, retention_requested, prior_carrier, prior_premium, securities_class_action_history, regulatory_investigation_history, merger_acquisition_activity, ipo_planned, going_concern_opinion, non_renewed_by_carrier. For each field: extract the value exactly as stated, assign confidence (0.0-1.0), and if not found, set to null with confidence 0.0. Never invent values. Return only valid JSON.",
+        "system", "behavioural",
+        "Initial extraction instruction with 20-field schema", "high", "James Okafor",
+        ("field_extractor_instruction", 1),
     )
-    pv[("field_extractor_instruction", 1)] = r["id"]
 
     # ── Field extractor input template
-    r = await verity.registry.register_prompt_version(
-        prompt_id=prompts["field_extractor_input"], version_number=1,
-        content="ACORD 855 document text:\n{{document_text}}",
-        api_role="user", governance_tier="formatting", lifecycle_state="champion",
-        change_summary="Simple ACORD 855 text input wrapper", sensitivity_level="low", author_name="Dev Team",
+    await _register_and_promote(
+        prompts["field_extractor_input"], 1,
+        "ACORD 855 document text:\n{{document_text}}",
+        "user", "formatting",
+        "Simple ACORD 855 text input wrapper", "low", "Dev Team",
+        ("field_extractor_input", 1),
     )
-    pv[("field_extractor_input", 1)] = r["id"]
 
-    print(f"  + {len(pv)} prompt versions registered")
+    print(f"  + {len(pv)} prompt versions registered and promoted via lifecycle")
     return pv
 
 
@@ -724,19 +765,21 @@ async def seed_pipeline(verity: Verity) -> dict:
          "error_policy": "continue_with_flag"},
     ]
 
+    # Register pipeline version as draft, then promote through lifecycle
     pv = await verity.registry.register_pipeline_version(
-        pipeline_id=pipeline_id, version_number=1, lifecycle_state="champion",
+        pipeline_id=pipeline_id, version_number=1, lifecycle_state="draft",
         steps=steps, change_summary="Initial 4-step pipeline: classify → extract → triage → appetite",
         developer_name="Dev Team",
     )
 
-    # Set the champion pointer on the pipeline so get_pipeline_by_name() resolves steps
-    await verity.db.execute_raw(
-        "UPDATE pipeline SET current_champion_version_id = %(version_id)s WHERE id = %(pipeline_id)s",
-        {"version_id": str(pv["id"]), "pipeline_id": str(pipeline_id)},
-    )
+    # Promote: draft → candidate → champion (lifecycle sets champion pointer + temporal fields)
+    await verity.promote(entity_type="pipeline", entity_version_id=pv["id"],
+        target_state="candidate", approver_name="Dev Team", rationale="Pipeline development complete")
+    await verity.promote(entity_type="pipeline", entity_version_id=pv["id"],
+        target_state="champion", approver_name="Sarah Chen, Chief Actuary",
+        rationale="Pipeline validated end-to-end")
 
-    print(f"  + pipeline: uw_submission_pipeline (4 steps)")
+    print(f"  + pipeline: uw_submission_pipeline (4 steps, promoted via lifecycle)")
     return {"id": pipeline_id}
 
 
@@ -906,7 +949,16 @@ async def seed_test_suites(verity, agents, tasks) -> dict:
 # ══════════════════════════════════════════════════════════════
 
 async def promote_to_champion(verity, agent_versions, task_versions, agents, tasks):
-    """Promote all v1.0.0 versions: draft → candidate → champion."""
+    """Promote all v1.0.0 versions: draft → candidate → champion.
+
+    This auto-deprecates the v0.9.0 champions (which were promoted earlier
+    in seed_agent_versions/seed_task_versions). The lifecycle functions
+    handle all valid_from/valid_to fields — no hardcoded dates.
+
+    After this step:
+    - v0.9.0 versions: lifecycle_state='deprecated', valid_to=NOW()
+    - v1.0.0 versions: lifecycle_state='champion', valid_from=NOW(), valid_to=2999-12-31
+    """
     promotions = [
         ("agent", agent_versions[("triage_agent", "1.0.0")], "triage_agent"),
         ("agent", agent_versions[("appetite_agent", "1.0.0")], "appetite_agent"),
@@ -921,14 +973,14 @@ async def promote_to_champion(verity, agent_versions, task_versions, agents, tas
             target_state="candidate", approver_name="Dev Team",
             rationale=f"Development complete for {name}",
         )
-        # Candidate → Champion (fast-track for demo seeding)
+        # Candidate → Champion (auto-deprecates prior champion v0.9.0 if exists)
         await verity.promote(
             entity_type=entity_type, entity_version_id=version_id,
             target_state="champion", approver_name="Sarah Chen, Chief Actuary",
             rationale=f"Ground truth validation passed for {name}. Model card approved.",
             ground_truth_reviewed=True, model_card_reviewed=True,
         )
-        print(f"  + promoted {name} v1.0.0 → champion")
+        print(f"  + promoted {name} v1.0.0 → champion (v0.9.0 auto-deprecated)")
 
 
 # ══════════════════════════════════════════════════════════════

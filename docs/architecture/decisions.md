@@ -31,3 +31,28 @@
 ## AD-008: Project docs in repo, not user home (2026-04-04)
 **Decision:** All architectural decisions, plans, and context stored in `docs/` and `CLAUDE.md` inside the project folder.
 **Rationale:** User wants decisions version-controlled with the codebase.
+
+## AD-009: Version temporal management — SCD Type 2 with sentinel date (2026-04-05)
+**Decision:** Version validity uses `valid_from` and `valid_to` timestamps with SCD Type 2 semantics. Active champions get `valid_to = '2999-12-31 23:59:59'` (sentinel) instead of NULL.
+**Rationale:** Eliminates NULL checks in all date-based queries. The comparison `valid_from <= effective_date AND valid_to > effective_date` is clean and simple. No ambiguity about what NULL means.
+
+**Lifecycle behavior:**
+
+| Event | valid_from | valid_to |
+|---|---|---|
+| Version created (draft) | NULL | NULL |
+| Promoted through candidate/staging/shadow/challenger | NULL | NULL |
+| **Promoted to champion** | **NOW()** | **2999-12-31 23:59:59** |
+| **Deprecated (superseded by new champion)** | unchanged | **NOW()** |
+
+**Entities covered:** agent_version, task_version, prompt_version, pipeline_version.
+
+**Key rules:**
+- Only champion (and formerly-champion, now deprecated) versions have valid_from/valid_to set
+- Pre-champion versions (draft through challenger) have NULL dates — they were never in production, so they're not date-resolvable
+- At any point in time, exactly ONE champion version satisfies `valid_from <= date AND valid_to > date`
+- The lifecycle `promote()` function enforces this automatically
+
+## AD-010: Version composition immutability (2026-04-05)
+**Decision:** An agent/task version is a frozen snapshot of its composition: prompts, inference config, tool authorizations, thresholds. Once promoted beyond `draft`, these bindings are immutable. Any change requires a new version.
+**Rationale:** Regulatory audit reproducibility (SR 11-7) requires that the validated model is the model that runs in production. If prompt assignments can change after validation, the audit trail breaks. See FC-12 in future_capabilities.md for enforcement design.

@@ -312,6 +312,10 @@ CREATE TABLE prompt_version (
                         (governance_tier = 'behavioural') STORED,
     staging_tests_passed BOOLEAN,
 
+    -- Temporal validity (SCD Type 2) — set by lifecycle management
+    valid_from          TIMESTAMP,
+    valid_to            TIMESTAMP,
+
     created_at          TIMESTAMP DEFAULT NOW(),
 
     CONSTRAINT uq_prompt_version UNIQUE (prompt_id, version_number)

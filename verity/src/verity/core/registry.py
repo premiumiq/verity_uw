@@ -25,13 +25,24 @@ class Registry:
 
     # ── AGENT CONFIG (runtime resolution) ─────────────────────
 
-    async def get_agent_config(self, agent_name: str) -> AgentConfig:
-        """Resolve the full champion config for a named agent.
+    async def get_agent_config(
+        self, agent_name: str, effective_date=None, version_id=None,
+    ) -> AgentConfig:
+        """Resolve the full config for a named agent.
 
-        This is the primary runtime call. Returns everything needed
-        to invoke the agent: prompts, tools, inference params.
+        Resolution priority:
+        1. version_id (if provided): direct version lookup, ignores dates
+        2. effective_date (if provided): SCD Type 2 temporal resolution
+        3. Default: current champion via pointer (fastest)
         """
-        row = await self.db.fetch_one("get_agent_champion", {"agent_name": agent_name})
+        if version_id:
+            row = await self.db.fetch_one("get_agent_version_by_id", {"version_id": str(version_id)})
+        elif effective_date:
+            row = await self.db.fetch_one("get_agent_champion_at_date", {
+                "agent_name": agent_name, "effective_date": effective_date,
+            })
+        else:
+            row = await self.db.fetch_one("get_agent_champion", {"agent_name": agent_name})
         if not row:
             raise ValueError(f"Agent '{agent_name}' not found or has no champion version")
 
@@ -116,9 +127,18 @@ class Registry:
 
     # ── TASK CONFIG (runtime resolution) ──────────────────────
 
-    async def get_task_config(self, task_name: str) -> TaskConfig:
-        """Resolve the full champion config for a named task."""
-        row = await self.db.fetch_one("get_task_champion", {"task_name": task_name})
+    async def get_task_config(
+        self, task_name: str, effective_date=None, version_id=None,
+    ) -> TaskConfig:
+        """Resolve the full config for a named task. Same resolution as get_agent_config."""
+        if version_id:
+            row = await self.db.fetch_one("get_task_version_by_id", {"version_id": str(version_id)})
+        elif effective_date:
+            row = await self.db.fetch_one("get_task_champion_at_date", {
+                "task_name": task_name, "effective_date": effective_date,
+            })
+        else:
+            row = await self.db.fetch_one("get_task_champion", {"task_name": task_name})
         if not row:
             raise ValueError(f"Task '{task_name}' not found or has no champion version")
 
