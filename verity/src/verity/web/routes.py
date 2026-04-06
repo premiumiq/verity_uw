@@ -112,16 +112,55 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
     @router.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request):
         await verity.ensure_connected()
+
+        # Card counts + deltas
         counts = await verity.dashboard_counts()
-        recent = await verity.decisions.list_recent_decisions(limit=5)
+        governance_stats = await verity.db.fetch_one("dashboard_governance_stats") or {}
+        deltas = await verity.db.fetch_one("dashboard_30d_deltas") or {}
+
+        # Registry data for slicers
         agents = await verity.list_agents()
         tasks = await verity.list_tasks()
+        tools = await verity.list_tools()
+        prompts = await verity.list_prompts()
+        pipelines = await verity.list_pipelines()
+        applications = await verity.list_applications()
+
+        # Chart data — convert dates to strings for JSON serialization
+        def _date_str(rows, date_field):
+            return [{**r, date_field: str(r[date_field])} for r in rows]
+
+        decisions_by_date = _date_str(await verity.db.fetch_all("dashboard_decisions_by_date"), "decision_date")
+        decisions_by_entity = await verity.db.fetch_all("dashboard_decisions_by_entity")
+        decisions_by_type = await verity.db.fetch_all("dashboard_decisions_by_type")
+        pipeline_runs_by_date = _date_str(await verity.db.fetch_all("dashboard_pipeline_runs_by_date"), "run_date")
+        top_pipelines = await verity.db.fetch_all("dashboard_top_pipelines")
+        overrides_by_date = _date_str(await verity.db.fetch_all("dashboard_overrides_by_date"), "override_date")
+        overrides_by_entity = await verity.db.fetch_all("dashboard_overrides_by_entity")
+
+        # Recent additions
+        recent_additions_raw = await verity.db.fetch_all("dashboard_recent_additions")
+        recent_additions = [{**r, "created_at": str(r["created_at"])[:10]} for r in recent_additions_raw]
+
         return _render(templates, request, "dashboard.html",
             active_page="home",
             counts=counts,
-            recent_decisions=recent,
+            governance_stats=governance_stats,
+            deltas=deltas,
             agents=agents,
             tasks=tasks,
+            tools=tools,
+            prompts=prompts,
+            pipelines=pipelines,
+            applications=applications,
+            decisions_by_date=decisions_by_date,
+            decisions_by_entity=decisions_by_entity,
+            decisions_by_type=decisions_by_type,
+            pipeline_runs_by_date=pipeline_runs_by_date,
+            top_pipelines=top_pipelines,
+            overrides_by_date=overrides_by_date,
+            overrides_by_entity=overrides_by_entity,
+            recent_additions=recent_additions,
         )
 
     # ── AGENTS ────────────────────────────────────────────────
@@ -328,9 +367,26 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
     async def pipelines_list(request: Request):
         await verity.ensure_connected()
         pipelines = await verity.list_pipelines()
+        entity_apps = await _load_entity_apps()
         return _render(templates, request, "pipelines.html",
             active_page="pipelines",
             pipelines=pipelines,
+            entity_apps=entity_apps,
+        )
+
+    @router.get("/pipelines/{pipeline_name}", response_class=HTMLResponse)
+    async def pipeline_detail(request: Request, pipeline_name: str):
+        """Show full detail for a pipeline: metadata + steps."""
+        await verity.ensure_connected()
+        pipeline = await verity.registry.get_pipeline_by_name(pipeline_name)
+        if not pipeline:
+            return HTMLResponse("<h1>Pipeline not found</h1>", status_code=404)
+        entity_apps = await _load_entity_apps()
+        apps = entity_apps.get(('pipeline', str(pipeline["id"])), '—')
+        return _render(templates, request, "pipeline_detail.html",
+            active_page="pipelines",
+            pipeline=pipeline,
+            entity_apps=apps,
         )
 
     # ── APPLICATIONS ──────────────────────────────────────────
@@ -340,12 +396,38 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
         """Show registered applications with mapped entities."""
         await verity.ensure_connected()
         apps = await verity.list_applications()
-        # Enrich each app with its mapped entities
         for app in apps:
             app["entities"] = await verity.registry.list_application_entities(app["id"])
         return _render(templates, request, "applications.html",
             active_page="applications",
             applications=apps,
+        )
+
+    @router.get("/applications/{app_name}", response_class=HTMLResponse)
+    async def application_detail(request: Request, app_name: str):
+        """Show full detail for an application: metadata + mapped entities + stats."""
+        await verity.ensure_connected()
+        app = await verity.registry.get_application_by_name(app_name)
+        if not app:
+            return HTMLResponse("<h1>Application not found</h1>", status_code=404)
+        entities = await verity.registry.list_application_entities(app["id"])
+        # Count decisions and overrides for this app
+        decision_row = await verity.db.fetch_one_raw(
+            "SELECT COUNT(*) AS cnt FROM agent_decision_log WHERE application = %(app_name)s",
+            {"app_name": app_name},
+        )
+        override_row = await verity.db.fetch_one_raw(
+            "SELECT COUNT(*) AS cnt FROM override_log ol "
+            "JOIN agent_decision_log adl ON adl.id = ol.decision_log_id "
+            "WHERE adl.application = %(app_name)s",
+            {"app_name": app_name},
+        )
+        return _render(templates, request, "application_detail.html",
+            active_page="applications",
+            app=app,
+            entities=entities,
+            decision_count=decision_row["cnt"] if decision_row else 0,
+            override_count=override_row["cnt"] if override_row else 0,
         )
 
     # ── DECISION LOG ──────────────────────────────────────────

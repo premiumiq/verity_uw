@@ -1,12 +1,13 @@
 <!--
-  PIPELINES PAGE — Browse registered pipelines and their steps
+  PIPELINES PAGE — Browse registered pipelines
 
   DATA PASSED BY ROUTE:
   - pipelines: list of dicts from registry.list_pipelines()
+  - entity_apps: dict mapping (entity_type, entity_id) → application display names
 -->
 {% extends "base.html" %}
 
-{% block title %}Pipelines — Verity Admin{% endblock %}
+{% block title %}Pipelines — Verity{% endblock %}
 
 {% block breadcrumbs %}
     <span class="separator">›</span>
@@ -17,59 +18,51 @@
 
 {% block content %}
 
-{% if pipelines %}
-    {% for pipeline in pipelines %}
-    <div class="verity-section">
-        <div class="verity-card">
-            <!-- Pipeline header -->
-            <div class="flex items-center gap-3 mb-3">
-                <span style="font-size: 1.1rem; font-weight: 600;">{{ pipeline.display_name }}</span>
-                {% if pipeline.champion_version %}
-                    <span class="verity-badge verity-badge-champion">v{{ pipeline.champion_version }}</span>
-                {% endif %}
-            </div>
-            <div style="font-size: 0.85rem; color: var(--verity-text-light); margin-bottom: 16px;">
-                {{ pipeline.description or '' }}
-            </div>
+<p class="verity-page-description">
+    Pipelines define ordered sequences of agents and tasks that execute as a governed unit. Each step declares dependencies and error policies. Pipeline runs are tracked with unique run IDs, and all step decisions are grouped for end-to-end audit traceability.
+</p>
 
-            <!-- Pipeline steps visualization -->
-            {% if pipeline.steps %}
-            <table class="verity-table">
-                <thead>
-                    <tr>
-                        <th>Order</th>
-                        <th>Step Name</th>
-                        <th>Entity Type</th>
-                        <th>Entity Name</th>
-                        <th>Parallel Group</th>
-                        <th>Depends On</th>
-                        <th>Error Policy</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for step in pipeline.steps %}
-                    <tr>
-                        <td>{{ step.step_order if step.step_order is defined else step.get('step_order', '—') }}</td>
-                        <td style="font-weight: 600;">{{ step.step_name if step.step_name is defined else step.get('step_name', '—') }}</td>
-                        <td>
-                            {% set etype = step.entity_type if step.entity_type is defined else step.get('entity_type', '') %}
-                            <span class="verity-badge verity-badge-{{ etype }}">{{ etype }}</span>
-                        </td>
-                        <td>{{ step.entity_name if step.entity_name is defined else step.get('entity_name', '—') }}</td>
-                        <td>{{ (step.parallel_group if step.parallel_group is defined else step.get('parallel_group')) or '—' }}</td>
-                        <td style="font-size: 0.8rem;">
-                            {% set deps = step.depends_on if step.depends_on is defined else step.get('depends_on', []) %}
-                            {{ deps | join(', ') if deps else '—' }}
-                        </td>
-                        <td>{{ step.error_policy if step.error_policy is defined else step.get('error_policy', 'fail_pipeline') }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% endif %}
-        </div>
-    </div>
-    {% endfor %}
+{% if pipelines %}
+<table class="verity-table">
+    <thead>
+        <tr>
+            <th>Pipeline</th>
+            <th>Champion</th>
+            <th>Steps</th>
+            <th>Applications</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for p in pipelines %}
+        {% set apps = entity_apps.get(('pipeline', p.id|string), '') if entity_apps else '' %}
+        <tr class="clickable" onclick="window.location='/admin/pipelines/{{ p.name }}'">
+            <td>
+                <a href="/admin/pipelines/{{ p.name }}" style="font-weight: 600;">{{ p.display_name }}</a>
+                <div style="font-size: 0.65rem; color: var(--verity-text-light); font-family: monospace;">{{ p.name }}</div>
+            </td>
+            <td>
+                {% if p.champion_version %}
+                    <span class="verity-badge verity-badge-champion">v{{ p.champion_version }}</span>
+                {% else %}
+                    <span class="verity-badge verity-badge-draft">none</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if p.steps %}
+                    {{ p.steps|length if p.steps is iterable and p.steps is not string else '—' }}
+                {% else %}
+                    —
+                {% endif %}
+            </td>
+            <td style="font-size: 0.8rem;">{{ apps or '—' }}</td>
+            <td style="font-size: 0.8rem; max-width: 300px; color: var(--verity-text-light);">
+                {{ p.description[:100] if p.description else '—' }}{% if p.description and p.description|length > 100 %}...{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
 {% else %}
 <div class="verity-empty">
     <div style="font-size: 2rem; opacity: 0.3;">⟿</div>

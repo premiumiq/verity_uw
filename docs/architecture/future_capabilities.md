@@ -131,7 +131,7 @@ This requires the system prompt to be passed as a list of content blocks rather 
 
 ---
 
-## FC-8: Version Management, Date Pinning & Version-Pinned Execution
+## FC-8: Version Management, Date Pinning & Version-Pinned Execution - DONE
 
 **STATUS: IMPLEMENTING NOW**
 
@@ -212,7 +212,7 @@ result = await verity.execute_agent(
 
 ---
 
-## FC-9: Multi-Application Support
+## FC-9: Multi-Application Support - DONE
 
 **Gap:** Verity currently assumes a single consuming application. There is no `application` table, no way to map agents/tasks/prompts to specific applications, and no way to filter the admin UI by application. The `application` column on `agent_decision_log` (added in Phase 2.5) provides basic decision-level tagging but no registry-level scoping.
 
@@ -249,7 +249,7 @@ This enables:
 
 ---
 
-## FC-10: Execution Context
+## FC-10: Execution Context - DONE
 
 **Gap:** Business applications currently pass raw business keys (`submission_id`) to Verity's decision log. While `pipeline_run_id` provides Verity-owned grouping for pipeline runs, there is no formal registration of business-level execution contexts. A business app should be able to register a named execution context (e.g., `submission:SUB-001`) that is unique within that application, and Verity should guarantee uniqueness of (application + context_ref).
 

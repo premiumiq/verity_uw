@@ -1,15 +1,12 @@
 <!--
-  APPLICATIONS PAGE — Registered consuming applications
-
-  Shows all applications that have registered with Verity,
-  with the entities mapped to each.
+  APPLICATIONS PAGE — Browse registered consuming applications
 
   DATA PASSED BY ROUTE:
-  - applications: list of application dicts with entity_counts
+  - applications: list of application dicts, each with "entities" list
 -->
 {% extends "base.html" %}
 
-{% block title %}Applications — Verity Admin{% endblock %}
+{% block title %}Applications — Verity{% endblock %}
 
 {% block breadcrumbs %}
     <span class="separator">›</span>
@@ -20,37 +17,46 @@
 
 {% block content %}
 
+<p class="verity-page-description">
+    Applications are consuming systems registered with Verity. Each application maps to the agents, tasks, tools, prompts, and pipelines it uses. All decisions and overrides are scoped by application, enabling multi-tenant governance and per-application audit trails.
+</p>
+
 {% if applications %}
-{% for app in applications %}
-<div class="verity-card" style="margin-bottom: 16px;">
-    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
-        <span style="font-size: 1.1rem; font-weight: 600;">{{ app.display_name }}</span>
-        <span style="font-family: monospace; font-size: 0.8rem; color: var(--verity-text-light);">{{ app.name }}</span>
-    </div>
-
-    {% if app.description %}
-    <div style="font-size: 0.85rem; color: var(--verity-text-light); margin-bottom: 12px;">
-        {{ app.description }}
-    </div>
-    {% endif %}
-
-    <!-- Mapped entities -->
-    {% if app.entities %}
-    <div style="font-size: 0.8rem;">
-        {% for entity in app.entities %}
-        <span class="verity-badge verity-badge-{{ entity.entity_type }}" style="margin-right: 4px; margin-bottom: 4px;">
-            {{ entity.entity_type }}: {{ entity.entity_display_name }}
-        </span>
+<table class="verity-table">
+    <thead>
+        <tr>
+            <th>Application</th>
+            <th>Description</th>
+            <th>Agents</th>
+            <th>Tasks</th>
+            <th>Tools</th>
+            <th>Prompts</th>
+            <th>Pipelines</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for app in applications %}
+        {% set ents = app.entities or [] %}
+        <tr class="clickable" onclick="window.location='/admin/applications/{{ app.name }}'">
+            <td>
+                <a href="/admin/applications/{{ app.name }}" style="font-weight: 600;">{{ app.display_name }}</a>
+                <div style="font-size: 0.65rem; color: var(--verity-text-light); font-family: monospace;">{{ app.name }}</div>
+            </td>
+            <td style="font-size: 0.8rem; max-width: 250px; color: var(--verity-text-light);">
+                {{ app.description[:100] if app.description else '—' }}{% if app.description and app.description|length > 100 %}...{% endif %}
+            </td>
+            <td>{{ ents|selectattr('entity_type', 'equalto', 'agent')|list|length }}</td>
+            <td>{{ ents|selectattr('entity_type', 'equalto', 'task')|list|length }}</td>
+            <td>{{ ents|selectattr('entity_type', 'equalto', 'tool')|list|length }}</td>
+            <td>{{ ents|selectattr('entity_type', 'equalto', 'prompt')|list|length }}</td>
+            <td>{{ ents|selectattr('entity_type', 'equalto', 'pipeline')|list|length }}</td>
+        </tr>
         {% endfor %}
-    </div>
-    {% else %}
-    <div style="font-size: 0.8rem; color: var(--verity-text-light);">No entities mapped</div>
-    {% endif %}
-</div>
-{% endfor %}
+    </tbody>
+</table>
 {% else %}
 <div class="verity-empty">
-    <div style="font-size: 2rem; opacity: 0.3;">📱</div>
+    <div style="font-size: 2rem; opacity: 0.3;">▣</div>
     <div class="verity-empty-message">No applications registered yet.</div>
 </div>
 {% endif %}

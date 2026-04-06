@@ -1,210 +1,418 @@
 <!--
-  DASHBOARD PAGE — Verity Admin Overview
+  HOME / DASHBOARD — Verity Admin
 
-  Shows at-a-glance governance health: entity counts (clickable),
-  recent activity summary, and cross-reference highlights.
-  Distinct from Decision Log (which shows raw execution records).
-
-  DATA PASSED BY ROUTE:
-  - counts: DashboardCounts
-  - recent_decisions: list of recent DecisionLog entries (last 5)
-  - agents: list of agent dicts (for cross-reference)
-  - tasks: list of task dicts (for cross-reference)
+  Layout:
+  ┌─────────────────────────────────────────────────────────┐
+  │ ASSETS cards (with 30d deltas)                          │
+  │ Asset count chart (gray, clickable) | New Additions     │
+  ├─────────────── separator ───────────────────────────────┤
+  │ OBSERVABILITY cards (with 30d deltas, overrides in red) │
+  │ Pipeline Runs/Time + Top Pipelines (gray)               │
+  │ Decisions/Time (blue/dark blue) + Decisions by Entity   │
+  │ Overrides/Time (amber) + Overrides by Entity            │
+  ├─────────────── separator ───────────────────────────────┤
+  │ GOVERNANCE cards                                        │
+  └─────────────────────────────────────────────────────────┘
 -->
 {% extends "base.html" %}
-
-{% block title %}Dashboard — Verity Admin{% endblock %}
-
-{% block page_title %}Dashboard{% endblock %}
+{% block title %}Home — Verity{% endblock %}
+{% block page_title %}Home{% endblock %}
 
 {% block content %}
 
-<!-- ── ENTITY COUNT CARDS (clickable — link to relevant page) ── -->
-<div class="verity-stats-grid">
-
-    <!-- Agents card — click "2" to go to Agents page -->
-    <a href="/admin/agents" style="text-decoration: none;">
-        <div class="verity-card" style="cursor: pointer; transition: border-color 0.15s;"
-             onmouseover="this.style.borderColor='var(--verity-blue)'"
-             onmouseout="this.style.borderColor='var(--verity-border)'">
-            <div class="verity-card-header">Agents</div>
-            <div class="verity-card-value">{{ counts.agent_count }}</div>
-            <div class="verity-card-footer">Goal-directed AI systems</div>
+<!-- ── Card macro with 30-day delta ── -->
+{% macro card(label, value, delta, url, color='var(--verity-blue-deep)', delta_color='var(--verity-green)') %}
+<a href="{{ url }}" style="text-decoration: none; flex: 1; min-width: 80px;">
+    <div class="verity-card" style="padding: 10px 12px; cursor: pointer; transition: border-color 0.15s;"
+         onmouseover="this.style.borderColor='var(--verity-blue)'" onmouseout="this.style.borderColor='var(--verity-border)'">
+        <div style="display: flex; align-items: baseline; gap: 6px;">
+            <span style="font-size: 1.5rem; font-weight: 700; color: {{ color }};">{{ value }}</span>
+            {% if delta and delta > 0 %}<span style="font-size: 0.65rem; color: {{ delta_color }}; font-weight: 600;">+{{ delta }}</span>{% endif %}
         </div>
-    </a>
-
-    <!-- Tasks card -->
-    <a href="/admin/tasks" style="text-decoration: none;">
-        <div class="verity-card" style="cursor: pointer; transition: border-color 0.15s;"
-             onmouseover="this.style.borderColor='var(--verity-blue)'"
-             onmouseout="this.style.borderColor='var(--verity-border)'">
-            <div class="verity-card-header">Tasks</div>
-            <div class="verity-card-value">{{ counts.task_count }}</div>
-            <div class="verity-card-footer">Bounded AI operations</div>
-        </div>
-    </a>
-
-    <!-- Prompts card -->
-    <a href="/admin/prompts" style="text-decoration: none;">
-        <div class="verity-card" style="cursor: pointer; transition: border-color 0.15s;"
-             onmouseover="this.style.borderColor='var(--verity-blue)'"
-             onmouseout="this.style.borderColor='var(--verity-border)'">
-            <div class="verity-card-header">Prompts</div>
-            <div class="verity-card-value">{{ counts.prompt_count }}</div>
-            <div class="verity-card-footer">Governed prompt versions</div>
-        </div>
-    </a>
-
-    <!-- Inference Configs card -->
-    <a href="/admin/configs" style="text-decoration: none;">
-        <div class="verity-card" style="cursor: pointer; transition: border-color 0.15s;"
-             onmouseover="this.style.borderColor='var(--verity-blue)'"
-             onmouseout="this.style.borderColor='var(--verity-border)'">
-            <div class="verity-card-header">Inference Configs</div>
-            <div class="verity-card-value">{{ counts.config_count }}</div>
-            <div class="verity-card-footer">Named LLM parameter sets</div>
-        </div>
-    </a>
-
-    <!-- Tools card -->
-    <a href="/admin/tools" style="text-decoration: none;">
-        <div class="verity-card" style="cursor: pointer; transition: border-color 0.15s;"
-             onmouseover="this.style.borderColor='var(--verity-blue)'"
-             onmouseout="this.style.borderColor='var(--verity-border)'">
-            <div class="verity-card-header">Tools</div>
-            <div class="verity-card-value">{{ counts.tool_count }}</div>
-            <div class="verity-card-footer">Registered callable tools</div>
-        </div>
-    </a>
-
-    <!-- Decisions card -->
-    <a href="/admin/decisions" style="text-decoration: none;">
-        <div class="verity-card" style="cursor: pointer; transition: border-color 0.15s;"
-             onmouseover="this.style.borderColor='var(--verity-blue)'"
-             onmouseout="this.style.borderColor='var(--verity-border)'">
-            <div class="verity-card-header">Decisions Logged</div>
-            <div class="verity-card-value">{{ counts.total_decisions }}</div>
-            <div class="verity-card-footer">Total AI invocations</div>
-        </div>
-    </a>
-
-    <!-- Overrides card -->
-    <a href="/admin/overrides" style="text-decoration: none;">
-        <div class="verity-card" style="cursor: pointer; transition: border-color 0.15s;"
-             onmouseover="this.style.borderColor='var(--verity-amber)'"
-             onmouseout="this.style.borderColor='var(--verity-border)'">
-            <div class="verity-card-header">Overrides</div>
-            <div class="verity-card-value">{{ counts.total_overrides }}</div>
-            <div class="verity-card-footer">Human corrections to AI</div>
-        </div>
-    </a>
-
-    <!-- Open Incidents card -->
-    <div class="verity-card">
-        <div class="verity-card-header">Open Incidents</div>
-        <div class="verity-card-value">{{ counts.open_incidents }}</div>
-        <div class="verity-card-footer">Active issues</div>
+        <div style="font-size: 0.6rem; text-transform: uppercase; color: var(--verity-text-light); letter-spacing: 0.3px;">{{ label }}</div>
     </div>
+</a>
+{% endmacro %}
 
+
+<!-- ══════════════════════════════════════════════════════════
+     SEGMENT 1: ASSETS
+     ══════════════════════════════════════════════════════════ -->
+<div style="margin-bottom: 4px; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1.5px; color: var(--verity-text-light); font-weight: 600;">Assets</div>
+<div style="display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap;">
+    {{ card('Applications', governance_stats.app_count or 0, deltas.new_apps, '/admin/applications') }}
+    {{ card('Pipelines', counts.pipeline_count, deltas.new_pipelines, '/admin/pipelines') }}
+    {{ card('Agents', counts.agent_count, deltas.new_agents, '/admin/agents') }}
+    {{ card('Tasks', counts.task_count, deltas.new_tasks, '/admin/tasks') }}
+    {{ card('Prompts', counts.prompt_count, deltas.new_prompts, '/admin/prompts') }}
+    {{ card('Configs', counts.config_count, 0, '/admin/configs') }}
+    {{ card('Tools', counts.tool_count, deltas.new_tools, '/admin/tools') }}
 </div>
 
-
-<!-- ── GOVERNED ENTITIES SUMMARY ───────────────────────────────
-     Shows which agents/tasks use which configs, prompts, and tools.
-     This is the cross-reference view that answers "what uses what." -->
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px;">
-
-    <!-- Agents summary with their configs and tool counts -->
-    <div class="verity-section">
-        <h2 class="verity-section-title">Agents</h2>
-        {% if agents %}
-        {% for agent in agents %}
-        <div class="verity-card" style="margin-bottom: 8px;">
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-                <a href="/admin/agents/{{ agent.name }}" style="font-weight: 600; font-size: 0.9rem;">{{ agent.display_name }}</a>
-                <span class="verity-badge verity-badge-{{ agent.materiality_tier }}">{{ agent.materiality_tier }}</span>
-                {% if agent.champion_version %}
-                <span class="verity-badge verity-badge-champion">v{{ agent.champion_version }}</span>
-                {% endif %}
-            </div>
-            <div style="font-size: 0.75rem; color: var(--verity-text-light);">
-                Config: {{ agent.inference_config_name or '—' }}
-                · {{ agent.description[:80] }}{% if agent.description|length > 80 %}...{% endif %}
-            </div>
+<!-- Asset count chart (left, gray, clickable) + New Additions (right, white) -->
+<div style="display: flex; gap: 16px; margin-bottom: 8px;">
+    <div style="flex: 1; max-width: 33%;">
+        <div class="chart-title">Asset Count by Type</div>
+        <div id="chart-asset-counts" style="height: 120px; width: 100%;"></div>
+    </div>
+    <div style="flex: 2;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+            <span class="chart-title">New Additions (Last 30 Days)</span>
+            <span id="additions-filter-label" style="font-size: 0.65rem; color: var(--verity-blue-deep); font-weight: 600; display: none;">
+                — filtered by <span id="additions-filter-type"></span>
+                <a href="#" onclick="clearAdditionsFilter(); return false;" style="margin-left: 4px; font-size: 0.6rem;">✕ clear</a>
+            </span>
         </div>
-        {% endfor %}
-        {% else %}
-        <div style="font-size: 0.85rem; color: var(--verity-text-light);">No agents registered</div>
-        {% endif %}
-    </div>
-
-    <!-- Tasks summary -->
-    <div class="verity-section">
-        <h2 class="verity-section-title">Tasks</h2>
-        {% if tasks %}
-        {% for task in tasks %}
-        <div class="verity-card" style="margin-bottom: 8px;">
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-                <a href="/admin/tasks/{{ task.name }}" style="font-weight: 600; font-size: 0.9rem;">{{ task.display_name }}</a>
-                <span class="verity-badge verity-badge-task">{{ task.capability_type }}</span>
-                {% if task.champion_version %}
-                <span class="verity-badge verity-badge-champion">v{{ task.champion_version }}</span>
-                {% endif %}
+        <div id="new-additions-container" style="display: flex; gap: 8px; flex-wrap: wrap;">
+            {% for item in recent_additions %}
+            <div class="addition-card" data-type="{{ item.entity_type }}"
+                 style="border: 1px solid var(--verity-border); border-radius: 6px; padding: 8px 12px; background: #fff; min-width: 140px; flex: 1; max-width: 220px;">
+                <div style="font-size: 0.75rem; font-weight: 600; color: var(--verity-text);">{{ item.display_name or item.entity_name }}</div>
+                <div style="display: flex; align-items: center; gap: 4px; margin-top: 2px;">
+                    <span class="verity-badge verity-badge-{{ item.entity_type }}" style="font-size: 0.55rem;">{{ item.entity_type }}</span>
+                    <span style="font-size: 0.6rem; color: var(--verity-text-light);">{{ item.created_at }}</span>
+                </div>
             </div>
-            <div style="font-size: 0.75rem; color: var(--verity-text-light);">
-                Config: {{ task.inference_config_name or '—' }}
-                · {{ task.description[:80] }}{% if task.description|length > 80 %}...{% endif %}
-            </div>
-        </div>
-        {% endfor %}
-        {% else %}
-        <div style="font-size: 0.85rem; color: var(--verity-text-light);">No tasks registered</div>
-        {% endif %}
-    </div>
-
-</div>
-
-
-<!-- ── RECENT ACTIVITY ────────────────────────────────────────
-     Last 5 decisions — just a quick snapshot, not the full log.
-     Links to the full Decision Log page for details. -->
-<div class="verity-section">
-    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-        <h2 class="verity-section-title" style="margin-bottom: 0; border-bottom: none;">Recent Activity</h2>
-        <a href="/admin/decisions" class="verity-btn verity-btn-secondary verity-btn-sm">View All Decisions →</a>
-    </div>
-
-    {% if recent_decisions %}
-    <table class="verity-table">
-        <thead>
-            <tr>
-                <th>Entity</th>
-                <th>Type</th>
-                <th>Step</th>
-                <th>Status</th>
-                <th>Duration</th>
-                <th>When</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for d in recent_decisions %}
-            <tr class="clickable" onclick="window.location='/admin/decisions/{{ d.id }}'">
-                <td>{{ d.entity_name or '—' }}</td>
-                <td><span class="verity-badge verity-badge-{{ d.entity_type }}">{{ d.entity_type }}</span></td>
-                <td>{{ d.step_name or '—' }}</td>
-                <td><span class="verity-badge verity-badge-{{ d.status }}">{{ d.status }}</span></td>
-                <td>{{ d.duration_ms or 0 }}ms</td>
-                <td>{{ d.created_at.strftime('%m-%d %H:%M') if d.created_at else '—' }}</td>
-            </tr>
             {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <div class="verity-empty">
-        <div style="font-size: 2rem; opacity: 0.3;">◉</div>
-        <div class="verity-empty-message">No decisions logged yet. Run an agent or task to see activity here.</div>
+            {% if not recent_additions %}
+            <div style="font-size: 0.75rem; color: var(--verity-text-light); padding: 8px;">No recent additions</div>
+            {% endif %}
+        </div>
     </div>
-    {% endif %}
 </div>
 
+<!-- ── Separator ── -->
+<div style="border-top: 2px solid var(--verity-border-light); margin: 20px 0;"></div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     SEGMENT 2: OBSERVABILITY
+     ══════════════════════════════════════════════════════════ -->
+<div style="margin-bottom: 4px; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1.5px; color: var(--verity-text-light); font-weight: 600;">Observability</div>
+<div style="display: flex; gap: 10px; margin-bottom: 16px;">
+    {{ card('Decisions', counts.total_decisions, deltas.new_decisions, '/admin/decisions') }}
+    {{ card('Pipeline Runs', governance_stats.total_pipeline_runs or 0, deltas.new_pipeline_runs, '/admin/pipeline-runs') }}
+    {{ card('Overrides', counts.total_overrides, deltas.new_overrides, '/admin/overrides', '#E3B447', '#E3B447') }}
+</div>
+
+<!-- Row 1: Pipeline Runs Over Time (left) + Top Pipelines (right) -->
+<div style="display: flex; gap: 16px; margin-bottom: 12px;">
+    <div style="flex: 1;">
+        <div class="chart-title">Pipeline Runs Over Time</div>
+        <div id="chart-pipeline-runs" style="height: 160px;"></div>
+    </div>
+    <div style="flex: 1;">
+        <div class="chart-title">Top Pipelines</div>
+        <div id="chart-top-pipelines" style="height: 160px;"></div>
+    </div>
+</div>
+
+<!-- Row 2: Decisions Over Time (left) + Decisions by Entity (right) -->
+<div style="display: flex; gap: 16px; margin-bottom: 12px;">
+    <div style="flex: 1;">
+        <div class="chart-title">Decisions Over Time</div>
+        <div id="chart-decisions-time" style="height: 160px;"></div>
+    </div>
+    <div style="flex: 1;">
+        <div class="chart-title">Decisions by Asset</div>
+        <div id="chart-decisions-entity" style="height: 160px;"></div>
+    </div>
+</div>
+
+<!-- Row 3: Overrides Over Time (left) + Overrides by Entity (right) -->
+<div style="display: flex; gap: 16px; margin-bottom: 8px;">
+    <div style="flex: 1;">
+        <div class="chart-title">Overrides Over Time</div>
+        <div id="chart-overrides-time" style="height: 160px;"></div>
+    </div>
+    <div style="flex: 1;">
+        <div class="chart-title">Top Overrides by Asset</div>
+        <div id="chart-overrides-entity" style="height: 160px;"></div>
+    </div>
+</div>
+
+<!-- ── Separator ── -->
+<div style="border-top: 2px solid var(--verity-border-light); margin: 20px 0;"></div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     SEGMENT 3: GOVERNANCE
+     ══════════════════════════════════════════════════════════ -->
+<div style="margin-bottom: 4px; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1.5px; color: var(--verity-text-light); font-weight: 600;">Governance</div>
+<div style="display: flex; gap: 10px; margin-bottom: 16px;">
+    <div class="verity-card" style="flex: 1; padding: 10px 12px; text-align: center;">
+        <div style="font-size: 1.5rem; font-weight: 700; color: var(--verity-blue-deep);">{{ governance_stats.total_approvals or 0 }}</div>
+        <div style="font-size: 0.6rem; text-transform: uppercase; color: var(--verity-text-light);">Promotions</div>
+    </div>
+    <div class="verity-card" style="flex: 1; padding: 10px 12px; text-align: center;">
+        <div style="font-size: 1.5rem; font-weight: 700; color: var(--verity-green);">
+            {% if governance_stats.tests_total %}{{ ((governance_stats.tests_passed / governance_stats.tests_total) * 100) | int }}%{% else %}—{% endif %}
+        </div>
+        <div style="font-size: 0.6rem; text-transform: uppercase; color: var(--verity-text-light);">Test Pass Rate</div>
+    </div>
+    <div class="verity-card" style="flex: 1; padding: 10px 12px; text-align: center;">
+        <div style="font-size: 1.5rem; font-weight: 700; color: var(--verity-blue-deep);">{{ governance_stats.entities_in_review or 0 }}</div>
+        <div style="font-size: 0.6rem; text-transform: uppercase; color: var(--verity-text-light);">In Review</div>
+    </div>
+    <div class="verity-card" style="flex: 1; padding: 10px 12px; text-align: center;">
+        <div style="font-size: 1.5rem; font-weight: 700; color: var(--verity-blue-deep);">{{ counts.open_incidents }}</div>
+        <div style="font-size: 0.6rem; text-transform: uppercase; color: var(--verity-text-light);">Open Incidents</div>
+    </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     ECHARTS
+     ══════════════════════════════════════════════════════════ -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script>
+const S = { fontFamily: 'Poppins, sans-serif' };
+const T = { fontSize: 11, color: '#7F7F7F', fontWeight: 500, fontFamily: 'Poppins' };
+const A = { fontSize: 8, color: '#7F7F7F' };
+
+/* Time axis config — used by all "Over Time" charts.
+   Uses type:'time' so ECharts understands dates properly.
+   max = today's date, min = 30 days ago. Bars sit at the right
+   edge when data is recent, not centered in empty space. */
+const today = new Date();
+const thirtyDaysAgo = new Date(today);
+thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+const timeAxisConfig = {
+    type: 'time',
+    min: thirtyDaysAgo.toISOString().slice(0, 10),
+    max: today.toISOString().slice(0, 10),
+    axisLabel: { fontSize: 8, color: '#7F7F7F',
+        formatter: function(val) { return new Date(val).toISOString().slice(5, 10); }
+    },
+};
+
+/* ── Data ── */
+const decisionsByDate = {{ decisions_by_date | tojson }};
+const decisionsByEntity = {{ decisions_by_entity | tojson }};
+const pipelineRunsByDate = {{ pipeline_runs_by_date | tojson }};
+const topPipelines = {{ top_pipelines | tojson }};
+const overridesByDate = {{ overrides_by_date | tojson }};
+const overridesByEntity = {{ overrides_by_entity | tojson }};
+
+/* ── Helper: init chart with auto-resize ── */
+function mkChart(id) {
+    const c = echarts.init(document.getElementById(id));
+    window.addEventListener('resize', () => c.resize());
+    return c;
+}
+
+/* ── Asset Counts (gray, clickable → filters New Additions) ── */
+let assetChart = null;
+let activeAssetFilter = null;
+const assetTypeLabels = ['Pipelines', 'Agents', 'Tasks', 'Tools', 'Prompts', 'Configs'];
+const assetTypeKeys = ['pipeline', 'agent', 'task', 'tool', 'prompt', 'config'];
+const assetTypeVals = [{{ pipelines|length }}, {{ agents|length }}, {{ tasks|length }}, {{ tools|length }}, {{ prompts|length }}, {{ counts.config_count }}];
+const defaultBarColor = '#949494';
+const selectedBarColor = '#405A8A';
+
+function renderAssetChart() {
+    /* Color bars: highlight the selected one, gray for the rest */
+    const colors = assetTypeLabels.map((_, i) =>
+        (activeAssetFilter !== null && i === activeAssetFilter) ? selectedBarColor : defaultBarColor
+    );
+    assetChart.setOption({
+        textStyle: S,        grid: { left: 70, right: 25, top: 5, bottom: 5 },
+        xAxis: { type: 'value', show: false },
+        yAxis: { type: 'category', data: assetTypeLabels, axisLabel: { fontSize: 9, color: '#7F7F7F' },
+            axisLine: { show: false }, axisTick: { show: false } },
+        series: [{ type: 'bar', data: assetTypeVals.map((v, i) => ({
+                value: v, itemStyle: { color: colors[i], borderRadius: [0, 3, 3, 0] }
+            })), barWidth: 12,
+            label: { show: true, position: 'right', fontSize: 9, color: '#4D4D4D' } }],
+    });
+}
+
+function filterAdditions(typeKey, typeLabel) {
+    /* Show only addition cards matching this type, max 5 visible */
+    let visibleCount = 0;
+    document.querySelectorAll('.addition-card').forEach(card => {
+        const match = card.dataset.type === typeKey;
+        if (match && visibleCount < 5) {
+            card.style.display = '';
+            visibleCount++;
+        } else {
+            card.style.display = 'none';
+        }
+    });
+    document.getElementById('additions-filter-label').style.display = 'inline';
+    document.getElementById('additions-filter-type').textContent = typeLabel;
+}
+
+function clearAdditionsFilter() {
+    /* Show all cards, max 5 visible */
+    activeAssetFilter = null;
+    let visibleCount = 0;
+    document.querySelectorAll('.addition-card').forEach(card => {
+        if (visibleCount < 5) {
+            card.style.display = '';
+            visibleCount++;
+        } else {
+            card.style.display = 'none';
+        }
+    });
+    document.getElementById('additions-filter-label').style.display = 'none';
+    renderAssetChart();
+}
+
+/* On load: show max 5 addition cards */
+(function() {
+    let count = 0;
+    document.querySelectorAll('.addition-card').forEach(card => {
+        card.style.display = (count < 5) ? '' : 'none';
+        count++;
+    });
+})();
+
+(function() {
+    assetChart = mkChart('chart-asset-counts');
+    renderAssetChart();
+
+    /* Click bar → toggle filter on New Additions */
+    assetChart.on('click', function(p) {
+        if (activeAssetFilter === p.dataIndex) {
+            /* Clicking same bar again → clear filter */
+            clearAdditionsFilter();
+        } else {
+            activeAssetFilter = p.dataIndex;
+            filterAdditions(assetTypeKeys[p.dataIndex], assetTypeLabels[p.dataIndex]);
+            renderAssetChart();
+        }
+    });
+})();
+
+/* ── Pipeline Runs Over Time (gray, time axis) ── */
+(function() {
+    const c = mkChart('chart-pipeline-runs');
+    const data = pipelineRunsByDate.map(d => [d.run_date, d.run_count]);
+    c.setOption({
+        textStyle: S,
+        tooltip: { trigger: 'axis' },
+        grid: { left: 35, right: 10, top: 5, bottom: 25 },
+        xAxis: timeAxisConfig,
+        yAxis: { type: 'value', axisLabel: A, minInterval: 1 },
+        series: [{ type: 'bar', data: data, itemStyle: { color: '#949494', borderRadius: [3, 3, 0, 0] }, barWidth: 18 }],
+    });
+})();
+
+/* ── Top Pipelines (gray, horizontal bar) ── */
+(function() {
+    const c = mkChart('chart-top-pipelines');
+    const names = topPipelines.map(d => d.pipeline_name).reverse();
+    const vals = topPipelines.map(d => d.run_count).reverse();
+    c.setOption({
+        textStyle: S,
+        tooltip: { trigger: 'axis' },
+        grid: { left: 160, right: 20, top: 5, bottom: 10 },
+        xAxis: { type: 'value', axisLabel: A },
+        yAxis: { type: 'category', data: names, axisLabel: { fontSize: 9, color: '#4D4D4D', width: 150, overflow: 'truncate' },
+            axisLine: { show: false }, axisTick: { show: false } },
+        series: [{ type: 'bar', data: vals, itemStyle: { color: '#949494', borderRadius: [0, 3, 3, 0] }, barWidth: 14,
+            label: { show: true, position: 'right', fontSize: 9, color: '#4D4D4D' } }],
+    });
+})();
+
+/* ── Decisions Over Time (stacked by entity type, time axis) ── */
+(function() {
+    const c = mkChart('chart-decisions-time');
+    const dateMap = {};
+    decisionsByDate.forEach(d => {
+        if (!dateMap[d.decision_date]) dateMap[d.decision_date] = { agent: 0, task: 0 };
+        dateMap[d.decision_date][d.entity_type] = (dateMap[d.decision_date][d.entity_type] || 0) + d.count;
+    });
+    const dates = Object.keys(dateMap).sort();
+    c.setOption({
+        textStyle: S,
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['Agent', 'Task'], top: 0, right: 0, textStyle: { fontSize: 9 } },
+        grid: { left: 35, right: 10, top: 10, bottom: 25 },
+        xAxis: timeAxisConfig,
+        yAxis: { type: 'value', axisLabel: A, minInterval: 1 },
+        series: [
+            { name: 'Agent', type: 'bar', stack: 't', data: dates.map(d => [d, dateMap[d].agent || 0]),
+              itemStyle: { color: '#8FAADC' }, barWidth: 18 },
+            { name: 'Task', type: 'bar', stack: 't', data: dates.map(d => [d, dateMap[d].task || 0]),
+              itemStyle: { color: '#405A8A' }, barWidth: 18 },
+        ],
+    });
+})();
+
+/* ── Decisions by Entity (horizontal bar, same color codes) ── */
+(function() {
+    const c = mkChart('chart-decisions-entity');
+    const ents = decisionsByEntity.map(d => d.entity_name).reverse();
+    const vals = decisionsByEntity.map(d => d.count).reverse();
+    const colors = decisionsByEntity.map(d => d.entity_type === 'agent' ? '#8FAADC' : '#405A8A').reverse();
+    c.setOption({
+        textStyle: S,
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['Agent', 'Task'], top: 0, right: 0, textStyle: { fontSize: 9 } },
+        grid: { left: 150, right: 20, top: 10, bottom: 10 },
+        xAxis: { type: 'value', axisLabel: A },
+        yAxis: { type: 'category', data: ents, axisLabel: { fontSize: 9, color: '#4D4D4D', width: 140, overflow: 'truncate' },
+            axisLine: { show: false }, axisTick: { show: false } },
+        series: [{ type: 'bar', data: vals, itemStyle: { color: (p) => colors[p.dataIndex], borderRadius: [0, 3, 3, 0] },
+            barWidth: 14, label: { show: true, position: 'right', fontSize: 9, color: '#4D4D4D' } }],
+    });
+})();
+
+/* ── Overrides Over Time (amber=agent, dark amber=task) ── */
+(function() {
+    const c = mkChart('chart-overrides-time');
+    const dateMap = {};
+    overridesByDate.forEach(d => {
+        if (!dateMap[d.override_date]) dateMap[d.override_date] = { agent: 0, task: 0 };
+        dateMap[d.override_date][d.entity_type] = (dateMap[d.override_date][d.entity_type] || 0) + d.count;
+    });
+    const dates = Object.keys(dateMap).sort();
+    c.setOption({
+        textStyle: S,
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['Agent', 'Task'], top: 0, right: 0, textStyle: { fontSize: 9 } },
+        grid: { left: 35, right: 10, top: 25, bottom: 25 },
+        xAxis: timeAxisConfig,
+        yAxis: { type: 'value', axisLabel: A, minInterval: 1 },
+        series: [
+            { name: 'Agent', type: 'bar', stack: 't', data: dates.map(d => [d, (dateMap[d] || {}).agent || 0]),
+              itemStyle: { color: '#E3B447' }, barWidth: 18 },
+            { name: 'Task', type: 'bar', stack: 't', data: dates.map(d => [d, (dateMap[d] || {}).task || 0]),
+              itemStyle: { color: '#816014' }, barWidth: 18 },
+        ],
+    });
+})();
+
+/* ── Overrides by Entity (amber color codes) ── */
+(function() {
+    const c = mkChart('chart-overrides-entity');
+    const ents = overridesByEntity.map(d => d.entity_name).reverse();
+    const vals = overridesByEntity.map(d => d.count).reverse();
+    const colors = overridesByEntity.map(d => d.entity_type === 'agent' ? '#E3B447' : '#816014').reverse();
+    c.setOption({
+        textStyle: S,
+        tooltip: { trigger: 'axis' },
+        grid: { left: 150, right: 20, top: 5, bottom: 10 },
+        xAxis: { type: 'value', axisLabel: A },
+        yAxis: { type: 'category', data: ents, axisLabel: { fontSize: 9, color: '#4D4D4D', width: 140, overflow: 'truncate' },
+            axisLine: { show: false }, axisTick: { show: false } },
+        series: [{ type: 'bar', data: vals, itemStyle: { color: (p) => colors[p.dataIndex], borderRadius: [0, 3, 3, 0] },
+            barWidth: 14, label: { show: true, position: 'right', fontSize: 9, color: '#4D4D4D' } }],
+    });
+})();
+</script>
+
+<style>
+    /* Chart title — matches "NEW ADDITIONS (LAST 30 DAYS)" style exactly */
+    .chart-title {
+        font-size: 0.6rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--verity-text-light);
+        font-weight: 600;
+        margin-bottom: 4px;
+    }
+</style>
 {% endblock %}

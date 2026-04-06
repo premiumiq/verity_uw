@@ -1,0 +1,109 @@
+<!--
+  PIPELINE DETAIL PAGE — Full view of a pipeline
+
+  Shows pipeline metadata, champion version steps with entity display names,
+  and applications using this pipeline.
+
+  DATA PASSED BY ROUTE:
+  - pipeline: dict from get_pipeline_by_name()
+  - entity_apps: application display names for this pipeline
+-->
+{% extends "base.html" %}
+
+{% block title %}{{ pipeline.display_name }} — Verity{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/pipelines">Pipelines</a>
+    <span class="separator">›</span>
+    <span>{{ pipeline.display_name }}</span>
+{% endblock %}
+
+{% block page_title %}{{ pipeline.display_name }}{% endblock %}
+
+{% block content %}
+
+<!-- ── PIPELINE METADATA ───────────────────────────────────── -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Pipeline Details</h2>
+    <div class="verity-card">
+        <div class="verity-detail-grid">
+            <div class="verity-detail-label">Display Name</div>
+            <div class="verity-detail-value" style="font-weight: 600;">{{ pipeline.display_name }}</div>
+
+            <div class="verity-detail-label">Machine Name</div>
+            <div class="verity-detail-value" style="font-family: monospace; font-size: 0.85rem;">{{ pipeline.name }}</div>
+
+            <div class="verity-detail-label">Description</div>
+            <div class="verity-detail-value">{{ pipeline.description or '—' }}</div>
+
+            <div class="verity-detail-label">Champion Version</div>
+            <div class="verity-detail-value">
+                {% if pipeline.champion_version_number %}
+                    <span class="verity-badge verity-badge-champion">v{{ pipeline.champion_version_number }}</span>
+                {% else %}
+                    <span class="verity-badge verity-badge-draft">no champion</span>
+                {% endif %}
+            </div>
+
+            <div class="verity-detail-label">Applications</div>
+            <div class="verity-detail-value">{{ entity_apps or '—' }}</div>
+        </div>
+    </div>
+</div>
+
+
+<!-- ── PIPELINE STEPS ──────────────────────────────────────── -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Pipeline Steps (Champion Version)</h2>
+
+    {% if pipeline.steps %}
+    <table class="verity-table">
+        <thead>
+            <tr>
+                <th>Order</th>
+                <th>Step Name</th>
+                <th>Type</th>
+                <th>Asset</th>
+                <th>Depends On</th>
+                <th>Parallel Group</th>
+                <th>Error Policy</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for step in pipeline.steps %}
+            {% set s = step if step is mapping else {} %}
+            <tr>
+                <td>{{ s.get('step_order', '—') if s is mapping else '—' }}</td>
+                <td style="font-weight: 600;">{{ s.get('step_name', '—') if s is mapping else '—' }}</td>
+                <td>
+                    {% set etype = s.get('entity_type', '') if s is mapping else '' %}
+                    <span class="verity-badge verity-badge-{{ etype }}">{{ etype }}</span>
+                </td>
+                <td>
+                    {% set ename = s.get('entity_name', '—') if s is mapping else '—' %}
+                    {% set etype = s.get('entity_type', '') if s is mapping else '' %}
+                    {% if etype in ['agent', 'task'] %}
+                        <a href="/admin/{{ etype }}s/{{ ename }}">{{ ename }}</a>
+                    {% else %}
+                        {{ ename }}
+                    {% endif %}
+                </td>
+                <td style="font-size: 0.8rem;">
+                    {% set deps = s.get('depends_on', []) if s is mapping else [] %}
+                    {{ deps | join(', ') if deps else '—' }}
+                </td>
+                <td style="font-size: 0.8rem;">{{ s.get('parallel_group', '—') if s is mapping else '—' }}</td>
+                <td style="font-size: 0.8rem;">{{ s.get('error_policy', 'fail_pipeline') if s is mapping else '—' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="verity-empty">
+        <div class="verity-empty-message">No steps defined for champion version.</div>
+    </div>
+    {% endif %}
+</div>
+
+{% endblock %}

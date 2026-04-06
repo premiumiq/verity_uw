@@ -21,6 +21,10 @@
 
 {% block content %}
 
+<p class="verity-page-description">
+    Tools are registered Python functions that agents call during execution. Each tool has defined input and output schemas, a data classification level, and a write operation flag. Tool authorizations are bound to specific agent versions and are immutable after promotion.
+</p>
+
 {% if tools %}
 <table class="verity-table">
     <thead>

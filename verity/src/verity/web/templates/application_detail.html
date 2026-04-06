@@ -1,0 +1,95 @@
+<!--
+  APPLICATION DETAIL PAGE — Full view of a registered application
+
+  Shows application metadata, mapped entities grouped by type,
+  recent decisions, and override history.
+
+  DATA PASSED BY ROUTE:
+  - app: dict from get_application_by_name()
+  - entities: list of mapped entities with display names
+  - decision_count: number of decisions for this app
+  - override_count: number of overrides for this app
+-->
+{% extends "base.html" %}
+
+{% block title %}{{ app.display_name }} — Verity{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/applications">Applications</a>
+    <span class="separator">›</span>
+    <span>{{ app.display_name }}</span>
+{% endblock %}
+
+{% block page_title %}{{ app.display_name }}{% endblock %}
+
+{% block content %}
+
+<!-- ── APPLICATION METADATA ─────────────────────────────────── -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Application Details</h2>
+    <div class="verity-card">
+        <div class="verity-detail-grid">
+            <div class="verity-detail-label">Display Name</div>
+            <div class="verity-detail-value" style="font-weight: 600;">{{ app.display_name }}</div>
+
+            <div class="verity-detail-label">Machine Name</div>
+            <div class="verity-detail-value" style="font-family: monospace; font-size: 0.85rem;">{{ app.name }}</div>
+
+            <div class="verity-detail-label">Description</div>
+            <div class="verity-detail-value">{{ app.description or '—' }}</div>
+
+            <div class="verity-detail-label">Total Entities</div>
+            <div class="verity-detail-value">{{ entities|length }}</div>
+
+            <div class="verity-detail-label">Decisions</div>
+            <div class="verity-detail-value">{{ decision_count }}</div>
+
+            <div class="verity-detail-label">Overrides</div>
+            <div class="verity-detail-value">{{ override_count }}</div>
+
+            <div class="verity-detail-label">Registered</div>
+            <div class="verity-detail-value">{{ app.created_at.strftime('%Y-%m-%d %H:%M') if app.created_at else '—' }}</div>
+        </div>
+    </div>
+</div>
+
+
+<!-- ── MAPPED ENTITIES ──────────────────────────────────────── -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Registered Assets</h2>
+
+    {% if entities %}
+    <!-- Group entities by type -->
+    {% set entity_types = ['agent', 'task', 'tool', 'prompt', 'pipeline'] %}
+    {% for etype in entity_types %}
+        {% set typed_entities = entities|selectattr('entity_type', 'equalto', etype)|list %}
+        {% if typed_entities %}
+        <div style="margin-bottom: 12px;">
+            <div style="font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--verity-text-light); font-weight: 600; margin-bottom: 4px;">
+                {{ etype }}s ({{ typed_entities|length }})
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                {% for e in typed_entities %}
+                <a href="/admin/{{ etype }}s/{{ e.entity_display_name }}"
+                   style="text-decoration: none;">
+                    <div class="verity-card" style="padding: 6px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;"
+                         onmouseover="this.style.borderColor='var(--verity-blue)'"
+                         onmouseout="this.style.borderColor='var(--verity-border)'">
+                        <span class="verity-badge verity-badge-{{ etype }}" style="font-size: 0.55rem;">{{ etype }}</span>
+                        <span style="font-size: 0.8rem; font-weight: 500;">{{ e.entity_display_name }}</span>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    {% endfor %}
+    {% else %}
+    <div class="verity-empty">
+        <div class="verity-empty-message">No assets mapped to this application.</div>
+    </div>
+    {% endif %}
+</div>
+
+{% endblock %}

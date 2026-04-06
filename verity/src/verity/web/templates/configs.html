@@ -18,6 +18,10 @@
 
 {% block content %}
 
+<p class="verity-page-description">
+    Inference configs are named, reusable sets of LLM API parameters - model, temperature, max tokens, and extended settings. They are assigned to agent and task versions, ensuring consistent and auditable AI behaviour. Any change to inference parameters requires a new version.
+</p>
+
 {% if configs %}
 <table class="verity-table">
     <thead>
