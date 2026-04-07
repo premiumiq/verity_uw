@@ -1,0 +1,60 @@
+BRIGHTLINE ANALYTICS CORP
+CONSOLIDATED FINANCIAL STATEMENTS
+Fiscal Years Ended December 31, 2025 and 2024
+
+===============================================================================
+INDEPENDENT AUDITOR'S REPORT
+===============================================================================
+
+To the Board of Directors and Shareholders of Brightline Analytics Corp:
+
+Opinion
+
+We have audited the accompanying consolidated financial statements of
+Brightline Analytics Corp (the "Company"), which comprise the consolidated balance
+sheets as of December 31, 2025 and 2024,
+and the related consolidated statements of operations, comprehensive income,
+stockholders' equity, and cash flows for the years then ended.
+
+In our opinion, the consolidated financial statements referred to above present
+fairly, in all material respects, the financial position of the Company as of
+December 31, 2025, in conformity with accounting
+principles generally accepted in the United States of America.
+
+RSM US LLP
+Certified Public Accountants
+Cambridge, MA
+March 15, 2025
+
+===============================================================================
+CONSOLIDATED BALANCE SHEET
+As of December 31 (in thousands)
+===============================================================================
+
+                                        2025        2024
+                                        ------------    ------------
+ASSETS
+  Total Assets                           $48,000,000   $42,000,000
+
+LIABILITIES
+  Total Liabilities                      $15,000,000   $14,000,000
+
+STOCKHOLDERS' EQUITY
+  Total Equity                           $33,000,000   $28,000,000
+
+Total Liabilities & Equity               $48,000,000   $42,000,000
+
+Debt-to-Equity Ratio:                   0.45            0.50
+
+===============================================================================
+CONSOLIDATED STATEMENT OF OPERATIONS
+For the Years Ended December 31 (in thousands)
+===============================================================================
+
+                                        2025        2024
+                                        ------------    ------------
+Total Revenue                            $60,000,000   $52,000,000
+
+Net Income (Loss)                         $4,800,000    $3,500,000
+
+===============================================================================

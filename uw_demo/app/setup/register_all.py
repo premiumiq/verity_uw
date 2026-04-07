@@ -31,7 +31,10 @@ from verity.db.migrate import apply_schema
 
 
 # ── DATABASE URL ──────────────────────────────────────────────
-DB_URL = "postgresql://verityuser:veritypass123@localhost:5432/verity_db"
+# Reads from VERITY_DB_URL environment variable (set in docker-compose.yml).
+# Falls back to localhost for running outside Docker (local development).
+import os
+DB_URL = os.environ.get("VERITY_DB_URL", "postgresql://verityuser:veritypass123@localhost:5432/verity_db")
 
 
 async def main():
@@ -350,17 +353,17 @@ async def seed_tasks(verity: Verity) -> dict:
         },
         {
             "name": "field_extractor",
-            "display_name": "D&O ACORD 855 Field Extraction Task",
-            "description": "Extracts structured data fields from a D&O Directors and Officers liability ACORD 855 application form. Returns field values with per-field confidence scores. Does not extract from GL forms, loss runs, or supplementals.",
+            "display_name": "D&O Application Field Extraction Task",
+            "description": "Extracts structured data fields from a D&O Directors and Officers liability D&O liability application form. Returns field values with per-field confidence scores. Does not extract from GL forms, loss runs, or supplementals.",
             "capability_type": "extraction",
-            "purpose": "Populate submission detail records from ACORD 855 application text.",
+            "purpose": "Populate submission detail records from D&O application text.",
             "domain": "underwriting",
             "materiality_tier": "medium",
             "input_schema": {"document_text": "string", "submission_id": "string"},
             "output_schema": {"fields": "object", "low_confidence_fields": "array", "unextractable_fields": "array", "extraction_complete": "boolean"},
             "owner_name": "James Okafor",
             "owner_email": "james.okafor@premiumiq.com",
-            "business_context": "Extracts key application fields from ACORD 855 forms to populate the submission record automatically.",
+            "business_context": "Extracts key application fields from D&O application forms to populate the submission record automatically.",
             "known_limitations": "Requires text-based input (not scanned images); field accuracy varies by form layout; may miss fields in non-standard form versions.",
             "regulatory_notes": "Medium materiality. Extracted values feed into risk assessment; errors propagate downstream.",
         },
@@ -398,7 +401,7 @@ async def seed_prompts(verity: Verity, agents: dict, tasks: dict) -> dict:
          "description": "User message template for document classifier input",
          "primary_entity_type": "task", "primary_entity_id": tasks["document_classifier"]["id"]},
         {"name": "field_extractor_instruction", "display_name": "Field Extractor Instruction",
-         "description": "System instruction for ACORD 855 field extraction task",
+         "description": "System instruction for D&O application field extraction task",
          "primary_entity_type": "task", "primary_entity_id": tasks["field_extractor"]["id"]},
         {"name": "field_extractor_input", "display_name": "Field Extractor Input Template",
          "description": "User message template for field extractor input",
@@ -527,7 +530,7 @@ async def seed_task_versions(verity: Verity, tasks: dict, configs: dict) -> dict
         inference_config_id=configs["extraction_deterministic"],
         output_schema=json.dumps({"fields": "object", "low_confidence_fields": "array", "unextractable_fields": "array", "extraction_complete": "boolean"}),
         mock_mode_enabled=False,
-        developer_name="Dev Team", change_summary="Initial release with 20-field ACORD 855 extraction",
+        developer_name="Dev Team", change_summary="Initial release with 20-field D&O application extraction",
         change_type="major_redesign",
     )
     versions[("field_extractor", "1.0.0")] = r["id"]
@@ -569,10 +572,19 @@ async def seed_prompt_versions(verity: Verity, prompts: dict) -> dict:
             target_state="champion", approver_name=author_name, rationale=change_summary)
         return version_id
 
+    # Prompt content is defined in uw_demo/app/prompts.py for readability.
+    # Each prompt is a named constant (e.g., TRIAGE_SYSTEM_V2).
+    from uw_demo.app.prompts import (
+        TRIAGE_SYSTEM_V1, TRIAGE_SYSTEM_V2, TRIAGE_CONTEXT_V1,
+        APPETITE_SYSTEM_V1, APPETITE_CONTEXT_V1,
+        CLASSIFIER_SYSTEM_V1, CLASSIFIER_SYSTEM_V2, CLASSIFIER_INPUT_V1,
+        EXTRACTOR_SYSTEM_V1, EXTRACTOR_INPUT_V1,
+    )
+
     # ── Triage agent system prompt — v1 promoted then superseded by v2
     await _register_and_promote(
         prompts["triage_agent_system"], 1, 0, 0,
-        "You are a risk assessment assistant. Given a submission, evaluate the risk level and provide a Green/Amber/Red score with brief reasoning.",
+        TRIAGE_SYSTEM_V1,
         "system", "behavioural",
         "Initial basic system prompt", "high", "Dev Team",
         ("triage_agent_system", 1),
@@ -580,110 +592,79 @@ async def seed_prompt_versions(verity: Verity, prompts: dict) -> dict:
     # v2 promotion auto-deprecates v1
     await _register_and_promote(
         prompts["triage_agent_system"], 2, 0, 0,
-        """You are a specialist underwriting risk triage agent for commercial lines insurance (D&O and GL). Your role is to synthesise submission data, account enrichment, loss history, and underwriting guidelines into a structured risk assessment.
-
-You MUST call the available tools to retrieve all relevant context before making your assessment. Do not assess based on partial information.
-
-Your output must be valid JSON with these fields:
-- risk_score: "Green" (accept), "Amber" (review), or "Red" (decline/refer)
-- routing: "assign_to_uw", "assign_to_senior_uw", "decline_without_review", or "refer_to_management"
-- confidence: 0.0 to 1.0
-- reasoning: Plain language explanation of your assessment (2-3 paragraphs)
-- risk_factors: Array of identified risk factors, each with {factor, severity, detail}
-- mitigating_factors: Array of positive indicators
-
-Consider these dimensions:
-1. Financial stability (revenue trends, going concern opinions)
-2. Claims and litigation history (frequency, severity, trends)
-3. Industry risk profile (SIC code risk classification)
-4. Corporate governance (board composition, D&O history)
-5. Regulatory exposure (investigations, enforcement actions)
-6. Market conditions (competitive landscape, rate adequacy)""",
+        TRIAGE_SYSTEM_V2,
         "system", "behavioural",
-        "Comprehensive system prompt with multi-factor assessment framework", "high", "Sarah Chen",
+        "Production-grade prompt with scoring criteria, confidence calibration, and critical distinctions", "high", "Sarah Chen",
         ("triage_agent_system", 2),
     )
 
     # ── Triage agent context template
     await _register_and_promote(
         prompts["triage_agent_context"], 1, 0, 0,
-        "Please assess the following submission. Use the available tools to retrieve full context before making your assessment.\n\nSubmission ID: {{submission_id}}\nLine of Business: {{lob}}\nNamed Insured: {{named_insured}}",
+        TRIAGE_CONTEXT_V1,
         "user", "contextual",
-        "Initial context template with submission identifiers", "medium", "Dev Team",
+        "Context template with tool call instructions and submission identifiers", "medium", "Dev Team",
         ("triage_agent_context", 1),
     )
 
     # ── Appetite agent system prompt
     await _register_and_promote(
         prompts["appetite_agent_system"], 1, 0, 0,
-        """You are an underwriting appetite assessment agent. Your role is to determine whether a submission falls within the company's underwriting appetite by comparing the submission's characteristics against the relevant underwriting guidelines document.
-
-You MUST:
-1. Call get_underwriting_guidelines to retrieve the relevant guidelines
-2. Call get_submission_context to retrieve the submission details
-3. Compare each guideline criterion against the submission data
-4. Cite specific guideline sections for each determination
-
-Your output must be valid JSON with these fields:
-- determination: "within_appetite", "borderline", or "outside_appetite"
-- confidence: 0.0 to 1.0
-- reasoning: Plain language explanation
-- guideline_citations: Array of {section, criterion, submission_value, meets_criterion}
-- exceptions_needed: Array of guideline exceptions that would need approval""",
+        APPETITE_SYSTEM_V1,
         "system", "behavioural",
-        "Initial system prompt with guidelines citation framework", "high", "Sarah Chen",
+        "Production-grade prompt with systematic guideline evaluation and determination rules", "high", "Sarah Chen",
         ("appetite_agent_system", 1),
     )
 
     # ── Appetite agent context template
     await _register_and_promote(
         prompts["appetite_agent_context"], 1, 0, 0,
-        "Please assess the appetite for the following submission.\n\nSubmission ID: {{submission_id}}\nLine of Business: {{lob}}\nNamed Insured: {{named_insured}}",
+        APPETITE_CONTEXT_V1,
         "user", "contextual",
-        "Initial context template", "medium", "Dev Team",
+        "Context template with tool call instructions and LOB-specific guidance", "medium", "Dev Team",
         ("appetite_agent_context", 1),
     )
 
     # ── Document classifier instruction — v1 promoted then superseded by v2
     await _register_and_promote(
         prompts["doc_classifier_instruction"], 1, 0, 0,
-        "Classify the document into one of: acord_855, acord_125, loss_runs, supplemental_do, supplemental_gl, other. Return JSON with document_type and confidence.",
+        CLASSIFIER_SYSTEM_V1,
         "system", "behavioural",
         "Initial simple classifier instruction", "high", "Dev Team",
         ("doc_classifier_instruction", 1),
     )
     await _register_and_promote(
         prompts["doc_classifier_instruction"], 2, 0, 0,
-        "You are an insurance document classifier. Classify the provided document into exactly one of these types: acord_855, acord_125, loss_runs, supplemental_do, supplemental_gl, financial_statements, board_resolution, other. Return only valid JSON with document_type, confidence (0.0-1.0), and classification_notes. Base classification only on document content — never on filename.",
+        CLASSIFIER_SYSTEM_V2,
         "system", "behavioural",
-        "Added financial_statements and board_resolution types, explicit instruction to ignore filename", "high", "James Okafor",
+        "Production-grade prompt with document type descriptions, recognition markers, and confidence calibration", "high", "James Okafor",
         ("doc_classifier_instruction", 2),
     )
 
     # ── Document classifier input template
     await _register_and_promote(
         prompts["doc_classifier_input"], 1, 0, 0,
-        "Document text:\n{{document_text}}",
+        CLASSIFIER_INPUT_V1,
         "user", "formatting",
-        "Simple document text input wrapper", "low", "Dev Team",
+        "Document text input with classification instruction", "low", "Dev Team",
         ("doc_classifier_input", 1),
     )
 
     # ── Field extractor system prompt
     await _register_and_promote(
         prompts["field_extractor_instruction"], 1, 0, 0,
-        "You are a specialist extraction system for D&O insurance applications (ACORD 855 form). Extract the following fields: named_insured, fein, entity_type, state_of_incorporation, annual_revenue, employee_count, board_size, independent_directors, effective_date, expiration_date, limits_requested, retention_requested, prior_carrier, prior_premium, securities_class_action_history, regulatory_investigation_history, merger_acquisition_activity, ipo_planned, going_concern_opinion, non_renewed_by_carrier. For each field: extract the value exactly as stated, assign confidence (0.0-1.0), and if not found, set to null with confidence 0.0. Never invent values. Return only valid JSON.",
+        EXTRACTOR_SYSTEM_V1,
         "system", "behavioural",
-        "Initial extraction instruction with 20-field schema", "high", "James Okafor",
+        "Production-grade prompt with 20-field schema, type definitions, confidence calibration, and extraction rules", "high", "James Okafor",
         ("field_extractor_instruction", 1),
     )
 
     # ── Field extractor input template
     await _register_and_promote(
         prompts["field_extractor_input"], 1, 0, 0,
-        "ACORD 855 document text:\n{{document_text}}",
+        EXTRACTOR_INPUT_V1,
         "user", "formatting",
-        "Simple ACORD 855 text input wrapper", "low", "Dev Team",
+        "D&O application text input with extraction instruction", "low", "Dev Team",
         ("field_extractor_input", 1),
     )
 
@@ -864,10 +845,10 @@ async def seed_test_suites(verity, agents, tasks) -> dict:
             "entity_type": "task", "entity_id": tasks["document_classifier"]["id"],
             "suite_type": "unit", "created_by": "Dev Team",
             "cases": [
-                {"name": "classify_acord_855", "description": "Should classify ACORD 855 form correctly",
-                 "input_data": {"document_text": "ACORD 855 DIRECTORS AND OFFICERS LIABILITY APPLICATION Named Insured: Acme Corp...", "document_filename": "test.pdf"},
-                 "expected_output": {"document_type": "acord_855", "confidence": 0.95},
-                 "metric_type": "classification_f1", "metric_config": {"classes": ["acord_855", "acord_125", "loss_runs", "other"]}},
+                {"name": "classify_do_application", "description": "Should classify D&O application form correctly",
+                 "input_data": {"document_text": "DIRECTORS AND OFFICERS LIABILITY APPLICATION Named Insured: Acme Corp...", "document_filename": "test.pdf"},
+                 "expected_output": {"document_type": "do_application", "confidence": 0.95},
+                 "metric_type": "classification_f1", "metric_config": {"classes": ["do_application", "gl_application", "loss_runs", "other"]}},
                 {"name": "classify_loss_runs", "description": "Should classify loss run document correctly",
                  "input_data": {"document_text": "LOSS RUN REPORT Policy Period: 2022-2023 Claims Summary...", "document_filename": "losses.pdf"},
                  "expected_output": {"document_type": "loss_runs", "confidence": 0.92},
@@ -880,11 +861,11 @@ async def seed_test_suites(verity, agents, tasks) -> dict:
         },
         {
             "name": "field_extractor_unit",
-            "description": "Unit tests for ACORD 855 field extraction",
+            "description": "Unit tests for D&O application field extraction",
             "entity_type": "task", "entity_id": tasks["field_extractor"]["id"],
             "suite_type": "unit", "created_by": "Dev Team",
             "cases": [
-                {"name": "extract_complete_form", "description": "Extract all fields from a complete ACORD 855",
+                {"name": "extract_complete_form", "description": "Extract all fields from a complete D&O application",
                  "input_data": {"document_text": "Named Insured: Acme Dynamics LLC FEIN: 12-3456789 Revenue: $50,000,000...", "submission_id": "test-001"},
                  "expected_output": {"fields": {"named_insured": "Acme Dynamics LLC", "fein": "12-3456789", "annual_revenue": 50000000}, "extraction_complete": True},
                  "metric_type": "field_accuracy", "metric_config": {"required_fields": ["named_insured", "fein", "annual_revenue"], "tolerance": 0.90}},
@@ -1004,31 +985,35 @@ async def promote_to_champion(verity, agent_versions, task_versions, agents, tas
 async def seed_governance_artifacts(verity, agents, tasks, agent_versions, task_versions):
     """Seed ground truth datasets, validation runs, model cards, and metric thresholds."""
 
-    # Ground truth datasets
+    # Ground truth datasets (three-table design: dataset -> record -> annotation)
     gt_classifier = await verity.registry.register_ground_truth_dataset(
         entity_type="task", entity_id=tasks["document_classifier"]["id"],
-        name="classifier_ground_truth_v1", version=1,
+        name="classifier_ground_truth_v1", version="1.0",
         description="200 SME-labeled insurance documents (50 per major type)",
-        lob=None, record_count=200, minio_bucket="ground-truth-datasets",
-        minio_key="document_classifier/v1/dataset.json",
-        labeled_by_sme="Maria Santos, Senior UW", reviewed_by="James Okafor, Model Risk",
+        purpose="Validate document classification accuracy before champion promotion",
+        quality_tier="silver", status="ready",
+        owner_name="Maria Santos, Senior UW", created_by="Maria Santos, Senior UW",
+        record_count=200, designed_for_version_id=None,
+        coverage_notes="Covers D&O applications, GL applications, loss runs, financial statements. 50 per major type.",
     )
 
     gt_triage = await verity.registry.register_ground_truth_dataset(
         entity_type="agent", entity_id=agents["triage_agent"]["id"],
-        name="triage_ground_truth_v1", version=1,
+        name="triage_ground_truth_v1", version="1.0",
         description="20 SME-labeled submissions with risk scores and routing decisions",
-        lob=None, record_count=20, minio_bucket="ground-truth-datasets",
-        minio_key="triage_agent/v1/dataset.json",
-        labeled_by_sme="James Okafor, Model Risk", reviewed_by="Sarah Chen, Chief Actuary",
+        purpose="Validate triage risk scoring accuracy before champion promotion",
+        quality_tier="silver", status="ready",
+        owner_name="James Okafor, Model Risk", created_by="James Okafor, Model Risk",
+        record_count=20, designed_for_version_id=None,
+        coverage_notes="Mix of Green/Amber/Red submissions across D&O and GL lines.",
     )
 
     # Validation runs
     await verity.registry.register_validation_run(
         entity_type="task", entity_version_id=task_versions[("document_classifier", "1.0.0")],
-        dataset_id=gt_classifier["id"], run_by="James Okafor",
+        dataset_id=gt_classifier["id"], dataset_version="1.0", run_by="James Okafor",
         precision_score=0.9600, recall_score=0.9400, f1_score=0.9500,
-        cohens_kappa=None, confusion_matrix={"acord_855": {"acord_855": 48, "other": 2}, "loss_runs": {"loss_runs": 47, "other": 3}},
+        cohens_kappa=None, confusion_matrix={"do_application": {"do_application": 48, "other": 2}, "loss_runs": {"loss_runs": 47, "other": 3}},
         field_accuracy=None, overall_extraction_rate=None, low_confidence_rate=None,
         fairness_metrics=None, fairness_passed=None, fairness_notes=None,
         thresholds_met=True, threshold_details={"f1": {"required": 0.92, "achieved": 0.95, "passed": True}},
@@ -1038,7 +1023,7 @@ async def seed_governance_artifacts(verity, agents, tasks, agent_versions, task_
 
     await verity.registry.register_validation_run(
         entity_type="agent", entity_version_id=agent_versions[("triage_agent", "1.0.0")],
-        dataset_id=gt_triage["id"], run_by="Sarah Chen",
+        dataset_id=gt_triage["id"], dataset_version="1.0", run_by="Sarah Chen",
         precision_score=0.8800, recall_score=0.8500, f1_score=0.8600,
         cohens_kappa=0.7800, confusion_matrix={"Green": {"Green": 8, "Amber": 1}, "Amber": {"Amber": 6, "Red": 1}, "Red": {"Red": 4}},
         field_accuracy=None, overall_extraction_rate=None, low_confidence_rate=None,
@@ -1094,7 +1079,7 @@ async def seed_governance_artifacts(verity, agents, tasks, agent_versions, task_
     for et, eid, tier, metric, min_val, target in thresholds:
         await verity.registry.register_metric_threshold(
             entity_type=et, entity_id=eid, materiality_tier=tier,
-            metric_name=metric, minimum_acceptable=min_val, target_champion=target,
+            metric_name=metric, field_name=None, minimum_acceptable=min_val, target_champion=target,
         )
     print(f"  + 4 metric thresholds")
 
@@ -1150,25 +1135,25 @@ async def seed_decisions(verity, agent_versions, task_versions):
     # Submission IDs — fixed UUIDs for consistency
     submissions = [
         {"id": "00000001-0001-0001-0001-000000000001", "name": "Acme Dynamics D&O", "lob": "DO",
-         "classifier_output": {"document_type": "acord_855", "confidence": 0.97, "classification_notes": "Clear ACORD 855 D&O application header"},
+         "classifier_output": {"document_type": "do_application", "confidence": 0.97, "classification_notes": "Clear D&O liability application header"},
          "extractor_output": {"fields": {"named_insured": "Acme Dynamics LLC", "annual_revenue": 50000000, "employee_count": 250, "board_size": 7}, "low_confidence_fields": [], "extraction_complete": True},
          "triage_output": {"risk_score": "Green", "routing": "assign_to_uw", "confidence": 0.89, "reasoning": "Strong financials, clean loss history, experienced board. Standard D&O risk profile.", "risk_factors": [{"factor": "Revenue concentration", "severity": "low", "detail": "Single market segment"}]},
          "appetite_output": {"determination": "within_appetite", "confidence": 0.92, "reasoning": "Meets all D&O guidelines criteria per §2.1-2.4.", "guideline_citations": [{"section": "§2.1", "criterion": "Revenue > $10M", "meets": True}]}},
 
         {"id": "00000002-0002-0002-0002-000000000002", "name": "TechFlow Industries D&O", "lob": "DO",
-         "classifier_output": {"document_type": "acord_855", "confidence": 0.94, "classification_notes": "ACORD 855 with some non-standard formatting"},
+         "classifier_output": {"document_type": "do_application", "confidence": 0.94, "classification_notes": "D&O application with some non-standard formatting"},
          "extractor_output": {"fields": {"named_insured": "TechFlow Industries Inc", "annual_revenue": 120000000, "employee_count": 800, "board_size": 9}, "low_confidence_fields": ["regulatory_investigation_history"], "extraction_complete": True},
          "triage_output": {"risk_score": "Amber", "routing": "assign_to_senior_uw", "confidence": 0.72, "reasoning": "Mixed profile. Strong revenue but pending regulatory investigation and recent board turnover raise concerns.", "risk_factors": [{"factor": "Regulatory investigation", "severity": "medium", "detail": "SEC inquiry pending"}, {"factor": "Board turnover", "severity": "low", "detail": "3 directors replaced in 12 months"}]},
          "appetite_output": {"determination": "borderline", "confidence": 0.65, "reasoning": "Meets most criteria but §3.2 flags pending regulatory matters.", "guideline_citations": [{"section": "§3.2", "criterion": "No pending regulatory investigations", "meets": False}]}},
 
         {"id": "00000003-0003-0003-0003-000000000003", "name": "Meridian Holdings GL", "lob": "GL",
-         "classifier_output": {"document_type": "acord_125", "confidence": 0.91, "classification_notes": "General liability application form"},
+         "classifier_output": {"document_type": "gl_application", "confidence": 0.91, "classification_notes": "General liability application form"},
          "extractor_output": {"fields": {"named_insured": "Meridian Holdings Corp", "annual_revenue": 25000000, "employee_count": 150}, "low_confidence_fields": ["prior_premium"], "extraction_complete": True},
          "triage_output": {"risk_score": "Red", "routing": "refer_to_management", "confidence": 0.85, "reasoning": "High claims frequency, going concern qualification, and industry in excluded SIC codes.", "risk_factors": [{"factor": "Claims frequency", "severity": "high", "detail": "12 claims in 3 years"}, {"factor": "Going concern", "severity": "critical", "detail": "Auditor qualified opinion"}]},
          "appetite_output": {"determination": "outside_appetite", "confidence": 0.94, "reasoning": "Multiple guideline violations: §4.1 excluded SIC code, §4.3 going concern disqualification.", "guideline_citations": [{"section": "§4.1", "criterion": "SIC code not excluded", "meets": False}, {"section": "§4.3", "criterion": "No going concern opinion", "meets": False}]}},
 
         {"id": "00000004-0004-0004-0004-000000000004", "name": "Acme Dynamics GL", "lob": "GL",
-         "classifier_output": {"document_type": "acord_125", "confidence": 0.93, "classification_notes": "Standard GL application"},
+         "classifier_output": {"document_type": "gl_application", "confidence": 0.93, "classification_notes": "Standard GL application"},
          "extractor_output": {"fields": {"named_insured": "Acme Dynamics LLC", "annual_revenue": 50000000, "employee_count": 250}, "low_confidence_fields": [], "extraction_complete": True},
          "triage_output": {"risk_score": "Amber", "routing": "assign_to_senior_uw", "confidence": 0.74, "reasoning": "Adequate financials but GL exposure from manufacturing operations and moderate claims history.", "risk_factors": [{"factor": "Manufacturing operations", "severity": "medium", "detail": "Products liability exposure"}, {"factor": "Claims trend", "severity": "low", "detail": "Increasing frequency, stable severity"}]},
          "appetite_output": {"determination": "within_appetite", "confidence": 0.81, "reasoning": "Meets GL criteria. Manufacturing operations within acceptable risk classes per §5.2.", "guideline_citations": [{"section": "§5.2", "criterion": "Manufacturing SIC codes allowed", "meets": True}]}},
@@ -1211,7 +1196,6 @@ async def seed_decisions(verity, agent_versions, task_versions):
                 entity_version_id=version_id,
                 prompt_version_ids=[],
                 inference_config_snapshot={"config_name": config_name, "model_name": model, "temperature": temp, "max_tokens": max_tok},
-                submission_id=sub["id"],
                 channel=DeploymentChannel.PRODUCTION,
                 pipeline_run_id=pipeline_run_id,
                 parent_decision_id=None,
@@ -1222,7 +1206,7 @@ async def seed_decisions(verity, agent_versions, task_versions):
                 output_json=output,
                 output_summary=json.dumps(output)[:300],
                 reasoning_text=output.get("reasoning", ""),
-                risk_factors={"factors": output.get("risk_factors", [])} if "risk_factors" in output else None,
+                risk_factors=output.get("risk_factors"),
                 confidence_score=output.get("confidence"),
                 model_used=model,
                 input_tokens=1500 + (decision_count * 100),
@@ -1256,7 +1240,6 @@ async def seed_decisions(verity, agent_versions, task_versions):
                 override_notes="Regulatory investigation is routine SEC review, not enforcement action. Downgrading risk assessment from Amber to Green based on direct discussion with insured's counsel.",
                 ai_recommendation={"risk_score": "Amber", "routing": "assign_to_senior_uw"},
                 human_decision={"risk_score": "Green", "routing": "assign_to_uw"},
-                submission_id=sub_id,
             ))
         elif override_type == "appetite":
             await verity.decisions.record_override(OverrideLogCreate(
@@ -1267,7 +1250,6 @@ async def seed_decisions(verity, agent_versions, task_versions):
                 override_notes="Long-standing client relationship with strong premium history. Accepting despite guideline §4.1 SIC code exclusion per management exception protocol.",
                 ai_recommendation={"determination": "outside_appetite"},
                 human_decision={"determination": "within_appetite", "exception_approved": True},
-                submission_id=sub_id,
             ))
 
     print(f"  + {len(override_decisions)} override logs")

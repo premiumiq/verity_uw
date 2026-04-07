@@ -1,0 +1,30 @@
+LOSS RUN REPORT
+===============================================================================
+
+Insured:          Brightline Analytics Corp
+FEIN:             01-2345678
+Policy Number:    PLY-DO-BRIGHTLI-2026
+Line of Business: Directors & Officers
+Report Date:      03/15/2026
+Report Period:    01/01/2023 to 12/31/2025
+
+===============================================================================
+CLAIMS SUMMARY - 3 YEAR HISTORY
+===============================================================================
+
+Year    Claims   Incurred ($)    Paid ($)       Reserves ($)   Status
+------  ------   ------------    ----------     -----------    --------
+2023      0                 $0              $0             $0  Closed
+2024      0                 $0              $0             $0  Closed
+2025      0                 $0              $0             $0  Closed
+
+TOTALS: 0 claims, $0 total incurred,
+        $0 paid, $0 outstanding reserves
+
+Loss Ratio (3-Year): N/A
+
+-------------------------------------------------------------------------------
+Report prepared by: Claims Department
+This report is provided for informational purposes only and does not constitute
+a guarantee of coverage or payment.
+===============================================================================

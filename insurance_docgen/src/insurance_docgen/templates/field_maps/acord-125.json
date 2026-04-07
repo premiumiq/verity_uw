@@ -1,0 +1,53 @@
+{
+    "_comment": "Field map: CompanyProfile data keys -> ACORD 125 form field names (XFA paths)",
+    "_template": "Acord-125-Commercial-Insurance-Application.pdf (2 pages, 365 fields)",
+
+    "named_insured": {
+        "pdf_field": "topmostSubform[0].Page1[0].APPLICANT_INFORMATION_SECTION[0]",
+        "type": "text"
+    },
+    "mailing_address": {
+        "pdf_field": "topmostSubform[0].Page1[0].APPLICANT_INFORMATION_SECTION[1]",
+        "type": "text"
+    },
+    "application_date": {
+        "pdf_field": "topmostSubform[0].Page1[0].DATE_MMDDYYYY[0]",
+        "type": "text"
+    },
+    "agency": {
+        "pdf_field": "topmostSubform[0].Page1[0].AGENCY[0]",
+        "type": "text"
+    },
+    "proposed_eff_date": {
+        "pdf_field": "topmostSubform[0].Page1[0].PROPOSED_EXP_DATE__Row_1[0]",
+        "type": "text"
+    },
+    "proposed_exp_date": {
+        "pdf_field": "topmostSubform[0].Page1[0].PROPOSED_EXP_DATE__Row_1[1]",
+        "type": "text"
+    },
+    "fein": {
+        "pdf_field": "topmostSubform[0].Page1[0].ID_NUMBER[0]",
+        "type": "text"
+    },
+    "sic_code": {
+        "pdf_field": "topmostSubform[0].Page1[0].ID_NUMBER[1]",
+        "type": "text"
+    },
+    "date_business_started": {
+        "pdf_field": "topmostSubform[0].Page1[0].DATE_BUS_STARTED[0]",
+        "type": "text"
+    },
+    "phone": {
+        "pdf_field": "topmostSubform[0].Page1[0].PHONE_AC__No__Ext[0]",
+        "type": "text"
+    },
+    "nature_of_business": {
+        "pdf_field": "topmostSubform[0].Page1[0].NATURE_OF_BUSINESSDESCRIPTION_OF_OPERATIONS_BY_PREMISES[0]",
+        "type": "text"
+    },
+    "location_1": {
+        "pdf_field": "topmostSubform[0].Page1[0].LOC[0]",
+        "type": "text"
+    }
+}

@@ -1,0 +1,75 @@
+{{ named_insured | upper }}
+CONSOLIDATED FINANCIAL STATEMENTS
+Fiscal Years Ended December 31, {{ financial_data.current_year }} and {{ financial_data.prior_year }}
+
+===============================================================================
+INDEPENDENT AUDITOR'S REPORT
+===============================================================================
+
+To the Board of Directors and Shareholders of {{ named_insured }}:
+
+Opinion
+
+We have audited the accompanying consolidated financial statements of
+{{ named_insured }} (the "Company"), which comprise the consolidated balance
+sheets as of December 31, {{ financial_data.current_year }} and {{ financial_data.prior_year }},
+and the related consolidated statements of operations, comprehensive income,
+stockholders' equity, and cash flows for the years then ended.
+
+In our opinion, the consolidated financial statements referred to above present
+fairly, in all material respects, the financial position of the Company as of
+December 31, {{ financial_data.current_year }}, in conformity with accounting
+principles generally accepted in the United States of America.
+{% if financial_data.auditor_opinion == "Going Concern" %}
+
+Going Concern
+
+The accompanying financial statements have been prepared assuming the Company
+will continue as a going concern. {{ financial_data.going_concern_note | default("As discussed in Note 2, the Company has suffered recurring losses from operations and has a net capital deficiency that raise substantial doubt about its ability to continue as a going concern. Management's plans in regard to these matters are also described in Note 2. The financial statements do not include any adjustments that might result from the outcome of this uncertainty.") }}
+{% endif %}
+{% if financial_data.auditor_opinion == "Qualified" %}
+
+Basis for Qualified Opinion
+
+As discussed in Note 4, the Company has not disclosed certain related-party
+transactions as required by accounting standards. In our opinion, disclosure
+of this information is required for a fair presentation.
+{% endif %}
+
+{{ financial_data.auditor_name }}
+Certified Public Accountants
+{{ report_city | default(city) }}, {{ state }}
+{{ audit_date | default("March 15, " + financial_data.current_year | string) }}
+
+===============================================================================
+CONSOLIDATED BALANCE SHEET
+As of December 31 (in thousands)
+===============================================================================
+
+                                        {{ financial_data.current_year }}        {{ financial_data.prior_year }}
+                                        ------------    ------------
+ASSETS
+  Total Assets                          {{ "%12s" | format(financial_data.current_total_assets | currency) }}  {{ "%12s" | format(financial_data.prior_total_assets | currency) }}
+
+LIABILITIES
+  Total Liabilities                     {{ "%12s" | format(financial_data.current_total_liabilities | currency) }}  {{ "%12s" | format(financial_data.prior_total_liabilities | currency) }}
+
+STOCKHOLDERS' EQUITY
+  Total Equity                          {{ "%12s" | format(financial_data.current_equity | currency) }}  {{ "%12s" | format(financial_data.prior_equity | currency) }}
+
+Total Liabilities & Equity              {{ "%12s" | format(financial_data.current_total_assets | currency) }}  {{ "%12s" | format(financial_data.prior_total_assets | currency) }}
+
+Debt-to-Equity Ratio:                   {{ "%.2f" | format(financial_data.current_total_liabilities / financial_data.current_equity) if financial_data.current_equity > 0 else "N/A" }}            {{ "%.2f" | format(financial_data.prior_total_liabilities / financial_data.prior_equity) if financial_data.prior_equity > 0 else "N/A" }}
+
+===============================================================================
+CONSOLIDATED STATEMENT OF OPERATIONS
+For the Years Ended December 31 (in thousands)
+===============================================================================
+
+                                        {{ financial_data.current_year }}        {{ financial_data.prior_year }}
+                                        ------------    ------------
+Total Revenue                           {{ "%12s" | format(financial_data.current_revenue | currency) }}  {{ "%12s" | format(financial_data.prior_revenue | currency) }}
+
+Net Income (Loss)                       {{ "%12s" | format(financial_data.current_net_income | currency) }}  {{ "%12s" | format(financial_data.prior_net_income | currency) }}
+
+===============================================================================

@@ -67,22 +67,24 @@ def create_uw_routes(verity) -> APIRouter:
         if not sub:
             return HTMLResponse("<h1>Submission not found</h1>", status_code=404)
 
-        # Get audit trail — try pipeline_run_id first (preferred), fall back to submission_id
+        # Get audit trail using Verity-owned IDs (never business keys)
         trail = []
         if sub.get("last_pipeline_run_id"):
             trail = await verity.get_audit_trail_by_run(sub["last_pipeline_run_id"])
-        if not trail:
-            # Fall back to submission_id for pre-seeded data
-            trail = await verity.get_audit_trail(submission_id)
+        elif sub.get("last_execution_context_id"):
+            trail = await verity.get_audit_trail(sub["last_execution_context_id"])
 
-        # Get any overrides for this submission
+        # Get any overrides linked to decisions for this submission's pipeline run
         overrides = []
-        override_rows = await verity.db.fetch_all_raw(
-            "SELECT * FROM override_log WHERE submission_id = %(sub_id)s",
-            {"sub_id": submission_id},
-        )
-        if override_rows:
-            overrides = override_rows
+        if sub.get("last_pipeline_run_id"):
+            override_rows = await verity.db.fetch_all_raw(
+                "SELECT ol.* FROM override_log ol "
+                "JOIN agent_decision_log adl ON adl.id = ol.decision_log_id "
+                "WHERE adl.pipeline_run_id = %(run_id)s::uuid",
+                {"run_id": sub["last_pipeline_run_id"]},
+            )
+            if override_rows:
+                overrides = override_rows
 
         return templates.TemplateResponse(request, "submission_detail.html", {
             "active_page": "submissions",
@@ -145,7 +147,6 @@ def create_uw_routes(verity) -> APIRouter:
             result = await verity.execute_pipeline(
                 pipeline_name="uw_submission_pipeline",
                 context=pipeline_context,
-                submission_id=submission_id,
                 execution_context_id=exec_ctx_id,
             )
         else:
@@ -153,13 +154,13 @@ def create_uw_routes(verity) -> APIRouter:
             result = await verity.execute_pipeline(
                 pipeline_name="uw_submission_pipeline",
                 context=pipeline_context,
-                submission_id=submission_id,
                 mock=mock,
                 execution_context_id=exec_ctx_id,
             )
 
-        # Store the pipeline_run_id so "View in Verity" links work
+        # Store Verity IDs on the submission so "View in Verity" links work
         sub["last_pipeline_run_id"] = str(result.pipeline_run_id)
+        sub["last_execution_context_id"] = str(exec_ctx_id) if exec_ctx_id else None
 
         return templates.TemplateResponse(request, "pipeline_runner.html", {
             "active_page": "submissions",

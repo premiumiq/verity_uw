@@ -1,0 +1,54 @@
+LOSS RUN REPORT
+===============================================================================
+
+Insured:          Bayview Chemical Corp
+FEIN:             77-9012345
+Policy Number:    PLY-GL-BAYVIEW_-2026
+Line of Business: General Liability
+Report Date:      03/15/2026
+Report Period:    01/01/2023 to 12/31/2025
+
+===============================================================================
+CLAIMS SUMMARY - 3 YEAR HISTORY
+===============================================================================
+
+Year    Claims   Incurred ($)    Paid ($)       Reserves ($)   Status
+------  ------   ------------    ----------     -----------    --------
+2023      1            $28,000         $28,000             $0  Closed
+2024      1            $35,000         $35,000             $0  Closed
+2025      0                 $0              $0             $0  Closed
+
+TOTALS: 2 claims, $63,000 total incurred,
+        $63,000 paid, $0 outstanding reserves
+
+Loss Ratio (3-Year): N/A
+
+===============================================================================
+CLAIM DETAILS
+===============================================================================
+
+Claim #CLM-2023-001
+  Date of Loss:  2023-09-10
+  Claimant:      Employee
+  Type:          Bodily Injury
+  Description:   Chemical burn from cleaning solution splashback. Treated at urgent care.
+  Status:        Closed
+  Amount Paid:   $28,000
+  Reserves:      $0
+  Total Incurred: $28,000
+
+Claim #CLM-2024-001
+  Date of Loss:  2024-03-22
+  Claimant:      Neighboring Business
+  Type:          Property Damage
+  Description:   Chemical fumes from manufacturing triggered evacuation of adjacent office building.
+  Status:        Closed
+  Amount Paid:   $35,000
+  Reserves:      $0
+  Total Incurred: $35,000
+
+-------------------------------------------------------------------------------
+Report prepared by: Claims Department
+This report is provided for informational purposes only and does not constitute
+a guarantee of coverage or payment.
+===============================================================================

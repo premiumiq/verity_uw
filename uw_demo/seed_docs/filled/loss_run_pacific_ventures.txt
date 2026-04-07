@@ -1,0 +1,44 @@
+LOSS RUN REPORT
+===============================================================================
+
+Insured:          Pacific Ventures Group Inc
+FEIN:             89-0123456
+Policy Number:    PLY-DO-PACIFIC_-2026
+Line of Business: Directors & Officers
+Report Date:      03/15/2026
+Report Period:    01/01/2023 to 12/31/2025
+
+===============================================================================
+CLAIMS SUMMARY - 3 YEAR HISTORY
+===============================================================================
+
+Year    Claims   Incurred ($)    Paid ($)       Reserves ($)   Status
+------  ------   ------------    ----------     -----------    --------
+2023      0                 $0              $0             $0  Closed
+2024      1           $350,000        $100,000       $250,000  Open
+2025      0                 $0              $0             $0  Closed
+
+TOTALS: 1 claims, $350,000 total incurred,
+        $100,000 paid, $250,000 outstanding reserves
+
+Loss Ratio (3-Year): N/A
+
+===============================================================================
+CLAIM DETAILS
+===============================================================================
+
+Claim #CLM-2024-001
+  Date of Loss:  2024-07-22
+  Claimant:      Minority Shareholders
+  Type:          D&O Breach of Duty
+  Description:   Minority shareholders allege board failed to disclose deteriorating financial condition. In litigation.
+  Status:        Open
+  Amount Paid:   $100,000
+  Reserves:      $250,000
+  Total Incurred: $350,000
+
+-------------------------------------------------------------------------------
+Report prepared by: Claims Department
+This report is provided for informational purposes only and does not constitute
+a guarantee of coverage or payment.
+===============================================================================

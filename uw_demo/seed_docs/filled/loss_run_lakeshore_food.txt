@@ -1,0 +1,44 @@
+LOSS RUN REPORT
+===============================================================================
+
+Insured:          Lakeshore Food Processing Inc
+FEIN:             55-7890123
+Policy Number:    PLY-GL-LAKESHOR-2026
+Line of Business: General Liability
+Report Date:      03/15/2026
+Report Period:    01/01/2023 to 12/31/2025
+
+===============================================================================
+CLAIMS SUMMARY - 3 YEAR HISTORY
+===============================================================================
+
+Year    Claims   Incurred ($)    Paid ($)       Reserves ($)   Status
+------  ------   ------------    ----------     -----------    --------
+2023      1            $15,000         $15,000             $0  Closed
+2024      0                 $0              $0             $0  Closed
+2025      0                 $0              $0             $0  Closed
+
+TOTALS: 1 claims, $15,000 total incurred,
+        $15,000 paid, $0 outstanding reserves
+
+Loss Ratio (3-Year): N/A
+
+===============================================================================
+CLAIM DETAILS
+===============================================================================
+
+Claim #CLM-2023-001
+  Date of Loss:  2023-11-15
+  Claimant:      Employee
+  Type:          Bodily Injury
+  Description:   Employee slipped on wet production floor. Minor injury treated on-site.
+  Status:        Closed
+  Amount Paid:   $15,000
+  Reserves:      $0
+  Total Incurred: $15,000
+
+-------------------------------------------------------------------------------
+Report prepared by: Claims Department
+This report is provided for informational purposes only and does not constitute
+a guarantee of coverage or payment.
+===============================================================================

@@ -73,6 +73,43 @@ CREATE TYPE metric_type AS ENUM (
     'human_rubric'          -- requires SME qualitative review
 );
 
+-- Ground truth dataset lifecycle status
+CREATE TYPE gt_dataset_status AS ENUM (
+    'collecting',    -- records being gathered, not yet ready for labeling
+    'labeling',      -- annotations in progress
+    'adjudicating',  -- disagreements being resolved
+    'ready',         -- all records have an authoritative annotation
+    'deprecated'     -- superseded by a newer dataset version
+);
+
+-- Ground truth quality classification
+CREATE TYPE gt_quality_tier AS ENUM (
+    'silver',   -- single annotator, no independent review
+    'gold'      -- multi-annotator with IAA check, adjudication where needed
+);
+
+-- Ground truth record source type
+CREATE TYPE gt_source_type AS ENUM (
+    'document',     -- a real insurance document (ACORD form, loss run, etc.)
+    'submission',   -- a full submission context (for agent testing)
+    'synthetic'     -- generated test case, no real source document
+);
+
+-- Ground truth annotator type
+CREATE TYPE gt_annotator_type AS ENUM (
+    'human_sme',      -- domain expert (underwriter, compliance analyst)
+    'llm_judge',      -- LLM evaluating against a rubric
+    'adjudicator'     -- senior SME resolving a disagreement
+);
+
+-- Why an execution happened (independent of channel and mock_mode)
+CREATE TYPE run_purpose AS ENUM (
+    'production',       -- normal business execution
+    'test',             -- test suite run
+    'validation',       -- ground truth validation
+    'audit_rerun'       -- historical reproduction
+);
+
 
 -- ── INFERENCE CONFIGURATION ──────────────────────────────────
 -- Named, reusable LLM API parameter sets.
@@ -567,34 +604,170 @@ CREATE INDEX idx_tel_entity ON test_execution_log(entity_type, entity_version_id
 CREATE INDEX idx_tel_suite ON test_execution_log(suite_id);
 
 
--- ── GROUND TRUTH DATASETS ─────────────────────────────────────
+-- ── GROUND TRUTH — THREE-TABLE DESIGN ────────────────────────
+-- Dataset → Record → Annotation
+--
+-- Dataset: metadata, quality tier, labeling status, IAA metrics.
+-- Record:  one input item (document or submission context). No label.
+-- Annotation: one annotator's answer per record. is_authoritative flag
+--   selects the label used by the validation runner.
+--
+-- Storage abstraction: all document references use provider/container/key
+-- instead of MinIO-specific fields. Works with MinIO, S3, Azure Blob, local.
 
 CREATE TABLE ground_truth_dataset (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+
+    -- Which Verity entity this dataset validates
     entity_type             entity_type NOT NULL CHECK (entity_type IN ('agent', 'task')),
     entity_id               UUID NOT NULL,
-    name                    VARCHAR(200) NOT NULL,
-    version                 INTEGER NOT NULL DEFAULT 1,
+
+    -- Optionally pin to a version this dataset was designed for
+    -- (a dataset may outlive the version it was originally built for)
+    designed_for_version_id UUID,
+
+    -- Identity
+    name                    VARCHAR(300) NOT NULL,
+    version                 VARCHAR(50)  NOT NULL DEFAULT '1.0',
     description             TEXT,
-    lob                     VARCHAR(20),
-    record_count            INTEGER NOT NULL,
+    purpose                 TEXT NOT NULL,
+    -- e.g. "Validate field extraction accuracy before v1.2 promotion"
 
-    minio_bucket            VARCHAR(100) DEFAULT 'ground-truth-datasets',
-    minio_key               VARCHAR(500),
+    -- Quality classification
+    quality_tier            gt_quality_tier NOT NULL DEFAULT 'silver',
+    status                  gt_dataset_status NOT NULL DEFAULT 'collecting',
 
-    labeled_by_sme          VARCHAR(200) NOT NULL,
-    reviewed_by             VARCHAR(200),
+    -- Labeling guidance document (storage-abstracted)
+    labeling_guide_provider  VARCHAR(50),
+    labeling_guide_container VARCHAR(200),
+    labeling_guide_key       VARCHAR(500),
 
-    superseded_by_version   INTEGER,
-    records_corrected_since INTEGER DEFAULT 0,
+    -- Ownership
+    owner_name              VARCHAR(200) NOT NULL,
+    created_by              VARCHAR(200) NOT NULL,
+
+    -- Computed quality metrics — updated whenever annotations change
+    record_count            INTEGER NOT NULL DEFAULT 0,
+    annotated_count         INTEGER NOT NULL DEFAULT 0,
+    authoritative_count     INTEGER NOT NULL DEFAULT 0,
+    iaa_score               NUMERIC(5,4),
+    iaa_computed_at         TIMESTAMP,
+    iaa_method              VARCHAR(50),
+    coverage_notes          TEXT,
 
     applies_to_versions     UUID[] DEFAULT '{}',
+    superseded_by           UUID REFERENCES ground_truth_dataset(id),
 
-    created_at              TIMESTAMP DEFAULT NOW(),
-    CONSTRAINT uq_gt_dataset UNIQUE (entity_id, entity_type, version)
+    created_at              TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMP NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT uq_gt_dataset UNIQUE (entity_type, entity_id, name, version)
 );
 
 CREATE INDEX idx_gtd_entity ON ground_truth_dataset(entity_type, entity_id);
+CREATE INDEX idx_gtd_status ON ground_truth_dataset(status);
+
+
+-- One input item within a dataset. This is the "question" — the document
+-- or context fed to the entity during validation. Carries NO label.
+-- The label lives entirely in ground_truth_annotation.
+
+CREATE TABLE ground_truth_record (
+    id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    dataset_id              UUID NOT NULL REFERENCES ground_truth_dataset(id)
+                            ON DELETE CASCADE,
+    record_index            INTEGER NOT NULL,
+
+    -- Source document reference (storage-abstracted)
+    source_type             gt_source_type NOT NULL,
+    source_provider         VARCHAR(50),
+    source_container        VARCHAR(200),
+    source_key              VARCHAR(500),
+    source_description      VARCHAR(500),
+
+    -- What gets fed to the entity during the validation run
+    input_data              JSONB NOT NULL,
+
+    -- Per-record tool mock overrides for agent testing
+    tool_mock_overrides     JSONB,
+
+    -- Slice tags for analysis (edge_case, high_risk, amber_boundary, etc.)
+    tags                    TEXT[] DEFAULT '{}',
+    difficulty              VARCHAR(20),
+    record_notes            TEXT,
+
+    created_at              TIMESTAMP NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT uq_gt_record UNIQUE (dataset_id, record_index)
+);
+
+CREATE INDEX idx_gtr_dataset ON ground_truth_record(dataset_id);
+CREATE INDEX idx_gtr_tags    ON ground_truth_record USING GIN(tags);
+
+
+-- One annotator's answer for one record. Multiple annotations per record
+-- are allowed and expected for gold-tier datasets.
+--
+-- Exactly one annotation per record has is_authoritative = true at any time.
+-- This is what the validation runner uses as the correct answer.
+--
+-- Adjudication: senior SME creates annotator_type = 'adjudicator' annotation
+-- with is_authoritative = true. Prior authoritative annotation set to false
+-- in the same transaction. Full lineage preserved.
+--
+-- LLM-as-judge: first-class annotator type. Tracked with model name and
+-- prompt version for reproducibility.
+
+CREATE TABLE ground_truth_annotation (
+    id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    record_id               UUID NOT NULL REFERENCES ground_truth_record(id)
+                            ON DELETE CASCADE,
+    dataset_id              UUID NOT NULL REFERENCES ground_truth_dataset(id),
+
+    -- Who or what produced this annotation
+    annotator_type          gt_annotator_type NOT NULL,
+
+    -- Human SME / adjudicator fields
+    labeled_by              VARCHAR(200),
+    label_confidence        NUMERIC(5,4),
+    label_notes             TEXT,
+
+    -- LLM judge fields
+    judge_model             VARCHAR(100),
+    judge_prompt_version_id UUID REFERENCES prompt_version(id),
+    judge_reasoning         TEXT,
+
+    -- The label itself — what the correct output should be.
+    -- Schema matches the entity's output_schema.
+    expected_output         JSONB NOT NULL,
+
+    -- Authoritative flag — exactly one per record should be true.
+    -- Enforced by application logic (atomic swap in same transaction).
+    is_authoritative        BOOLEAN NOT NULL DEFAULT FALSE,
+
+    -- Correction tracking
+    is_corrected            BOOLEAN DEFAULT FALSE,
+    original_output         JSONB,
+    corrected_at            TIMESTAMP,
+    correction_reason       TEXT,
+
+    labeled_at              TIMESTAMP NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT chk_human_fields CHECK (
+        annotator_type NOT IN ('human_sme', 'adjudicator')
+        OR labeled_by IS NOT NULL
+    ),
+    CONSTRAINT chk_llm_fields CHECK (
+        annotator_type != 'llm_judge'
+        OR judge_model IS NOT NULL
+    )
+);
+
+CREATE INDEX idx_gta_record     ON ground_truth_annotation(record_id);
+CREATE INDEX idx_gta_dataset    ON ground_truth_annotation(dataset_id);
+CREATE INDEX idx_gta_auth       ON ground_truth_annotation(record_id)
+                                WHERE is_authoritative = TRUE;
+CREATE INDEX idx_gta_type       ON ground_truth_annotation(annotator_type);
 
 
 -- ── VALIDATION RUNS ───────────────────────────────────────────
@@ -604,6 +777,8 @@ CREATE TABLE validation_run (
     entity_type             entity_type NOT NULL CHECK (entity_type IN ('agent', 'task')),
     entity_version_id       UUID NOT NULL,
     dataset_id              UUID NOT NULL REFERENCES ground_truth_dataset(id),
+    dataset_version         VARCHAR(50),
+    -- Which dataset version was used, so results are unambiguous
     run_at                  TIMESTAMP DEFAULT NOW(),
     run_by                  VARCHAR(200) NOT NULL,
 
@@ -612,8 +787,10 @@ CREATE TABLE validation_run (
     f1_score                NUMERIC(7,6),
     cohens_kappa            NUMERIC(7,6),
     confusion_matrix        JSONB,
+    -- Canonical format: {"labels": [...], "matrix": [[...]], "per_class": {...}}
 
     field_accuracy          JSONB,
+    -- Canonical format: {"per_field": {"field_name": {"correct": N, "total": N, "accuracy": 0.96}}, "overall_accuracy": 0.91}
     overall_extraction_rate NUMERIC(7,6),
     low_confidence_rate     NUMERIC(7,6),
 
@@ -635,6 +812,45 @@ CREATE TABLE validation_run (
 );
 
 CREATE INDEX idx_vr_entity ON validation_run(entity_type, entity_version_id);
+
+
+-- Per-record prediction results from a validation run.
+-- Enables drill-down from aggregate metrics (F1=0.95) to individual
+-- misclassifications, extraction errors, or incorrect triage outcomes.
+
+CREATE TABLE validation_record_result (
+    id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    validation_run_id       UUID NOT NULL REFERENCES validation_run(id)
+                            ON DELETE CASCADE,
+    ground_truth_record_id  UUID NOT NULL REFERENCES ground_truth_record(id),
+    record_index            INTEGER NOT NULL,
+
+    -- Ground truth vs prediction
+    expected_output         JSONB NOT NULL,
+    actual_output           JSONB NOT NULL,
+    confidence              NUMERIC(5,4),
+
+    -- Outcome
+    correct                 BOOLEAN NOT NULL,
+    match_type              VARCHAR(50),   -- 'exact', 'partial', 'fuzzy'
+    match_score             NUMERIC(7,6),  -- 0.0-1.0 for partial/fuzzy matches
+
+    -- For extraction: per-field breakdown
+    -- {"named_insured": {"correct": true, "expected": "X", "actual": "X"}, ...}
+    field_results           JSONB,
+
+    -- Links to agent_decision_log for full audit trail.
+    -- No FK constraint: agent_decision_log is defined later in schema.
+    -- Referential integrity maintained by application logic.
+    decision_log_id         UUID,
+
+    duration_ms             INTEGER,
+    created_at              TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT uq_vrr UNIQUE (validation_run_id, record_index)
+);
+
+CREATE INDEX idx_vrr_run     ON validation_record_result(validation_run_id);
+CREATE INDEX idx_vrr_correct ON validation_record_result(validation_run_id, correct);
 
 
 -- ── EVALUATION RUNS ───────────────────────────────────────────
@@ -698,7 +914,6 @@ CREATE TABLE approval_record (
     model_card_reviewed             BOOLEAN DEFAULT FALSE,
     similarity_flags_reviewed       BOOLEAN DEFAULT FALSE,
 
-    submission_id           UUID,
     decision_override       BOOLEAN DEFAULT FALSE,
     override_reason         TEXT
 );
@@ -718,11 +933,6 @@ CREATE TABLE agent_decision_log (
 
     prompt_version_ids      UUID[] DEFAULT '{}',
     inference_config_snapshot JSONB NOT NULL,
-
-    submission_id           UUID,
-    policy_id               UUID,
-    renewal_id              UUID,
-    business_entity         VARCHAR(100),
 
     channel                 deployment_channel NOT NULL,
     mock_mode               BOOLEAN DEFAULT FALSE,
@@ -757,6 +967,15 @@ CREATE TABLE agent_decision_log (
     -- Source application that created this decision.
     application             VARCHAR(100) DEFAULT 'default',
 
+    -- Why this execution happened. Independent of channel (deployment stage)
+    -- and mock_mode (whether mocking was used). Separates production runs
+    -- from test/validation/audit activities.
+    run_purpose             run_purpose NOT NULL DEFAULT 'production',
+
+    -- For audit reruns: direct FK to the original decision being reproduced.
+    -- Preserves lineage without burying it in JSONB metadata.
+    reproduced_from_decision_id UUID REFERENCES agent_decision_log(id),
+
     -- Execution context: business-level grouping registered by the app.
     -- Links this decision to a specific business operation (e.g., submission, policy).
     execution_context_id    UUID REFERENCES execution_context(id),
@@ -772,7 +991,6 @@ CREATE TABLE agent_decision_log (
 );
 
 CREATE INDEX idx_adl_entity ON agent_decision_log(entity_type, entity_version_id);
-CREATE INDEX idx_adl_submission ON agent_decision_log(submission_id);
 CREATE INDEX idx_adl_created ON agent_decision_log(created_at);
 CREATE INDEX idx_adl_pipeline ON agent_decision_log(pipeline_run_id);
 CREATE INDEX idx_adl_parent ON agent_decision_log(parent_decision_id);
@@ -792,7 +1010,6 @@ CREATE TABLE override_log (
     override_notes          TEXT,
     ai_recommendation       JSONB,
     human_decision          JSONB,
-    submission_id           UUID,
     created_at              TIMESTAMP DEFAULT NOW()
 );
 
@@ -844,10 +1061,35 @@ CREATE TABLE metric_threshold (
     entity_id           UUID NOT NULL,
     materiality_tier    materiality_tier NOT NULL,
     metric_name         VARCHAR(100) NOT NULL,
+    -- NULL = aggregate metric, set = per-field threshold (for extraction tasks)
+    field_name          VARCHAR(100),
     minimum_acceptable  NUMERIC(7,6) NOT NULL,
     target_champion     NUMERIC(7,6) NOT NULL,
     created_at          TIMESTAMP DEFAULT NOW(),
-    CONSTRAINT uq_threshold UNIQUE (entity_id, entity_type, materiality_tier, metric_name)
+    CONSTRAINT uq_threshold UNIQUE (entity_id, entity_type, materiality_tier, metric_name, field_name)
+);
+
+
+-- Per-field tolerance configuration for extraction tasks.
+-- Defines how each extracted field should be compared against ground truth.
+
+CREATE TABLE field_extraction_config (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    entity_type         entity_type NOT NULL CHECK (entity_type IN ('task')),
+    entity_id           UUID NOT NULL,
+    field_name          VARCHAR(100) NOT NULL,
+    field_type          VARCHAR(50)  NOT NULL,
+    -- 'string', 'numeric', 'date', 'boolean', 'enum'
+    match_type          VARCHAR(50)  NOT NULL,
+    -- 'exact', 'numeric_tolerance', 'case_insensitive', 'contains'
+    tolerance_value     NUMERIC(10,4),
+    -- For numeric: 0.05 = 5% when tolerance_unit='percent'
+    tolerance_unit      VARCHAR(20),
+    -- 'percent' or 'absolute'
+    is_required         BOOLEAN DEFAULT TRUE,
+    -- Must this field be extracted for "pass"?
+    created_at          TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT uq_field_config UNIQUE (entity_id, entity_type, field_name)
 );
 
 
@@ -863,7 +1105,7 @@ CREATE TABLE incident (
     severity                VARCHAR(20) NOT NULL,
     detection_source        VARCHAR(100),
     detected_at             TIMESTAMP NOT NULL DEFAULT NOW(),
-    affected_submission_ids UUID[] DEFAULT '{}',
+    affected_context_ids    UUID[] DEFAULT '{}',
     affected_decision_count INTEGER DEFAULT 0,
     rollback_executed       BOOLEAN DEFAULT FALSE,
     rollback_to_version_id  UUID,

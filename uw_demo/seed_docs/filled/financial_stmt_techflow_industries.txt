@@ -1,0 +1,60 @@
+TECHFLOW INDUSTRIES INC
+CONSOLIDATED FINANCIAL STATEMENTS
+Fiscal Years Ended December 31, 2025 and 2024
+
+===============================================================================
+INDEPENDENT AUDITOR'S REPORT
+===============================================================================
+
+To the Board of Directors and Shareholders of TechFlow Industries Inc:
+
+Opinion
+
+We have audited the accompanying consolidated financial statements of
+TechFlow Industries Inc (the "Company"), which comprise the consolidated balance
+sheets as of December 31, 2025 and 2024,
+and the related consolidated statements of operations, comprehensive income,
+stockholders' equity, and cash flows for the years then ended.
+
+In our opinion, the consolidated financial statements referred to above present
+fairly, in all material respects, the financial position of the Company as of
+December 31, 2025, in conformity with accounting
+principles generally accepted in the United States of America.
+
+Ernst & Young LLP
+Certified Public Accountants
+Austin, TX
+March 15, 2025
+
+===============================================================================
+CONSOLIDATED BALANCE SHEET
+As of December 31 (in thousands)
+===============================================================================
+
+                                        2025        2024
+                                        ------------    ------------
+ASSETS
+  Total Assets                           $88,000,000   $82,000,000
+
+LIABILITIES
+  Total Liabilities                      $38,000,000   $32,000,000
+
+STOCKHOLDERS' EQUITY
+  Total Equity                           $50,000,000   $50,000,000
+
+Total Liabilities & Equity               $88,000,000   $82,000,000
+
+Debt-to-Equity Ratio:                   0.76            0.64
+
+===============================================================================
+CONSOLIDATED STATEMENT OF OPERATIONS
+For the Years Ended December 31 (in thousands)
+===============================================================================
+
+                                        2025        2024
+                                        ------------    ------------
+Total Revenue                           $120,000,000  $105,000,000
+
+Net Income (Loss)                         $6,000,000    $8,500,000
+
+===============================================================================

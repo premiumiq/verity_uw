@@ -1,0 +1,55 @@
+LOSS RUN REPORT
+===============================================================================
+
+Insured:          {{ named_insured }}
+FEIN:             {{ fein }}
+Policy Number:    {{ policy_number | default("PLY-" + company_id[:6] | upper + "-2025") }}
+Line of Business: {{ lob_display }}
+Report Date:      {{ report_date | default("03/15/2026") }}
+Report Period:    {{ report_start | default("01/01/2023") }} to {{ report_end | default("12/31/2025") }}
+
+===============================================================================
+CLAIMS SUMMARY - {{ loss_history | length }} YEAR HISTORY
+===============================================================================
+
+Year    Claims   Incurred ($)    Paid ($)       Reserves ($)   Status
+------  ------   ------------    ----------     -----------    --------
+{% for yr in loss_history %}
+{{ yr.year }}    {{ "%3d" | format(yr.claims) }}      {{ "%13s" | format(yr.incurred | currency) }}   {{ "%13s" | format(yr.paid | currency) }}  {{ "%13s" | format(yr.reserves | currency) }}  {{ yr.status | default("Closed") }}
+{% endfor %}
+
+TOTALS: {{ total_claims }} claims, {{ total_incurred | currency }} total incurred,
+        {{ total_paid | currency }} paid, {{ total_reserves | currency }} outstanding reserves
+
+Loss Ratio (3-Year): {{ loss_ratio | default("N/A") }}
+{% if claim_details %}
+
+===============================================================================
+CLAIM DETAILS
+===============================================================================
+{% for claim in claim_details %}
+
+Claim #{{ claim.number }}
+  Date of Loss:  {{ claim.date_of_loss }}
+  Claimant:      {{ claim.claimant }}
+  Type:          {{ claim.type }}
+  Description:   {{ claim.description }}
+  Status:        {{ claim.status }}
+  Amount Paid:   {{ claim.paid | currency }}
+  Reserves:      {{ claim.reserves | currency }}
+  Total Incurred: {{ (claim.paid + claim.reserves) | currency }}
+{% endfor %}
+{% endif %}
+{% if loss_notes %}
+
+===============================================================================
+NOTES
+===============================================================================
+{{ loss_notes }}
+{% endif %}
+
+-------------------------------------------------------------------------------
+Report prepared by: {{ prepared_by | default("Claims Department") }}
+This report is provided for informational purposes only and does not constitute
+a guarantee of coverage or payment.
+===============================================================================

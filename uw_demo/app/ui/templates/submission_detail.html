@@ -65,12 +65,18 @@
         </a>
         {% if sub.last_pipeline_run_id %}
         <a href="http://localhost:8000/admin/audit-trail/run/{{ sub.last_pipeline_run_id }}" class="verity-btn verity-btn-secondary" target="_blank">
-            View in Verity ↗
+            View Latest Run ↗
         </a>
-        {% else %}
-        <a href="http://localhost:8000/admin/audit-trail/{{ sub.id }}" class="verity-btn verity-btn-secondary" target="_blank">
-            View in Verity ↗
+        {% endif %}
+        {% if sub.last_execution_context_id %}
+        <a href="http://localhost:8000/admin/audit-trail/context/{{ sub.last_execution_context_id }}" class="verity-btn verity-btn-secondary" target="_blank" style="{% if sub.last_pipeline_run_id %}margin-left: 8px;{% endif %}">
+            View Full History ↗
         </a>
+        {% endif %}
+        {% if not sub.last_pipeline_run_id and not sub.last_execution_context_id %}
+        <span class="verity-btn verity-btn-secondary" style="opacity: 0.4; cursor: default;">
+            No audit trail yet
+        </span>
         {% endif %}
     </div>
 </div>

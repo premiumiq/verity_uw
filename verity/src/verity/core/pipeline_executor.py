@@ -53,7 +53,7 @@ class PipelineExecutor:
         self,
         pipeline_name: str,
         context: dict[str, Any],
-        submission_id: Optional[UUID] = None,
+
         channel: str = "production",
         mock=None,  # Optional MockContext
         execution_context_id=None,  # Optional UUID — links decisions to a business context
@@ -158,7 +158,7 @@ class PipelineExecutor:
             if len(runnable) == 1:
                 result = await self._execute_step(
                     runnable[0], context, accumulated_results,
-                    submission_id, channel, pipeline_run_id, mock, execution_context_id,
+                    channel, pipeline_run_id, mock, execution_context_id,
                 )
                 accumulated_results[runnable[0].step_name] = result
                 all_steps.append(result)
@@ -170,7 +170,7 @@ class PipelineExecutor:
                 tasks = [
                     self._execute_step(
                         step, context, accumulated_results,
-                        submission_id, channel, pipeline_run_id, mock,
+                        channel, pipeline_run_id, mock,
                     )
                     for step in runnable
                 ]
@@ -224,7 +224,6 @@ class PipelineExecutor:
         step: PipelineStep,
         context: dict[str, Any],
         accumulated_results: dict[str, StepResult],
-        submission_id: Optional[UUID],
         channel: str,
         pipeline_run_id: UUID,
         mock=None,
@@ -246,7 +245,7 @@ class PipelineExecutor:
                 exec_result = await self.engine.run_agent(
                     agent_name=step.entity_name,
                     context=step_context,
-                    submission_id=submission_id,
+
                     channel=channel,
                     pipeline_run_id=pipeline_run_id,
                     step_name=step.step_name,
@@ -257,7 +256,7 @@ class PipelineExecutor:
                 exec_result = await self.engine.run_task(
                     task_name=step.entity_name,
                     input_data=step_context,
-                    submission_id=submission_id,
+
                     channel=channel,
                     pipeline_run_id=pipeline_run_id,
                     step_name=step.step_name,
@@ -268,7 +267,7 @@ class PipelineExecutor:
                 exec_result = await self.engine.run_tool(
                     tool_name=step.entity_name,
                     input_data=step_context,
-                    submission_id=submission_id,
+
                     channel=channel,
                     pipeline_run_id=pipeline_run_id,
                     step_name=step.step_name,
@@ -335,7 +334,7 @@ def _evaluate_step_condition(
     """Evaluate a step's condition against accumulated results and context.
 
     Example conditions:
-    - {"if_doc_type_present": "acord_855"} — checks if doc type is in prior outputs
+    - {"if_doc_type_present": "do_application"} — checks if doc type is in prior outputs
     """
     for key, expected_value in condition.items():
         if key == "if_doc_type_present":

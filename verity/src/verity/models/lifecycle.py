@@ -70,6 +70,43 @@ class MetricType(str, Enum):
     HUMAN_RUBRIC = "human_rubric"
 
 
+class RunPurpose(str, Enum):
+    """Why an execution happened. Independent of channel and mock_mode."""
+    PRODUCTION = "production"       # Normal business execution
+    TEST = "test"                   # Test suite run
+    VALIDATION = "validation"       # Ground truth validation
+    AUDIT_RERUN = "audit_rerun"     # Historical reproduction
+
+
+class GtDatasetStatus(str, Enum):
+    """Ground truth dataset lifecycle status."""
+    COLLECTING = "collecting"
+    LABELING = "labeling"
+    ADJUDICATING = "adjudicating"
+    READY = "ready"
+    DEPRECATED = "deprecated"
+
+
+class GtQualityTier(str, Enum):
+    """Ground truth quality classification."""
+    SILVER = "silver"   # Single annotator, no independent review
+    GOLD = "gold"       # Multi-annotator with IAA check
+
+
+class GtSourceType(str, Enum):
+    """Ground truth record source type."""
+    DOCUMENT = "document"
+    SUBMISSION = "submission"
+    SYNTHETIC = "synthetic"
+
+
+class GtAnnotatorType(str, Enum):
+    """Ground truth annotator type."""
+    HUMAN_SME = "human_sme"
+    LLM_JUDGE = "llm_judge"
+    ADJUDICATOR = "adjudicator"
+
+
 # Valid lifecycle transitions per the 7-state model
 VALID_TRANSITIONS: dict[LifecycleState, list[LifecycleState]] = {
     LifecycleState.DRAFT: [LifecycleState.CANDIDATE],

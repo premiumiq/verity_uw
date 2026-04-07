@@ -69,10 +69,10 @@
             <div class="verity-detail-value">{{ "%.2f"|format(decision.confidence_score) }}</div>
             {% endif %}
 
-            {% if decision.submission_id %}
-            <div class="verity-detail-label">Submission</div>
+            {% if decision.execution_context_id %}
+            <div class="verity-detail-label">Execution Context</div>
             <div class="verity-detail-value">
-                <a href="/admin/audit-trail/{{ decision.submission_id }}">{{ decision.submission_id }}</a>
+                <a href="/admin/audit-trail/context/{{ decision.execution_context_id }}">{{ decision.execution_context_id | short_id }}</a>
             </div>
             {% endif %}
 

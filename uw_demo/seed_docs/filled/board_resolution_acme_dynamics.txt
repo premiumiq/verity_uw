@@ -1,0 +1,77 @@
+BOARD OF DIRECTORS RESOLUTION
+ACME DYNAMICS LLC
+
+===============================================================================
+
+RESOLVED, that the Board of Directors of Acme Dynamics LLC (the "Company"),
+a LLC organized under the laws of the State of Delaware,
+at a duly convened meeting held on January 15, 2026,
+at which a quorum was present and acting, hereby adopts the following resolutions:
+
+===============================================================================
+BOARD COMPOSITION
+===============================================================================
+
+Total Board Members:        7
+Independent Directors:      4
+Inside Directors:           3
+
+DIRECTORS:
+  1. Margaret Chen
+     Title:        Chairman & CEO
+     Independent:  No
+     Committee:    None
+     Shares Owned:  12%  2. Robert Hartley
+     Title:        CFO
+     Independent:  No
+     Committee:    None
+     Shares Owned:  5%  3. Diana Okafor
+     Title:        Director
+     Independent:  Yes
+     Committee:    Audit
+     Shares Owned:  2%  4. James Liu
+     Title:        Director
+     Independent:  Yes
+     Committee:    Audit, Compensation
+     Shares Owned:  1%  5. Patricia Novak
+     Title:        Director
+     Independent:  Yes
+     Committee:    Governance
+     Shares Owned:  <1%  6. Samuel Torres
+     Title:        Director
+     Independent:  Yes
+     Committee:    Compensation
+     Shares Owned:  <1%  7. William Reeves
+     Title:        COO
+     Independent:  No
+     Committee:    None
+     Shares Owned:  8%
+===============================================================================
+COMMITTEE STRUCTURE
+===============================================================================
+
+Audit Committee:
+  - Diana Okafor (Director) — Committee Chair  - James Liu (Director)
+Financial Expert on Audit Committee: Yes
+
+===============================================================================
+DIRECTORS AND OFFICERS LIABILITY INSURANCE
+===============================================================================
+
+RESOLVED, that the officers of the Company are hereby authorized and directed
+to procure Directors and Officers Liability Insurance on behalf of the Company
+and its directors and officers, with limits of liability not to exceed
+$5,000,000 and a retention of $50,000,
+for the policy period 2026-07-01 through 2027-07-01.
+
+RESOLVED, that the Secretary is directed to maintain a copy of this resolution
+with the corporate records.
+
+===============================================================================
+
+I, the undersigned Secretary of Acme Dynamics LLC, do hereby certify that
+the foregoing is a true and correct copy of the resolutions adopted by the
+Board of Directors at its meeting on January 15, 2026.
+
+Secretary: ___________________________
+Date:     ___________________________

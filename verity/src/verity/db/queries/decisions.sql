@@ -4,26 +4,30 @@
 -- ============================================================
 
 -- name: log_decision
+-- Insert a decision log entry for every AI invocation (agent, task, or tool).
+-- Business context is linked via execution_context_id, NOT direct business keys.
 INSERT INTO agent_decision_log (
     entity_type, entity_version_id, prompt_version_ids,
-    inference_config_snapshot, submission_id, policy_id, renewal_id,
-    business_entity, channel, mock_mode, pipeline_run_id,
+    inference_config_snapshot, channel, mock_mode, pipeline_run_id,
     parent_decision_id, decision_depth, step_name,
     input_summary, input_json, output_json, output_summary,
     reasoning_text, risk_factors, confidence_score, low_confidence_flag,
     model_used, input_tokens, output_tokens, duration_ms,
-    tool_calls_made, message_history, application, execution_context_id,
+    tool_calls_made, message_history, application,
+    run_purpose, reproduced_from_decision_id,
+    execution_context_id,
     hitl_required, status, error_message
 )
 VALUES (
     %(entity_type)s, %(entity_version_id)s, %(prompt_version_ids)s,
-    %(inference_config_snapshot)s, %(submission_id)s, %(policy_id)s, %(renewal_id)s,
-    %(business_entity)s, %(channel)s, %(mock_mode)s, %(pipeline_run_id)s,
+    %(inference_config_snapshot)s, %(channel)s, %(mock_mode)s, %(pipeline_run_id)s,
     %(parent_decision_id)s, %(decision_depth)s, %(step_name)s,
     %(input_summary)s, %(input_json)s, %(output_json)s, %(output_summary)s,
     %(reasoning_text)s, %(risk_factors)s, %(confidence_score)s, %(low_confidence_flag)s,
     %(model_used)s, %(input_tokens)s, %(output_tokens)s, %(duration_ms)s,
-    %(tool_calls_made)s, %(message_history)s, %(application)s, %(execution_context_id)s,
+    %(tool_calls_made)s, %(message_history)s, %(application)s,
+    %(run_purpose)s, %(reproduced_from_decision_id)s,
+    %(execution_context_id)s,
     %(hitl_required)s, %(status)s, %(error_message)s
 )
 RETURNING id, created_at;
@@ -45,11 +49,11 @@ WHERE adl.id = %(decision_id)s;
 
 
 -- name: list_decisions
+-- Paginated list of all decisions with entity names and execution context reference.
 SELECT
     adl.id,
     adl.entity_type,
     adl.entity_version_id,
-    adl.submission_id,
     adl.channel,
     adl.mock_mode,
     adl.pipeline_run_id,
@@ -87,7 +91,11 @@ LIMIT %(limit)s OFFSET %(offset)s;
 SELECT COUNT(*) AS total FROM agent_decision_log;
 
 
--- name: list_decisions_by_submission
+-- name: list_decisions_by_execution_context
+-- All decisions for an execution context (e.g., all runs for a submission).
+-- Replaces the old list_decisions_by_submission query.
+-- The business app registers a context_ref like "submission:SUB-001" and
+-- passes the execution_context_id. Verity doesn't know what "submission" means.
 SELECT
     adl.id,
     adl.entity_type,
@@ -121,20 +129,23 @@ LEFT JOIN agent_version av ON av.id = adl.entity_version_id AND adl.entity_type 
 LEFT JOIN agent a ON a.id = av.agent_id
 LEFT JOIN task_version tv ON tv.id = adl.entity_version_id AND adl.entity_type = 'task'
 LEFT JOIN task t ON t.id = tv.task_id
-WHERE adl.submission_id = %(submission_id)s
+WHERE adl.execution_context_id = %(execution_context_id)s::uuid
 ORDER BY adl.decision_depth, adl.created_at;
 
 
 -- name: record_override
+-- Record a human override of an AI decision.
+-- No business keys here — the override links to the decision_log_id,
+-- which links to execution_context_id for business context.
 INSERT INTO override_log (
     decision_log_id, entity_type, entity_version_id,
     overrider_name, overrider_role, override_reason_code,
-    override_notes, ai_recommendation, human_decision, submission_id
+    override_notes, ai_recommendation, human_decision
 )
 VALUES (
     %(decision_log_id)s, %(entity_type)s, %(entity_version_id)s,
     %(overrider_name)s, %(overrider_role)s, %(override_reason_code)s,
-    %(override_notes)s, %(ai_recommendation)s, %(human_decision)s, %(submission_id)s
+    %(override_notes)s, %(ai_recommendation)s, %(human_decision)s
 )
 RETURNING id, created_at;
 
@@ -156,7 +167,6 @@ SELECT
     adl.id,
     adl.entity_type,
     adl.entity_version_id,
-    adl.submission_id,
     adl.channel,
     adl.step_name,
     adl.output_summary,
@@ -177,7 +187,6 @@ LIMIT %(limit)s;
 -- name: list_decisions_by_pipeline_run
 -- Audit trail by pipeline_run_id (Verity-owned UUID).
 -- This is the correct way to query decisions for a specific execution run.
--- Does not use submission_id (business key) — no cross-app collision.
 SELECT
     adl.id,
     adl.entity_type,

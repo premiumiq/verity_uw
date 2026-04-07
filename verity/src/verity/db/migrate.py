@@ -101,6 +101,28 @@ async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
         else:
             print("pgvector extension: NOT installed (vector columns will be NULL)")
 
+        # Seed governance applications (idempotent — skips if already exist).
+        # These are Verity platform applications, not business app registrations.
+        # They provide execution identity for testing, validation, and audit activities.
+        governance_apps = [
+            ("ai_ops", "AI Operations",
+             "AI/ML engineering team: test suite runs, regression testing, development experimentation."),
+            ("model_validation", "Model Validation",
+             "Model Risk Management (MRM) team: ground truth validation for promotion gates, independent model assessment."),
+            ("compliance_audit", "Compliance & Audit",
+             "Compliance officers and internal audit: audit reruns, regulatory reproduction, adverse action verification."),
+        ]
+        for name, display_name, description in governance_apps:
+            try:
+                await conn.execute(
+                    "INSERT INTO application (name, display_name, description) "
+                    "VALUES (%s, %s, %s) ON CONFLICT (name) DO NOTHING",
+                    (name, display_name, description),
+                )
+            except Exception:
+                pass  # Table may not exist yet on first run
+        print("Governance applications seeded: ai_ops, model_validation, compliance_audit")
+
 
 def _split_sql_statements(sql: str) -> list[str]:
     """Split SQL text into individual statements.

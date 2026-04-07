@@ -456,29 +456,33 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
 
     # ── AUDIT TRAIL ───────────────────────────────────────────
 
-    @router.get("/audit-trail/{submission_id}", response_class=HTMLResponse)
-    async def audit_trail(request: Request, submission_id: str):
-        """Audit trail by submission_id (legacy — uses business key)."""
-        await verity.ensure_connected()
-        trail = await verity.get_audit_trail(UUID(submission_id))
-        return _render(templates, request, "audit_trail.html",
-            active_page="decisions",
-            submission_id=submission_id,
-            trail=trail,
-        )
-
     @router.get("/audit-trail/run/{pipeline_run_id}", response_class=HTMLResponse)
     async def audit_trail_by_run(request: Request, pipeline_run_id: str):
-        """Audit trail by pipeline_run_id (preferred — uses Verity-owned ID).
+        """Audit trail for one pipeline execution.
 
-        This is the correct way to view audit trails. No cross-app collision.
-        Used by the UW app's "View in Verity" links.
+        Shows all decisions (steps) from a single pipeline run.
         """
         await verity.ensure_connected()
         trail = await verity.get_audit_trail_by_run(UUID(pipeline_run_id))
         return _render(templates, request, "audit_trail.html",
             active_page="decisions",
-            submission_id=f"Run: {pipeline_run_id[:8]}...",
+            pipeline_run_id=pipeline_run_id,
+            trail=trail,
+        )
+
+    @router.get("/audit-trail/context/{execution_context_id}", response_class=HTMLResponse)
+    async def audit_trail_by_context(request: Request, execution_context_id: str):
+        """Audit trail for a business context (spans all pipeline runs).
+
+        Shows every decision across every pipeline run linked to this
+        execution context. Useful for viewing the full history of a
+        submission, policy, or other business operation.
+        """
+        await verity.ensure_connected()
+        trail = await verity.get_audit_trail(UUID(execution_context_id))
+        return _render(templates, request, "audit_trail.html",
+            active_page="decisions",
+            execution_context_id=execution_context_id,
             trail=trail,
         )
 

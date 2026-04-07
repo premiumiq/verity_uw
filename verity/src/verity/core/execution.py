@@ -33,7 +33,7 @@ from verity.core.decisions import Decisions
 from verity.core.mock_context import MockContext
 from verity.core.registry import Registry
 from verity.models.decision import DecisionLogCreate
-from verity.models.lifecycle import DeploymentChannel, EntityType
+from verity.models.lifecycle import DeploymentChannel, EntityType, RunPurpose
 from verity.models.prompt import PromptAssignment
 
 
@@ -241,7 +241,7 @@ class ExecutionEngine:
         self,
         agent_name: str,
         context: dict[str, Any],
-        submission_id: Optional[UUID] = None,
+
         channel: str = "production",
         pipeline_run_id: Optional[UUID] = None,
         parent_decision_id: Optional[UUID] = None,
@@ -276,7 +276,7 @@ class ExecutionEngine:
                     output=output, output_text=json.dumps(output, default=str)[:500],
                     tool_calls_made=[], message_history=[],
                     total_input_tokens=0, total_output_tokens=0,
-                    duration_ms=duration_ms, submission_id=submission_id,
+                    duration_ms=duration_ms, 
                     channel=channel, pipeline_run_id=pipeline_run_id,
                     parent_decision_id=parent_decision_id,
                     decision_depth=decision_depth, step_name=step_name,
@@ -361,11 +361,12 @@ class ExecutionEngine:
                 tool_calls_made=tool_calls_made, message_history=message_history,
                 total_input_tokens=total_input_tokens,
                 total_output_tokens=total_output_tokens,
-                duration_ms=duration_ms, submission_id=submission_id,
+                duration_ms=duration_ms, 
                 channel=channel, pipeline_run_id=pipeline_run_id,
                 parent_decision_id=parent_decision_id,
                 decision_depth=decision_depth, step_name=step_name,
                 status="complete", mock_mode=is_mocked,
+                execution_context_id=execution_context_id,
             )
 
             return ExecutionResult(
@@ -387,11 +388,12 @@ class ExecutionEngine:
                 entity_type=EntityType.AGENT, config=config, context=context,
                 output={}, output_text="", tool_calls_made=[], message_history=[],
                 total_input_tokens=0, total_output_tokens=0,
-                duration_ms=duration_ms, submission_id=submission_id,
+                duration_ms=duration_ms, 
                 channel=channel, pipeline_run_id=pipeline_run_id,
                 parent_decision_id=parent_decision_id,
                 decision_depth=decision_depth, step_name=step_name,
                 status="failed", error_message=str(e),
+                execution_context_id=execution_context_id,
             )
             return ExecutionResult(
                 decision_log_id=log_result["decision_log_id"],
@@ -409,7 +411,7 @@ class ExecutionEngine:
         self,
         task_name: str,
         input_data: dict[str, Any],
-        submission_id: Optional[UUID] = None,
+
         channel: str = "production",
         pipeline_run_id: Optional[UUID] = None,
         parent_decision_id: Optional[UUID] = None,
@@ -435,7 +437,7 @@ class ExecutionEngine:
                     output=output, output_text=json.dumps(output, default=str)[:500],
                     tool_calls_made=[], message_history=[],
                     total_input_tokens=0, total_output_tokens=0,
-                    duration_ms=duration_ms, submission_id=submission_id,
+                    duration_ms=duration_ms, 
                     channel=channel, pipeline_run_id=pipeline_run_id,
                     parent_decision_id=parent_decision_id,
                     decision_depth=decision_depth, step_name=step_name,
@@ -497,11 +499,12 @@ class ExecutionEngine:
                 tool_calls_made=[], message_history=[],
                 total_input_tokens=response.usage.input_tokens,
                 total_output_tokens=response.usage.output_tokens,
-                duration_ms=duration_ms, submission_id=submission_id,
+                duration_ms=duration_ms, 
                 channel=channel, pipeline_run_id=pipeline_run_id,
                 parent_decision_id=parent_decision_id,
                 decision_depth=decision_depth, step_name=step_name,
                 status="complete",
+                execution_context_id=execution_context_id,
             )
 
             return ExecutionResult(
@@ -520,11 +523,12 @@ class ExecutionEngine:
                 entity_type=EntityType.TASK, config=config, context=input_data,
                 output={}, output_text="", tool_calls_made=[], message_history=[],
                 total_input_tokens=0, total_output_tokens=0,
-                duration_ms=duration_ms, submission_id=submission_id,
+                duration_ms=duration_ms, 
                 channel=channel, pipeline_run_id=pipeline_run_id,
                 parent_decision_id=parent_decision_id,
                 decision_depth=decision_depth, step_name=step_name,
                 status="failed", error_message=str(e),
+                execution_context_id=execution_context_id,
             )
             return ExecutionResult(
                 decision_log_id=log_result["decision_log_id"],
@@ -542,7 +546,7 @@ class ExecutionEngine:
         self,
         tool_name: str,
         input_data: dict[str, Any],
-        submission_id: Optional[UUID] = None,
+
         channel: str = "production",
         pipeline_run_id: Optional[UUID] = None,
         parent_decision_id: Optional[UUID] = None,
@@ -594,12 +598,13 @@ class ExecutionEngine:
                 entity_version_id=tool_def["id"],  # Use tool ID as version ID
                 prompt_version_ids=[],
                 inference_config_snapshot=snapshot,
-                submission_id=submission_id,
+                
                 channel=DeploymentChannel(channel),
                 pipeline_run_id=pipeline_run_id,
                 parent_decision_id=parent_decision_id,
                 decision_depth=decision_depth,
                 step_name=step_name,
+                execution_context_id=execution_context_id,
                 input_summary=str(input_data)[:500],
                 input_json=input_data,
                 output_json=output if isinstance(output, dict) else {"result": output},
@@ -650,7 +655,6 @@ class ExecutionEngine:
         total_input_tokens: int,
         total_output_tokens: int,
         duration_ms: int,
-        submission_id: Optional[UUID],
         channel: str,
         pipeline_run_id: Optional[UUID],
         parent_decision_id: Optional[UUID],
@@ -660,6 +664,8 @@ class ExecutionEngine:
         error_message: Optional[str] = None,
         mock_mode: bool = False,
         execution_context_id: Optional[UUID] = None,
+        run_purpose: str = "production",
+        reproduced_from_decision_id: Optional[UUID] = None,
     ) -> dict:
         """Create a decision log entry with full snapshot."""
         snapshot = config.get_inference_snapshot() if hasattr(config, 'get_inference_snapshot') else {}
@@ -677,7 +683,6 @@ class ExecutionEngine:
             entity_version_id=version_id,
             prompt_version_ids=[p.prompt_version_id for p in config.prompts] if hasattr(config, 'prompts') else [],
             inference_config_snapshot=snapshot.model_dump() if hasattr(snapshot, 'model_dump') else snapshot,
-            submission_id=submission_id,
             channel=DeploymentChannel(channel),
             mock_mode=mock_mode,
             pipeline_run_id=pipeline_run_id,
@@ -685,6 +690,8 @@ class ExecutionEngine:
             decision_depth=decision_depth,
             step_name=step_name,
             execution_context_id=execution_context_id,
+            run_purpose=RunPurpose(run_purpose),
+            reproduced_from_decision_id=reproduced_from_decision_id,
             input_summary=str(context)[:500],
             input_json=context if isinstance(context, dict) else None,
             output_json=output if isinstance(output, dict) else None,

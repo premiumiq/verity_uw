@@ -1,0 +1,87 @@
+GENERAL LIABILITY SUPPLEMENTAL QUESTIONNAIRE
+===============================================================================
+
+Applicant:        {{ named_insured }}
+FEIN:             {{ fein }}
+SIC Code:         {{ sic_code }} - {{ sic_description }}
+Date:             {{ application_date | default("03/01/2026") }}
+
+===============================================================================
+SECTION 1: OPERATIONS DESCRIPTION
+===============================================================================
+
+Nature of Business:
+{{ nature_of_business }}
+
+{% if operations_detail %}
+Detailed Operations:
+{{ operations_detail }}
+{% endif %}
+
+Years in Business: {{ years_in_business }}
+Number of Locations: {{ num_locations | default(1) }}
+Total Employees: {{ total_employees }}
+
+===============================================================================
+SECTION 2: MANUFACTURING OPERATIONS
+===============================================================================
+
+Manufacturing Operations:  {{ "Yes" if manufacturing_operations else "No" }}
+{% if manufacturing_operations %}
+SIC Code Classification:   {{ sic_code }}
+{% if sic_code[:2] in ["33"] %}
+Classification:            HEAVY MANUFACTURING (SIC 3300-3399)
+                           ** Requires Senior Underwriter Approval **
+{% elif sic_code[:2] in ["34", "35"] %}
+Classification:            LIGHT MANUFACTURING (SIC 3400-3599)
+                           Standard rates apply
+{% endif %}
+
+Products Manufactured:
+{{ products_description | default("See attached product catalog") }}
+
+Products Liability Exposure: {{ products_liability_exposure | default("Standard") }}
+{% endif %}
+
+===============================================================================
+SECTION 3: HAZARDOUS MATERIALS
+===============================================================================
+
+Hazardous Materials Handling: {{ "Yes" if hazmat_handling else "No" }}
+{% if hazmat_handling %}
+Types of Materials: {{ hazmat_types | default("Industrial chemicals used in manufacturing process") }}
+Storage Method: {{ hazmat_storage | default("On-site storage per EPA guidelines") }}
+Disposal Method: {{ hazmat_disposal | default("Licensed third-party hazardous waste disposal") }}
+
+** Environmental Supplemental Required **
+{% endif %}
+
+===============================================================================
+SECTION 4: CONTRACTOR OPERATIONS
+===============================================================================
+
+Construction Operations: {{ "Yes" if construction_operations else "No" }}
+{% if construction_operations %}
+** Separate Contractor's Liability Coverage Required **
+{% endif %}
+
+Use of Subcontractors: {{ "Yes" if use_subcontractors | default(false) else "No" }}
+{% if use_subcontractors | default(false) %}
+Annual Payments to Subcontractors: {{ subcontractor_payments | default("N/A") | currency }}
+Certificates of Insurance Required: Yes
+{% endif %}
+
+===============================================================================
+SECTION 5: PRODUCTS/COMPLETED OPERATIONS
+===============================================================================
+
+Recall Exposure: {{ "Yes" if recall_exposure | default(false) else "No" }}
+{% if recall_exposure | default(false) %}
+** Separate Recall Coverage Endorsement Required **
+{% endif %}
+
+Product Guarantees/Warranties: {{ product_warranties | default("Standard manufacturer warranty") }}
+
+===============================================================================
+
+Applicant Signature: ___________________________  Date: _______________

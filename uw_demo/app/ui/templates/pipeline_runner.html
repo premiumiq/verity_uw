@@ -151,9 +151,16 @@
         <a href="/submissions/{{ sub.id }}" class="verity-btn verity-btn-primary">
             ← View Submission
         </a>
-        <a href="http://localhost:8000/admin/audit-trail/{{ sub.id }}" class="verity-btn verity-btn-secondary" target="_blank">
-            View Audit Trail in Verity ↗
+        {% if sub.last_pipeline_run_id %}
+        <a href="http://localhost:8000/admin/audit-trail/run/{{ sub.last_pipeline_run_id }}" class="verity-btn verity-btn-secondary" target="_blank">
+            View Latest Run ↗
         </a>
+        {% endif %}
+        {% if sub.last_execution_context_id %}
+        <a href="http://localhost:8000/admin/audit-trail/context/{{ sub.last_execution_context_id }}" class="verity-btn verity-btn-secondary" target="_blank">
+            View Full History ↗
+        </a>
+        {% endif %}
     </div>
 
 {% endif %}

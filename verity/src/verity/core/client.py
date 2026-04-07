@@ -9,11 +9,11 @@ Usage:
     config = await verity.get_task_config("document_classifier")
 
     # Execution: run agents and tasks with full governance
-    result = await verity.execute_agent("triage_agent", context={...}, submission_id=uuid)
+    result = await verity.execute_agent("triage_agent", context={...})
     result = await verity.execute_task("document_classifier", input_data={...})
 
     # Decisions: query the audit trail
-    trail = await verity.get_audit_trail(submission_id)
+    trail = await verity.get_audit_trail(execution_context_id)
 
     # Reporting
     inventory = await verity.model_inventory()
@@ -110,55 +110,54 @@ class Verity:
         self,
         agent_name: str,
         context: dict[str, Any],
-        submission_id: Optional[UUID] = None,
         channel: str = "production",
         pipeline_run_id: Optional[UUID] = None,
         mock: Optional[MockContext] = None,
         stream: bool = False,
+        execution_context_id: Optional[UUID] = None,
     ) -> ExecutionResult:
         """Execute an agent with full governance.
 
+        Pass execution_context_id to link this decision to a business context.
         Pass mock=MockContext(...) to control mocking behavior.
-        See MockContext for usage examples.
         """
         await self.ensure_connected()
         return await self.execution.run_agent(
             agent_name=agent_name,
             context=context,
-            submission_id=submission_id,
             channel=channel,
             pipeline_run_id=pipeline_run_id,
             mock=mock,
             stream=stream,
+            execution_context_id=execution_context_id,
         )
 
     async def execute_task(
         self,
         task_name: str,
         input_data: dict[str, Any],
-        submission_id: Optional[UUID] = None,
         channel: str = "production",
         pipeline_run_id: Optional[UUID] = None,
         mock: Optional[MockContext] = None,
         stream: bool = False,
+        execution_context_id: Optional[UUID] = None,
     ) -> ExecutionResult:
         """Execute a task with single-turn structured output."""
         await self.ensure_connected()
         return await self.execution.run_task(
             task_name=task_name,
             input_data=input_data,
-            submission_id=submission_id,
             channel=channel,
             pipeline_run_id=pipeline_run_id,
             mock=mock,
             stream=stream,
+            execution_context_id=execution_context_id,
         )
 
     async def execute_pipeline(
         self,
         pipeline_name: str,
         context: dict[str, Any],
-        submission_id: Optional[UUID] = None,
         channel: str = "production",
         mock: Optional[MockContext] = None,
         execution_context_id: Optional[UUID] = None,
@@ -172,7 +171,6 @@ class Verity:
         return await self.pipeline_executor.run_pipeline(
             pipeline_name=pipeline_name,
             context=context,
-            submission_id=submission_id,
             channel=channel,
             mock=mock,
             execution_context_id=execution_context_id,
@@ -227,10 +225,10 @@ class Verity:
 
     # ── DECISIONS (audit trail) ───────────────────────────────
 
-    async def get_audit_trail(self, submission_id: UUID) -> list[AuditTrailEntry]:
-        """Get the full decision chain for a submission (legacy — uses business key)."""
+    async def get_audit_trail(self, execution_context_id: UUID) -> list[AuditTrailEntry]:
+        """Get all decisions for an execution context (spans multiple pipeline runs)."""
         await self.ensure_connected()
-        return await self.decisions.get_audit_trail(submission_id)
+        return await self.decisions.get_audit_trail(execution_context_id)
 
     async def get_audit_trail_by_run(self, pipeline_run_id: UUID) -> list[AuditTrailEntry]:
         """Get the full decision chain for a pipeline run (preferred — uses Verity-owned ID).

@@ -1,0 +1,44 @@
+LOSS RUN REPORT
+===============================================================================
+
+Insured:          Horizon Capital Group LLC
+FEIN:             56-7890123
+Policy Number:    PLY-DO-HORIZON_-2026
+Line of Business: Directors & Officers
+Report Date:      03/15/2026
+Report Period:    01/01/2023 to 12/31/2025
+
+===============================================================================
+CLAIMS SUMMARY - 3 YEAR HISTORY
+===============================================================================
+
+Year    Claims   Incurred ($)    Paid ($)       Reserves ($)   Status
+------  ------   ------------    ----------     -----------    --------
+2023      0                 $0              $0             $0  Closed
+2024      1            $85,000         $60,000        $25,000  Open
+2025      0                 $0              $0             $0  Closed
+
+TOTALS: 1 claims, $85,000 total incurred,
+        $60,000 paid, $25,000 outstanding reserves
+
+Loss Ratio (3-Year): N/A
+
+===============================================================================
+CLAIM DETAILS
+===============================================================================
+
+Claim #CLM-2024-001
+  Date of Loss:  2024-11-05
+  Claimant:      Investor Group
+  Type:          D&O Misrepresentation
+  Description:   Allegation of inadequate risk disclosure in fund offering documents. In mediation.
+  Status:        Open
+  Amount Paid:   $60,000
+  Reserves:      $25,000
+  Total Incurred: $85,000
+
+-------------------------------------------------------------------------------
+Report prepared by: Claims Department
+This report is provided for informational purposes only and does not constitute
+a guarantee of coverage or payment.
+===============================================================================

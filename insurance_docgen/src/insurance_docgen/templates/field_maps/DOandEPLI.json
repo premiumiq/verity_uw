@@ -1,0 +1,141 @@
+{
+    "_comment": "Field map: CompanyProfile data keys -> DOandEPLI.pdf form field names",
+    "_template": "DOandEPLI.pdf (5 pages, 157 fillable fields)",
+
+    "named_insured": {
+        "pdf_field": "Name of Applicant",
+        "type": "text"
+    },
+    "address": {
+        "pdf_field": "Address of Applicant",
+        "type": "text"
+    },
+    "city": {
+        "pdf_field": "City",
+        "type": "text"
+    },
+    "state": {
+        "pdf_field": "State",
+        "type": "text"
+    },
+    "zip": {
+        "pdf_field": "Zip",
+        "type": "text"
+    },
+    "contact_name": {
+        "pdf_field": "Name",
+        "type": "text"
+    },
+    "contact_title": {
+        "pdf_field": "Title",
+        "type": "text"
+    },
+    "contact_email": {
+        "pdf_field": "EMail Address",
+        "type": "text"
+    },
+    "do_coverage_requested": {
+        "pdf_field": "Directors & Officers",
+        "type": "checkbox"
+    },
+    "do_limit_display": {
+        "pdf_field": "Directors/Officers LoL",
+        "type": "text"
+    },
+    "state_of_incorporation": {
+        "pdf_field": "State of Incorporation",
+        "type": "text"
+    },
+    "date_established": {
+        "pdf_field": "Date Established",
+        "type": "text"
+    },
+    "nature_of_business": {
+        "pdf_field": "Nature of the Applicants business 1",
+        "type": "text"
+    },
+    "total_employees_display": {
+        "pdf_field": "Total employees",
+        "type": "text"
+    },
+    "annual_revenue_display": {
+        "pdf_field": "Annual Revenues",
+        "type": "text"
+    },
+    "total_assets_display": {
+        "pdf_field": "DIRECTORS AND OFFICERS LIABILITY INFORMATION",
+        "type": "text"
+    },
+    "securities_offering": {
+        "pdf_field_yes": "Public or Private offering?",
+        "type": "checkbox_pair"
+    },
+    "antitrust_litigation": {
+        "pdf_field_yes": "Anti-trust, copyright",
+        "type": "checkbox_pair"
+    },
+    "securities_violation": {
+        "pdf_field_yes": "Violation of securities laws?",
+        "type": "checkbox_pair"
+    },
+    "other_criminal": {
+        "pdf_field_yes": "Other criminal actions?",
+        "type": "checkbox_pair"
+    },
+    "prior_claims": {
+        "pdf_field_yes": "Claim question",
+        "type": "checkbox_pair"
+    },
+    "director_1_name": {
+        "pdf_field": "Names of Director or Officer ShareholdersRow1",
+        "type": "text"
+    },
+    "director_1_shares": {
+        "pdf_field": "Text17",
+        "type": "text"
+    },
+    "director_2_name": {
+        "pdf_field": "Names of Director or Officer ShareholdersRow2",
+        "type": "text"
+    },
+    "director_2_shares": {
+        "pdf_field": "fill_13",
+        "type": "text"
+    },
+    "current_year_revenue": {
+        "pdf_field": "Current Year 1",
+        "type": "text"
+    },
+    "previous_year_revenue": {
+        "pdf_field": "Previous Year 1",
+        "type": "text"
+    },
+    "current_year_income": {
+        "pdf_field": "Current Year 2",
+        "type": "text"
+    },
+    "previous_year_income": {
+        "pdf_field": "Previous Year 2",
+        "type": "text"
+    },
+    "current_year_assets": {
+        "pdf_field": "Current Year 3",
+        "type": "text"
+    },
+    "previous_year_assets": {
+        "pdf_field": "Previous Year 3",
+        "type": "text"
+    },
+    "reorganization": {
+        "pdf_field_yes": "Reorganization or arrangement?",
+        "type": "checkbox_pair"
+    },
+    "consolidations_layoffs": {
+        "pdf_field_yes": "Consolidations or layoffs?",
+        "type": "checkbox_pair"
+    },
+    "notice_of_claim": {
+        "pdf_field_yes": "Applicant given notice of claim?",
+        "type": "checkbox_pair"
+    }
+}

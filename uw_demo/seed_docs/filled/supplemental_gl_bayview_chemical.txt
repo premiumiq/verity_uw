@@ -1,0 +1,62 @@
+GENERAL LIABILITY SUPPLEMENTAL QUESTIONNAIRE
+===============================================================================
+
+Applicant:        Bayview Chemical Corp
+FEIN:             77-9012345
+SIC Code:         2899 - Chemicals and Chemical Preparations NEC
+Date:             03/01/2026
+
+===============================================================================
+SECTION 1: OPERATIONS DESCRIPTION
+===============================================================================
+
+Nature of Business:
+Specialty chemical manufacturing - industrial cleaning solutions, surface treatments, and corrosion inhibitors
+
+
+Years in Business: 18
+Number of Locations: 1
+Total Employees: 110
+
+===============================================================================
+SECTION 2: MANUFACTURING OPERATIONS
+===============================================================================
+
+Manufacturing Operations:  Yes
+SIC Code Classification:   2899
+
+Products Manufactured:
+See attached product catalog
+
+Products Liability Exposure: Chemical products used in industrial cleaning and metal treatment. MSDS documentation maintained for all products.
+
+===============================================================================
+SECTION 3: HAZARDOUS MATERIALS
+===============================================================================
+
+Hazardous Materials Handling: Yes
+Types of Materials: Industrial chemicals used in manufacturing process
+Storage Method: On-site storage per EPA guidelines
+Disposal Method: Licensed third-party hazardous waste disposal
+
+** Environmental Supplemental Required **
+
+===============================================================================
+SECTION 4: CONTRACTOR OPERATIONS
+===============================================================================
+
+Construction Operations: No
+
+Use of Subcontractors: No
+
+===============================================================================
+SECTION 5: PRODUCTS/COMPLETED OPERATIONS
+===============================================================================
+
+Recall Exposure: No
+
+Product Guarantees/Warranties: Standard manufacturer warranty
+
+===============================================================================
+
+Applicant Signature: ___________________________  Date: _______________

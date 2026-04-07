@@ -1,0 +1,65 @@
+MERIDIAN HOLDINGS CORP
+CONSOLIDATED FINANCIAL STATEMENTS
+Fiscal Years Ended December 31, 2025 and 2024
+
+===============================================================================
+INDEPENDENT AUDITOR'S REPORT
+===============================================================================
+
+To the Board of Directors and Shareholders of Meridian Holdings Corp:
+
+Opinion
+
+We have audited the accompanying consolidated financial statements of
+Meridian Holdings Corp (the "Company"), which comprise the consolidated balance
+sheets as of December 31, 2025 and 2024,
+and the related consolidated statements of operations, comprehensive income,
+stockholders' equity, and cash flows for the years then ended.
+
+In our opinion, the consolidated financial statements referred to above present
+fairly, in all material respects, the financial position of the Company as of
+December 31, 2025, in conformity with accounting
+principles generally accepted in the United States of America.
+
+Going Concern
+
+The accompanying financial statements have been prepared assuming the Company
+will continue as a going concern. The Company has incurred net losses in each of the past two fiscal years and has experienced a significant decline in equity. These factors raise substantial doubt about the Company's ability to continue as a going concern.
+
+Marcum LLP
+Certified Public Accountants
+Miami, FL
+March 15, 2025
+
+===============================================================================
+CONSOLIDATED BALANCE SHEET
+As of December 31 (in thousands)
+===============================================================================
+
+                                        2025        2024
+                                        ------------    ------------
+ASSETS
+  Total Assets                           $18,000,000   $20,000,000
+
+LIABILITIES
+  Total Liabilities                      $16,000,000   $15,000,000
+
+STOCKHOLDERS' EQUITY
+  Total Equity                            $2,000,000    $5,000,000
+
+Total Liabilities & Equity               $18,000,000   $20,000,000
+
+Debt-to-Equity Ratio:                   8.00            3.00
+
+===============================================================================
+CONSOLIDATED STATEMENT OF OPERATIONS
+For the Years Ended December 31 (in thousands)
+===============================================================================
+
+                                        2025        2024
+                                        ------------    ------------
+Total Revenue                            $25,000,000   $28,000,000
+
+Net Income (Loss)                        $-1,200,000     $-800,000
+
+===============================================================================

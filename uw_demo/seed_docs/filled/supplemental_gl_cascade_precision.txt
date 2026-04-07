@@ -1,0 +1,59 @@
+GENERAL LIABILITY SUPPLEMENTAL QUESTIONNAIRE
+===============================================================================
+
+Applicant:        Cascade Precision Manufacturing LLC
+FEIN:             33-5678901
+SIC Code:         3462 - Iron and Steel Forgings
+Date:             03/01/2026
+
+===============================================================================
+SECTION 1: OPERATIONS DESCRIPTION
+===============================================================================
+
+Nature of Business:
+Precision forging and machining of steel components for aerospace, defense, and energy sectors
+
+
+Years in Business: 20
+Number of Locations: 1
+Total Employees: 310
+
+===============================================================================
+SECTION 2: MANUFACTURING OPERATIONS
+===============================================================================
+
+Manufacturing Operations:  Yes
+SIC Code Classification:   3462
+Classification:            LIGHT MANUFACTURING (SIC 3400-3599)
+                           Standard rates apply
+
+Products Manufactured:
+See attached product catalog
+
+Products Liability Exposure: Steel forgings used in aircraft landing gear, turbine components, and pressure vessels. All products tested to ASTM and AMS specifications.
+
+===============================================================================
+SECTION 3: HAZARDOUS MATERIALS
+===============================================================================
+
+Hazardous Materials Handling: No
+
+===============================================================================
+SECTION 4: CONTRACTOR OPERATIONS
+===============================================================================
+
+Construction Operations: No
+
+Use of Subcontractors: No
+
+===============================================================================
+SECTION 5: PRODUCTS/COMPLETED OPERATIONS
+===============================================================================
+
+Recall Exposure: No
+
+Product Guarantees/Warranties: Standard manufacturer warranty
+
+===============================================================================
+
+Applicant Signature: ___________________________  Date: _______________

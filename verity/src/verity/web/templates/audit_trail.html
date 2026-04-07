@@ -1,11 +1,12 @@
 <!--
-  AUDIT TRAIL PAGE — Full decision chain for a submission
+  AUDIT TRAIL PAGE — Full decision chain for a pipeline run or execution context
 
-  Shows every task and agent that ran for a specific submission,
-  in execution order. This is the regulatory audit view.
+  Shows every task and agent that ran, in execution order.
+  This is the regulatory audit view.
 
-  DATA PASSED BY ROUTE:
-  - submission_id: UUID of the submission
+  DATA PASSED BY ROUTE (one of):
+  - pipeline_run_id: UUID of one pipeline execution
+  - execution_context_id: UUID of a business context (spans multiple runs)
   - trail: list of AuditTrailEntry
 -->
 {% extends "base.html" %}
@@ -24,7 +25,11 @@
 {% block content %}
 
 <div style="margin-bottom: 16px; font-size: 0.85rem; color: var(--verity-text-light);">
-    Submission: <span style="font-family: monospace;">{{ submission_id }}</span>
+    {% if pipeline_run_id %}
+    Pipeline Run: <span style="font-family: monospace;">{{ pipeline_run_id[:8] }}...{{ pipeline_run_id[-4:] }}</span>
+    {% elif execution_context_id %}
+    Execution Context: <span style="font-family: monospace;">{{ execution_context_id[:8] }}...{{ execution_context_id[-4:] }}</span>
+    {% endif %}
     — {{ trail|length }} steps executed
 </div>
 

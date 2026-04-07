@@ -19,8 +19,10 @@ RUN pip install --no-cache-dir -e /app/verity/
 COPY uw_demo/ /app/uw_demo/
 COPY scripts/ /app/scripts/
 
-# Expose port
-EXPOSE 8000
+# Both ports available — docker-compose.yml selects which to use per container
+EXPOSE 8000 8001
 
-# Run the UW demo app (which mounts Verity API + Web internally)
-CMD ["uvicorn", "uw_demo.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Default CMD is overridden in docker-compose.yml per container:
+#   verity container:  uvicorn verity.main:app --port 8000
+#   uw-demo container: uvicorn uw_demo.app.main:app --port 8001
+CMD ["uvicorn", "verity.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

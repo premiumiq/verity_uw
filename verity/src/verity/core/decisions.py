@@ -36,10 +36,6 @@ class Decisions:
             "entity_version_id": str(decision.entity_version_id),
             "prompt_version_ids": [str(p) for p in decision.prompt_version_ids],
             "inference_config_snapshot": json.dumps(decision.inference_config_snapshot),
-            "submission_id": str(decision.submission_id) if decision.submission_id else None,
-            "policy_id": str(decision.policy_id) if decision.policy_id else None,
-            "renewal_id": str(decision.renewal_id) if decision.renewal_id else None,
-            "business_entity": decision.business_entity,
             "channel": decision.channel.value,
             "mock_mode": decision.mock_mode,
             "pipeline_run_id": str(decision.pipeline_run_id) if decision.pipeline_run_id else None,
@@ -61,6 +57,8 @@ class Decisions:
             "tool_calls_made": json.dumps(decision.tool_calls_made) if decision.tool_calls_made else None,
             "message_history": json.dumps(decision.message_history) if decision.message_history else None,
             "application": decision.application,
+            "run_purpose": decision.run_purpose.value,
+            "reproduced_from_decision_id": str(decision.reproduced_from_decision_id) if decision.reproduced_from_decision_id else None,
             "execution_context_id": str(decision.execution_context_id) if decision.execution_context_id else None,
             "hitl_required": decision.hitl_required,
             "status": decision.status,
@@ -86,14 +84,15 @@ class Decisions:
         row = await self.db.fetch_one("count_decisions")
         return row["total"] if row else 0
 
-    async def get_audit_trail(self, submission_id: UUID) -> list[AuditTrailEntry]:
-        """Get the full decision chain for a submission.
+    async def get_audit_trail(self, execution_context_id: UUID) -> list[AuditTrailEntry]:
+        """Get the full decision chain for an execution context.
 
         Returns every task and agent that ran, in order, with exact versions
         and outputs. This is the regulatory audit trail.
+        Uses execution_context_id (Verity's abstraction), not business keys.
         """
-        rows = await self.db.fetch_all("list_decisions_by_submission", {
-            "submission_id": str(submission_id),
+        rows = await self.db.fetch_all("list_decisions_by_execution_context", {
+            "execution_context_id": str(execution_context_id),
         })
         return [
             AuditTrailEntry(
@@ -175,7 +174,6 @@ class Decisions:
             "override_notes": override.override_notes,
             "ai_recommendation": json.dumps(override.ai_recommendation) if override.ai_recommendation else None,
             "human_decision": json.dumps(override.human_decision) if override.human_decision else None,
-            "submission_id": str(override.submission_id) if override.submission_id else None,
         }
         result = await self.db.execute_returning("record_override", params)
         return {"override_id": result["id"], "created_at": result["created_at"]}

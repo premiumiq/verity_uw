@@ -296,6 +296,20 @@ class Registry:
     async def register_ground_truth_dataset(self, **kwargs) -> dict:
         return await self.db.execute_returning("insert_ground_truth_dataset", kwargs)
 
+    async def register_ground_truth_record(self, **kwargs) -> dict:
+        """Register one input record in a ground truth dataset."""
+        params = _prepare_json_params(kwargs, json_fields=[
+            "input_data", "tool_mock_overrides",
+        ])
+        return await self.db.execute_returning("insert_ground_truth_record", params)
+
+    async def register_ground_truth_annotation(self, **kwargs) -> dict:
+        """Register one annotator's label for a ground truth record."""
+        params = _prepare_json_params(kwargs, json_fields=[
+            "expected_output",
+        ])
+        return await self.db.execute_returning("insert_ground_truth_annotation", params)
+
     async def register_validation_run(self, **kwargs) -> dict:
         params = _prepare_json_params(kwargs, json_fields=[
             "confusion_matrix", "field_accuracy", "fairness_metrics",

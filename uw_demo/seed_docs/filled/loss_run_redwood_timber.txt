@@ -1,0 +1,54 @@
+LOSS RUN REPORT
+===============================================================================
+
+Insured:          Redwood Timber Products LLC
+FEIN:             10-2345678
+Policy Number:    PLY-GL-REDWOOD_-2026
+Line of Business: General Liability
+Report Date:      03/15/2026
+Report Period:    01/01/2023 to 12/31/2025
+
+===============================================================================
+CLAIMS SUMMARY - 3 YEAR HISTORY
+===============================================================================
+
+Year    Claims   Incurred ($)    Paid ($)       Reserves ($)   Status
+------  ------   ------------    ----------     -----------    --------
+2023      2            $65,000         $55,000        $10,000  Closed
+2024      2            $85,000         $70,000        $15,000  Closed
+2025      2           $110,000         $60,000        $50,000  Open
+
+TOTALS: 6 claims, $260,000 total incurred,
+        $185,000 paid, $75,000 outstanding reserves
+
+Loss Ratio (3-Year): N/A
+
+===============================================================================
+CLAIM DETAILS
+===============================================================================
+
+Claim #CLM-2023-001
+  Date of Loss:  2023-03-20
+  Claimant:      Employee
+  Type:          Bodily Injury
+  Description:   Saw blade laceration during lumber processing. Required surgery.
+  Status:        Closed
+  Amount Paid:   $45,000
+  Reserves:      $0
+  Total Incurred: $45,000
+
+Claim #CLM-2025-002
+  Date of Loss:  2025-07-12
+  Claimant:      Contractor
+  Type:          Property Damage
+  Description:   Lumber stack collapsed during loading, damaging contractor's flatbed truck and injuring loader operator.
+  Status:        Open
+  Amount Paid:   $30,000
+  Reserves:      $50,000
+  Total Incurred: $80,000
+
+-------------------------------------------------------------------------------
+Report prepared by: Claims Department
+This report is provided for informational purposes only and does not constitute
+a guarantee of coverage or payment.
+===============================================================================

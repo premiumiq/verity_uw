@@ -124,8 +124,8 @@ def _get_step_outputs(submission_id: str) -> Optional[dict[str, dict]]:
 def _outputs_acme_do() -> dict:
     return {
         "classify_documents": {
-            "document_type": "acord_855", "confidence": 0.97,
-            "classification_notes": "Clear ACORD 855 D&O application header",
+            "document_type": "do_application", "confidence": 0.97,
+            "classification_notes": "Clear D&O liability application header",
         },
         "extract_fields": {
             "fields": {"named_insured": "Acme Dynamics LLC", "annual_revenue": 50000000,
@@ -151,8 +151,8 @@ def _outputs_acme_do() -> dict:
 def _outputs_techflow_do() -> dict:
     return {
         "classify_documents": {
-            "document_type": "acord_855", "confidence": 0.94,
-            "classification_notes": "ACORD 855 with some non-standard formatting",
+            "document_type": "do_application", "confidence": 0.94,
+            "classification_notes": "D&O application with some non-standard formatting",
         },
         "extract_fields": {
             "fields": {"named_insured": "TechFlow Industries Inc", "annual_revenue": 120000000,
@@ -181,7 +181,7 @@ def _outputs_techflow_do() -> dict:
 def _outputs_meridian_gl() -> dict:
     return {
         "classify_documents": {
-            "document_type": "acord_125", "confidence": 0.91,
+            "document_type": "gl_application", "confidence": 0.91,
             "classification_notes": "General liability application form",
         },
         "extract_fields": {
@@ -212,7 +212,7 @@ def _outputs_meridian_gl() -> dict:
 def _outputs_acme_gl() -> dict:
     return {
         "classify_documents": {
-            "document_type": "acord_125", "confidence": 0.93,
+            "document_type": "gl_application", "confidence": 0.93,
             "classification_notes": "Standard GL application",
         },
         "extract_fields": {

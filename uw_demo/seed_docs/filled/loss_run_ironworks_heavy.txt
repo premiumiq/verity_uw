@@ -1,0 +1,54 @@
+LOSS RUN REPORT
+===============================================================================
+
+Insured:          Ironworks Heavy Industries Corp
+FEIN:             66-8901234
+Policy Number:    PLY-GL-IRONWORK-2026
+Line of Business: General Liability
+Report Date:      03/15/2026
+Report Period:    01/01/2023 to 12/31/2025
+
+===============================================================================
+CLAIMS SUMMARY - 3 YEAR HISTORY
+===============================================================================
+
+Year    Claims   Incurred ($)    Paid ($)       Reserves ($)   Status
+------  ------   ------------    ----------     -----------    --------
+2023      2           $125,000        $100,000        $25,000  Closed
+2024      1            $45,000         $45,000             $0  Closed
+2025      1            $80,000         $50,000        $30,000  Open
+
+TOTALS: 4 claims, $250,000 total incurred,
+        $195,000 paid, $55,000 outstanding reserves
+
+Loss Ratio (3-Year): N/A
+
+===============================================================================
+CLAIM DETAILS
+===============================================================================
+
+Claim #CLM-2023-001
+  Date of Loss:  2023-01-20
+  Claimant:      Employee
+  Type:          Bodily Injury
+  Description:   Burns from molten steel splash during pouring operation. Significant injury.
+  Status:        Closed
+  Amount Paid:   $85,000
+  Reserves:      $0
+  Total Incurred: $85,000
+
+Claim #CLM-2025-001
+  Date of Loss:  2025-06-30
+  Claimant:      Delivery Company
+  Type:          Property Damage
+  Description:   Steel beam fell from crane during loading, damaging delivery truck. Under negotiation.
+  Status:        Open
+  Amount Paid:   $50,000
+  Reserves:      $30,000
+  Total Incurred: $80,000
+
+-------------------------------------------------------------------------------
+Report prepared by: Claims Department
+This report is provided for informational purposes only and does not constitute
+a guarantee of coverage or payment.
+===============================================================================

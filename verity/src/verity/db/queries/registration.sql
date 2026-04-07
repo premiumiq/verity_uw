@@ -170,19 +170,51 @@ RETURNING id, created_at;
 
 -- name: insert_ground_truth_dataset
 INSERT INTO ground_truth_dataset (
-    entity_type, entity_id, name, version, description, lob,
-    record_count, minio_bucket, minio_key, labeled_by_sme, reviewed_by
+    entity_type, entity_id, name, version, description, purpose,
+    quality_tier, status, owner_name, created_by,
+    record_count, designed_for_version_id, coverage_notes
 )
 VALUES (
-    %(entity_type)s, %(entity_id)s, %(name)s, %(version)s, %(description)s, %(lob)s,
-    %(record_count)s, %(minio_bucket)s, %(minio_key)s, %(labeled_by_sme)s, %(reviewed_by)s
+    %(entity_type)s, %(entity_id)s, %(name)s, %(version)s, %(description)s, %(purpose)s,
+    %(quality_tier)s, %(status)s, %(owner_name)s, %(created_by)s,
+    %(record_count)s, %(designed_for_version_id)s, %(coverage_notes)s
 )
 RETURNING id, created_at;
 
 
+-- name: insert_ground_truth_record
+INSERT INTO ground_truth_record (
+    dataset_id, record_index, source_type,
+    source_provider, source_container, source_key, source_description,
+    input_data, tool_mock_overrides, tags, difficulty, record_notes
+)
+VALUES (
+    %(dataset_id)s, %(record_index)s, %(source_type)s,
+    %(source_provider)s, %(source_container)s, %(source_key)s, %(source_description)s,
+    %(input_data)s, %(tool_mock_overrides)s, %(tags)s, %(difficulty)s, %(record_notes)s
+)
+RETURNING id, created_at;
+
+
+-- name: insert_ground_truth_annotation
+INSERT INTO ground_truth_annotation (
+    record_id, dataset_id, annotator_type,
+    labeled_by, label_confidence, label_notes,
+    judge_model, judge_prompt_version_id, judge_reasoning,
+    expected_output, is_authoritative
+)
+VALUES (
+    %(record_id)s, %(dataset_id)s, %(annotator_type)s,
+    %(labeled_by)s, %(label_confidence)s, %(label_notes)s,
+    %(judge_model)s, %(judge_prompt_version_id)s, %(judge_reasoning)s,
+    %(expected_output)s, %(is_authoritative)s
+)
+RETURNING id, labeled_at;
+
+
 -- name: insert_validation_run
 INSERT INTO validation_run (
-    entity_type, entity_version_id, dataset_id, run_by,
+    entity_type, entity_version_id, dataset_id, dataset_version, run_by,
     precision_score, recall_score, f1_score, cohens_kappa, confusion_matrix,
     field_accuracy, overall_extraction_rate, low_confidence_rate,
     fairness_metrics, fairness_passed, fairness_notes,
@@ -190,7 +222,7 @@ INSERT INTO validation_run (
     passed, notes
 )
 VALUES (
-    %(entity_type)s, %(entity_version_id)s, %(dataset_id)s, %(run_by)s,
+    %(entity_type)s, %(entity_version_id)s, %(dataset_id)s, %(dataset_version)s, %(run_by)s,
     %(precision_score)s, %(recall_score)s, %(f1_score)s, %(cohens_kappa)s, %(confusion_matrix)s,
     %(field_accuracy)s, %(overall_extraction_rate)s, %(low_confidence_rate)s,
     %(fairness_metrics)s, %(fairness_passed)s, %(fairness_notes)s,
@@ -225,11 +257,11 @@ RETURNING id, created_at;
 -- name: insert_metric_threshold
 INSERT INTO metric_threshold (
     entity_type, entity_id, materiality_tier, metric_name,
-    minimum_acceptable, target_champion
+    field_name, minimum_acceptable, target_champion
 )
 VALUES (
     %(entity_type)s, %(entity_id)s, %(materiality_tier)s, %(metric_name)s,
-    %(minimum_acceptable)s, %(target_champion)s
+    %(field_name)s, %(minimum_acceptable)s, %(target_champion)s
 )
 RETURNING id, created_at;
 

@@ -1,0 +1,54 @@
+LOSS RUN REPORT
+===============================================================================
+
+Insured:          TechFlow Industries Inc
+FEIN:             45-6789012
+Policy Number:    PLY-DO-TECHFLOW-2026
+Line of Business: Directors & Officers
+Report Date:      03/15/2026
+Report Period:    01/01/2023 to 12/31/2025
+
+===============================================================================
+CLAIMS SUMMARY - 3 YEAR HISTORY
+===============================================================================
+
+Year    Claims   Incurred ($)    Paid ($)       Reserves ($)   Status
+------  ------   ------------    ----------     -----------    --------
+2023      1            $75,000         $75,000             $0  Closed
+2024      0                 $0              $0             $0  Closed
+2025      1           $150,000              $0       $150,000  Open
+
+TOTALS: 2 claims, $225,000 total incurred,
+        $75,000 paid, $150,000 outstanding reserves
+
+Loss Ratio (3-Year): N/A
+
+===============================================================================
+CLAIM DETAILS
+===============================================================================
+
+Claim #CLM-2023-001
+  Date of Loss:  2023-08-20
+  Claimant:      Former Board Member
+  Type:          D&O Breach of Fiduciary Duty
+  Description:   Allegation of inadequate oversight of executive compensation. Settled.
+  Status:        Closed
+  Amount Paid:   $75,000
+  Reserves:      $0
+  Total Incurred: $75,000
+
+Claim #CLM-2025-001
+  Date of Loss:  2025-03-10
+  Claimant:      Shareholder Group
+  Type:          D&O Securities Claim
+  Description:   Shareholder derivative action alleging misleading revenue projections. Currently in discovery.
+  Status:        Open
+  Amount Paid:   $0
+  Reserves:      $150,000
+  Total Incurred: $150,000
+
+-------------------------------------------------------------------------------
+Report prepared by: Claims Department
+This report is provided for informational purposes only and does not constitute
+a guarantee of coverage or payment.
+===============================================================================

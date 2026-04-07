@@ -53,11 +53,50 @@ services:
       echo 'MinIO buckets created';
       "
 
-  app:
+  # ── VERITY: AI Governance Platform ──────────────────────────
+  # Runs the Verity admin web UI + API on port 8000.
+  # This is the governance platform — independent of any business app.
+  verity:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: verity_app
+    restart: unless-stopped
+    environment:
+      VERITY_DB_URL: postgresql://verityuser:veritypass123@postgres:5432/verity_db
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      MINIO_SECURE: "false"
+      APP_ENV: demo
+    volumes:
+      - ./verity:/app/verity
+      - ./uw_demo:/app/uw_demo
+      - ./scripts:/app/scripts
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    # Runs Verity's own standalone server (admin UI at /admin/)
+    command: ["uvicorn", "verity.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  # ── UW DEMO: Business Application Powered by Verity ─────────
+  # Runs the underwriting demo on port 8001.
+  # Uses Verity as a Python SDK (direct function calls, not HTTP).
+  # Both containers share the same verity_db database.
+  uw-demo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: uw_demo_app
     restart: unless-stopped
     environment:
       VERITY_DB_URL: postgresql://verityuser:veritypass123@postgres:5432/verity_db
@@ -71,18 +110,21 @@ services:
     volumes:
       - ./verity:/app/verity
       - ./uw_demo:/app/uw_demo
+      - ./scripts:/app/scripts
     ports:
-      - "8000:8000"
+      - "8001:8001"
     depends_on:
       postgres:
         condition: service_healthy
       minio:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 15s
       timeout: 5s
       retries: 5
+    # Runs the UW demo business app on port 8001
+    command: ["uvicorn", "uw_demo.app.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
 
 volumes:
   postgres_data:

@@ -1,0 +1,56 @@
+LOSS RUN REPORT
+===============================================================================
+
+Insured:          Sterling Advisory Partners LLC
+FEIN:             67-8901234
+Policy Number:    PLY-DO-STERLING-2026
+Line of Business: Directors & Officers
+Report Date:      03/15/2026
+Report Period:    01/01/2023 to 12/31/2025
+
+===============================================================================
+CLAIMS SUMMARY - 5 YEAR HISTORY
+===============================================================================
+
+Year    Claims   Incurred ($)    Paid ($)       Reserves ($)   Status
+------  ------   ------------    ----------     -----------    --------
+2021      1           $180,000        $180,000             $0  Closed
+2022      0                 $0              $0             $0  Closed
+2023      1           $220,000        $150,000        $70,000  Open
+2024      0                 $0              $0             $0  Closed
+2025      0                 $0              $0             $0  Closed
+
+TOTALS: 2 claims, $400,000 total incurred,
+        $330,000 paid, $70,000 outstanding reserves
+
+Loss Ratio (3-Year): N/A
+
+===============================================================================
+CLAIM DETAILS
+===============================================================================
+
+Claim #CLM-2021-001
+  Date of Loss:  2021-06-15
+  Claimant:      Former Partner
+  Type:          D&O Breach of Duty
+  Description:   Allegation of breach of partnership agreement during firm restructuring. Settled.
+  Status:        Closed
+  Amount Paid:   $180,000
+  Reserves:      $0
+  Total Incurred: $180,000
+
+Claim #CLM-2023-001
+  Date of Loss:  2023-09-01
+  Claimant:      Client Company
+  Type:          D&O Professional Negligence
+  Description:   Client alleges faulty strategic advice led to failed acquisition. Ongoing litigation.
+  Status:        Open
+  Amount Paid:   $150,000
+  Reserves:      $70,000
+  Total Incurred: $220,000
+
+-------------------------------------------------------------------------------
+Report prepared by: Claims Department
+This report is provided for informational purposes only and does not constitute
+a guarantee of coverage or payment.
+===============================================================================

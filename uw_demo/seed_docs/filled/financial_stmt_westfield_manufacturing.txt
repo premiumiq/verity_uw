@@ -1,0 +1,60 @@
+WESTFIELD MANUFACTURING INC
+CONSOLIDATED FINANCIAL STATEMENTS
+Fiscal Years Ended December 31, 2025 and 2024
+
+===============================================================================
+INDEPENDENT AUDITOR'S REPORT
+===============================================================================
+
+To the Board of Directors and Shareholders of Westfield Manufacturing Inc:
+
+Opinion
+
+We have audited the accompanying consolidated financial statements of
+Westfield Manufacturing Inc (the "Company"), which comprise the consolidated balance
+sheets as of December 31, 2025 and 2024,
+and the related consolidated statements of operations, comprehensive income,
+stockholders' equity, and cash flows for the years then ended.
+
+In our opinion, the consolidated financial statements referred to above present
+fairly, in all material respects, the financial position of the Company as of
+December 31, 2025, in conformity with accounting
+principles generally accepted in the United States of America.
+
+PricewaterhouseCoopers LLP
+Certified Public Accountants
+Westfield Center, OH
+March 15, 2025
+
+===============================================================================
+CONSOLIDATED BALANCE SHEET
+As of December 31 (in thousands)
+===============================================================================
+
+                                        2025        2024
+                                        ------------    ------------
+ASSETS
+  Total Assets                           $95,000,000   $90,000,000
+
+LIABILITIES
+  Total Liabilities                      $35,000,000   $33,000,000
+
+STOCKHOLDERS' EQUITY
+  Total Equity                           $60,000,000   $57,000,000
+
+Total Liabilities & Equity               $95,000,000   $90,000,000
+
+Debt-to-Equity Ratio:                   0.58            0.58
+
+===============================================================================
+CONSOLIDATED STATEMENT OF OPERATIONS
+For the Years Ended December 31 (in thousands)
+===============================================================================
+
+                                        2025        2024
+                                        ------------    ------------
+Total Revenue                           $120,000,000  $115,000,000
+
+Net Income (Loss)                         $9,600,000    $8,900,000
+
+===============================================================================

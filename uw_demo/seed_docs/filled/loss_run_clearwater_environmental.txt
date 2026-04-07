@@ -1,0 +1,59 @@
+LOSS RUN REPORT
+===============================================================================
+
+Insured:          Clearwater Environmental Services LLC
+FEIN:             99-1234567
+Policy Number:    PLY-GL-CLEARWAT-2026
+Line of Business: General Liability
+Report Date:      03/15/2026
+Report Period:    01/01/2023 to 12/31/2025
+
+===============================================================================
+CLAIMS SUMMARY - 3 YEAR HISTORY
+===============================================================================
+
+Year    Claims   Incurred ($)    Paid ($)       Reserves ($)   Status
+------  ------   ------------    ----------     -----------    --------
+2023      2            $95,000         $80,000        $15,000  Closed
+2024      3           $180,000        $120,000        $60,000  Closed
+2025      3           $250,000        $100,000       $150,000  Open
+
+TOTALS: 8 claims, $525,000 total incurred,
+        $300,000 paid, $225,000 outstanding reserves
+
+Loss Ratio (3-Year): N/A
+
+===============================================================================
+CLAIM DETAILS
+===============================================================================
+
+Claim #CLM-2024-002
+  Date of Loss:  2024-06-10
+  Claimant:      Property Owner
+  Type:          Environmental
+  Description:   Contamination of residential well water near disposal site. State environmental agency investigating.
+  Status:        Open
+  Amount Paid:   $50,000
+  Reserves:      $60,000
+  Total Incurred: $110,000
+
+Claim #CLM-2025-003
+  Date of Loss:  2025-09-01
+  Claimant:      Multiple Residents
+  Type:          Bodily Injury
+  Description:   Class action by residents alleging health effects from airborne contaminants. Early stage litigation.
+  Status:        Open
+  Amount Paid:   $0
+  Reserves:      $150,000
+  Total Incurred: $150,000
+
+===============================================================================
+NOTES
+===============================================================================
+Prior carrier (CNA) non-renewed the policy effective 12/31/2025 citing deteriorating loss experience and pending environmental litigation.
+
+-------------------------------------------------------------------------------
+Report prepared by: Claims Department
+This report is provided for informational purposes only and does not constitute
+a guarantee of coverage or payment.
+===============================================================================

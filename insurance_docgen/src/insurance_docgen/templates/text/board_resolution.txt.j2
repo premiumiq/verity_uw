@@ -1,0 +1,61 @@
+BOARD OF DIRECTORS RESOLUTION
+{{ named_insured | upper }}
+
+===============================================================================
+
+RESOLVED, that the Board of Directors of {{ named_insured }} (the "Company"),
+a {{ entity_type }} organized under the laws of the State of {{ state_of_incorporation }},
+at a duly convened meeting held on {{ resolution_date | default("January 15, 2026") }},
+at which a quorum was present and acting, hereby adopts the following resolutions:
+
+===============================================================================
+BOARD COMPOSITION
+===============================================================================
+
+Total Board Members:        {{ board_size }}
+Independent Directors:      {{ independent_directors }}
+Inside Directors:           {{ board_size - independent_directors }}
+
+DIRECTORS:
+{% for member in board_members %}
+  {{ loop.index }}. {{ member.name }}
+     Title:        {{ member.title }}
+     Independent:  {{ "Yes" if member.is_independent else "No" }}
+     Committee:    {{ member.committee | default("None") }}
+{% if member.shares_owned %}     Shares Owned:  {{ member.shares_owned }}{% endif %}
+{% endfor %}
+
+===============================================================================
+COMMITTEE STRUCTURE
+===============================================================================
+
+Audit Committee:
+{% for member in board_members if member.committee and "Audit" in member.committee %}
+  - {{ member.name }} ({{ member.title }}){% if loop.first %} — Committee Chair{% endif %}
+{% else %}
+  (No audit committee members listed)
+{% endfor %}
+
+Financial Expert on Audit Committee: {{ "Yes" if audit_committee_financial_expert else "No" }}
+
+===============================================================================
+DIRECTORS AND OFFICERS LIABILITY INSURANCE
+===============================================================================
+
+RESOLVED, that the officers of the Company are hereby authorized and directed
+to procure Directors and Officers Liability Insurance on behalf of the Company
+and its directors and officers, with limits of liability not to exceed
+{{ limits_requested | currency }} and a retention of {{ retention_requested | currency }},
+for the policy period {{ effective_date }} through {{ expiration_date }}.
+
+RESOLVED, that the Secretary is directed to maintain a copy of this resolution
+with the corporate records.
+
+===============================================================================
+
+I, the undersigned Secretary of {{ named_insured }}, do hereby certify that
+the foregoing is a true and correct copy of the resolutions adopted by the
+Board of Directors at its meeting on {{ resolution_date | default("January 15, 2026") }}.
+
+Secretary: ___________________________
+Date:     ___________________________

@@ -1,0 +1,60 @@
+CONTINENTAL SERVICES INC
+CONSOLIDATED FINANCIAL STATEMENTS
+Fiscal Years Ended December 31, 2025 and 2024
+
+===============================================================================
+INDEPENDENT AUDITOR'S REPORT
+===============================================================================
+
+To the Board of Directors and Shareholders of Continental Services Inc:
+
+Opinion
+
+We have audited the accompanying consolidated financial statements of
+Continental Services Inc (the "Company"), which comprise the consolidated balance
+sheets as of December 31, 2025 and 2024,
+and the related consolidated statements of operations, comprehensive income,
+stockholders' equity, and cash flows for the years then ended.
+
+In our opinion, the consolidated financial statements referred to above present
+fairly, in all material respects, the financial position of the Company as of
+December 31, 2025, in conformity with accounting
+principles generally accepted in the United States of America.
+
+Deloitte & Touche LLP
+Certified Public Accountants
+Tysons, VA
+March 15, 2025
+
+===============================================================================
+CONSOLIDATED BALANCE SHEET
+As of December 31 (in thousands)
+===============================================================================
+
+                                        2025        2024
+                                        ------------    ------------
+ASSETS
+  Total Assets                          $145,000,000  $140,000,000
+
+LIABILITIES
+  Total Liabilities                      $65,000,000   $60,000,000
+
+STOCKHOLDERS' EQUITY
+  Total Equity                           $80,000,000   $80,000,000
+
+Total Liabilities & Equity              $145,000,000  $140,000,000
+
+Debt-to-Equity Ratio:                   0.81            0.75
+
+===============================================================================
+CONSOLIDATED STATEMENT OF OPERATIONS
+For the Years Ended December 31 (in thousands)
+===============================================================================
+
+                                        2025        2024
+                                        ------------    ------------
+Total Revenue                           $200,000,000  $190,000,000
+
+Net Income (Loss)                        $12,000,000   $14,000,000
+
+===============================================================================
