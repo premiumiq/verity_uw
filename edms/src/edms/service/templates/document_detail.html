@@ -1,0 +1,279 @@
+{% extends "base.html" %}
+
+{% block title %}{{ doc.filename }} - EDMS{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">></span>
+    <a href="/ui/">Documents</a>
+    <span class="separator">></span>
+    <span>{{ doc.filename }}</span>
+{% endblock %}
+
+{% block page_title %}{{ doc.filename }}{% endblock %}
+
+{% block header_actions %}
+    <form method="POST" action="/ui/documents/{{ doc.id }}/delete"
+          onsubmit="return confirm('Delete this document and all derived documents?')"
+          style="display: inline;">
+        <button type="submit" class="edms-btn edms-btn-danger edms-btn-sm">Delete</button>
+    </form>
+{% endblock %}
+
+{% block content %}
+
+<!-- ── METADATA ────────────────────────────────────────────── -->
+<div class="edms-section">
+    <h2 class="edms-section-title">Document Metadata</h2>
+    <div class="edms-card">
+        <div class="edms-detail-grid">
+            <div class="edms-detail-label">Document ID</div>
+            <div style="font-family: monospace; font-size: 0.78rem;">{{ doc.id }}</div>
+
+            <div class="edms-detail-label">Filename</div>
+            <div style="font-weight: 600;">{{ doc.filename }}</div>
+
+            <div class="edms-detail-label">Content Type</div>
+            <div>{{ doc.content_type or '-' }}</div>
+
+            <div class="edms-detail-label">File Size</div>
+            <div>{% if doc.file_size_bytes %}{{ "%.1f"|format(doc.file_size_bytes / 1024) }} KB{% else %}-{% endif %}</div>
+
+            <div class="edms-detail-label">Context</div>
+            <div style="font-family: monospace; font-size: 0.78rem;">{{ doc.context_ref }}</div>
+
+            <div class="edms-detail-label">Context Type</div>
+            <div>{{ doc.context_type or '-' }}</div>
+
+            <div class="edms-detail-label">Storage</div>
+            <div style="font-size: 0.75rem; font-family: monospace;">{{ doc.storage_provider }}://{{ doc.storage_container }}/{{ doc.storage_key }}</div>
+
+            <div class="edms-detail-label">Uploaded By</div>
+            <div>{{ doc.uploaded_by }}</div>
+
+            <div class="edms-detail-label">Uploaded At</div>
+            <div>{{ doc.uploaded_at.strftime('%Y-%m-%d %H:%M:%S') if doc.uploaded_at else '-' }}</div>
+
+            <div class="edms-detail-label">Notes</div>
+            <div>{{ doc.notes or '-' }}</div>
+
+            <div class="edms-detail-label">Folder</div>
+            <div>
+                <form method="POST" action="/ui/documents/{{ doc.id }}/folder" style="display: flex; gap: 8px; align-items: center;">
+                    <select name="folder_id" class="edms-input edms-select" style="width: 220px; padding: 4px 8px; font-size: 0.78rem;">
+                        <option value="">No folder</option>
+                        {% for f in all_folders %}
+                        <option value="{{ f.id }}" {% if doc.folder_id and doc.folder_id == f.id %}selected{% endif %}>{{ f.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="edms-btn edms-btn-secondary edms-btn-sm">Move</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── DOCUMENT TYPE ──────────────────────────────────────── -->
+<div class="edms-section">
+    <h2 class="edms-section-title">Classification</h2>
+    <div class="edms-card">
+        <form method="POST" action="/ui/documents/{{ doc.id }}/type" style="display: flex; align-items: end; gap: 12px;">
+            <div>
+                <label class="edms-label">Document Type</label>
+                <select name="document_type" class="edms-input edms-select" style="width: 250px;">
+                    <option value="">Unclassified</option>
+                    {% for dt in document_types %}
+                    <option value="{{ dt.type_key }}" {% if doc.document_type == dt.type_key %}selected{% endif %}>
+                        {{ dt.display_name }} ({{ dt.type_key }})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="edms-btn edms-btn-secondary edms-btn-sm">Update Type</button>
+        </form>
+    </div>
+</div>
+
+<!-- ── TAGS ────────────────────────────────────────────────── -->
+<div class="edms-section">
+    <h2 class="edms-section-title">Tags</h2>
+    <div class="edms-card">
+        <form method="POST" action="/ui/documents/{{ doc.id }}/tags">
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                {% for td in tag_definitions %}
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <label class="edms-label" style="width: 150px; margin: 0;">
+                        {{ td.display_name }}
+                        {% if td.is_required %}<span class="edms-badge edms-badge-required" style="margin-left: 4px;">req</span>{% endif %}
+                        {% if td.value_mode == 'freetext' %}<span class="edms-badge edms-badge-freetext" style="margin-left: 4px;">free</span>{% endif %}
+                    </label>
+                    <div style="flex: 1;">
+                        {% set current_values = doc.tags.get(td.tag_key, []) if doc.tags is mapping else [] %}
+                        {% if td.value_mode == 'restricted' %}
+                        <!-- Multi-select checkboxes for restricted tags -->
+                        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                            {% for av in td.allowed_values %}
+                            <label style="font-size: 0.78rem; display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                                <input type="checkbox" name="tag_{{ td.tag_key }}" value="{{ av.value }}"
+                                       {% if av.value in current_values %}checked{% endif %}>
+                                {{ av.display_name }}
+                            </label>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <!-- Free text input for freetext tags -->
+                        <input type="text" name="tag_{{ td.tag_key }}" class="edms-input"
+                               value="{{ current_values | join(', ') if current_values else '' }}"
+                               placeholder="Comma-separated values">
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <div style="margin-top: 12px;">
+                <button type="submit" class="edms-btn edms-btn-secondary edms-btn-sm">Save Tags</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ── TEXT EXTRACTION ─────────────────────────────────────── -->
+<div class="edms-section">
+    <h2 class="edms-section-title">Extracted Text</h2>
+    {% if extracted_text %}
+    <div class="edms-card">
+        <div style="font-size: 0.75rem; color: var(--edms-text-light); margin-bottom: 8px;">
+            {{ extracted_text | length }} characters
+            <span class="edms-badge edms-badge-complete">extracted</span>
+        </div>
+        <div class="edms-text-preview">{{ extracted_text }}</div>
+        <div style="margin-top: 8px;">
+            <form method="POST" action="/ui/documents/{{ doc.id }}/re-extract" style="display: inline;">
+                <button type="submit" class="edms-btn edms-btn-secondary edms-btn-sm">Re-extract</button>
+            </form>
+        </div>
+    </div>
+    {% else %}
+    <div class="edms-card">
+        <div style="color: var(--edms-text-light); font-size: 0.82rem;">
+            <span class="edms-badge edms-badge-pending">pending</span>
+            Text has not been extracted from this document.
+        </div>
+        <form method="POST" action="/ui/documents/{{ doc.id }}/extract" style="margin-top: 8px;">
+            <button type="submit" class="edms-btn edms-btn-primary edms-btn-sm">Extract Text</button>
+        </form>
+    </div>
+    {% endif %}
+</div>
+
+<!-- ── LINEAGE ─────────────────────────────────────────────── -->
+<div class="edms-section">
+    <h2 class="edms-section-title">Document Lineage</h2>
+
+    <!-- Upstream: parent document this was derived from -->
+    {% if parent_doc %}
+    <div class="edms-card" style="margin-bottom: 12px; border-left: 3px solid var(--edms-amber);">
+        <div style="font-size: 0.68rem; font-weight: 600; color: var(--edms-text-light); text-transform: uppercase; margin-bottom: 6px;">Derived From</div>
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <a href="/ui/documents/{{ parent_doc.id }}" style="font-weight: 600; color: var(--edms-blue); text-decoration: none;">
+                {{ parent_doc.filename }}
+            </a>
+            <span style="font-size: 0.72rem; color: var(--edms-text-light);">
+                via {{ parent_doc.transformation_type }}
+                {% if parent_doc.transformation_method %}({{ parent_doc.transformation_method }}){% endif %}
+            </span>
+            <span class="edms-badge edms-badge-{{ parent_doc.transformation_status }}">
+                {{ parent_doc.transformation_status }}
+            </span>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Downstream: child documents derived from this -->
+    {% if children %}
+    <table class="edms-table">
+        <thead>
+            <tr>
+                <th>Child Document</th>
+                <th>Transformation</th>
+                <th>Method</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for child in children %}
+            <tr class="clickable" onclick="window.location='/ui/documents/{{ child.id }}'">
+                <td>
+                    <a href="/ui/documents/{{ child.id }}" style="font-weight: 500; color: var(--edms-blue); text-decoration: none;">
+                        {{ child.filename }}
+                    </a>
+                </td>
+                <td>{{ child.transformation_type }}</td>
+                <td style="font-size: 0.75rem;">{{ child.transformation_method or '-' }}</td>
+                <td>
+                    <span class="edms-badge edms-badge-{{ child.transformation_status }}">
+                        {{ child.transformation_status }}
+                    </span>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    {% if not parent_doc and not children %}
+    <div class="edms-card">
+        <div style="color: var(--edms-text-light); font-size: 0.82rem;">No lineage - this is a standalone document with no parent or children.</div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- ── TASK HISTORY ────────────────────────────────────────── -->
+<div class="edms-section">
+    <h2 class="edms-section-title">Task History</h2>
+    {% if tasks %}
+    <table class="edms-table">
+        <thead>
+            <tr>
+                <th>Task Type</th>
+                <th>Method</th>
+                <th>Status</th>
+                <th>Duration</th>
+                <th>Result</th>
+                <th>Initiated By</th>
+                <th>When</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for task in tasks %}
+            <tr>
+                <td style="font-size: 0.78rem;">{{ task.task_type }}</td>
+                <td style="font-size: 0.72rem; color: var(--edms-text-light);">{{ task.task_method or '-' }}</td>
+                <td>
+                    <span class="edms-badge edms-badge-{{ task.status }}">{{ task.status }}</span>
+                </td>
+                <td style="font-size: 0.75rem;">
+                    {% if task.duration_ms %}{{ "%.1f"|format(task.duration_ms / 1000) }}s{% else %}-{% endif %}
+                </td>
+                <td style="font-size: 0.72rem; max-width: 250px;">
+                    {% if task.status == 'complete' and task.result_summary %}
+                    {{ task.result_summary }}
+                    {% elif task.status == 'failed' and task.error_message %}
+                    <span style="color: var(--edms-red);">{{ task.error_message | truncate(80) }}</span>
+                    {% else %}-{% endif %}
+                </td>
+                <td style="font-size: 0.75rem;">{{ task.initiated_by }}</td>
+                <td style="font-size: 0.72rem; color: var(--edms-text-light);">
+                    {{ task.created_at.strftime('%m-%d %H:%M') if task.created_at else '-' }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="edms-card">
+        <div style="color: var(--edms-text-light); font-size: 0.82rem;">No tasks have been run on this document.</div>
+    </div>
+    {% endif %}
+</div>
+
+{% endblock %}

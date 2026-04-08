@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+
+{% block title %}Documents - EDMS{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">></span>
+    <span>Documents</span>
+{% endblock %}
+
+{% block page_title %}Documents{% endblock %}
+
+{% block header_actions %}
+    <a href="/ui/upload" class="edms-btn edms-btn-primary">Upload Document</a>
+{% endblock %}
+
+{% block content %}
+
+<p class="edms-page-description">
+    All documents stored in the EDMS. Filter by folder, context, or document type. Select documents for bulk actions.
+</p>
+
+<div style="display: flex; gap: 20px;">
+
+<!-- ── LEFT SIDEBAR: Collections + Folders ─────────────────── -->
+<div style="width: 210px; flex-shrink: 0;">
+    <!-- All documents link -->
+    <a href="/ui/" style="display: block; padding: 4px 8px; font-size: 0.78rem; text-decoration: none; color: {% if not filter_collection %}var(--edms-blue){% else %}var(--edms-text){% endif %}; font-weight: {% if not filter_collection %}600{% else %}400{% endif %}; border-radius: 4px; {% if not filter_collection %}background: rgba(74,144,217,0.08);{% endif %}; margin-bottom: 8px;">
+        All Documents
+    </a>
+
+    <!-- Collections -->
+    <div style="font-size: 0.65rem; font-weight: 600; color: var(--edms-text-light); text-transform: uppercase; margin-bottom: 4px;">Collections</div>
+    {% for c in collections %}
+    <a href="/ui/?collection_id={{ c.id }}"
+       style="display: block; padding: 4px 8px; font-size: 0.78rem; text-decoration: none;
+              color: {% if filter_collection == c.id|string %}var(--edms-blue){% else %}var(--edms-text){% endif %};
+              font-weight: {% if filter_collection == c.id|string %}600{% else %}400{% endif %};
+              border-radius: 4px;
+              {% if filter_collection == c.id|string %}background: rgba(74,144,217,0.08);{% endif %}">
+        &#128230; {{ c.display_name }}
+        <span style="font-size: 0.6rem; color: var(--edms-text-light);">{{ c.doc_count or 0 }}</span>
+    </a>
+
+    <!-- Folders within selected collection -->
+    {% if filter_collection == c.id|string and folder_tree %}
+    {% macro render_tree_item(folder, coll_id, depth=0) %}
+    <a href="/ui/?collection_id={{ coll_id }}&folder_id={{ folder.id }}"
+       style="display: block; padding: 3px 8px; padding-left: {{ 16 + depth * 14 }}px; font-size: 0.75rem; text-decoration: none;
+              color: {% if filter_folder == folder.id|string %}var(--edms-blue){% else %}var(--edms-text-light){% endif %};
+              font-weight: {% if filter_folder == folder.id|string %}600{% else %}400{% endif %};">
+        {% if folder.children %}&#128193;{% else %}&#128194;{% endif %} {{ folder.name }}
+        <span style="font-size: 0.55rem;">{{ folder.doc_count }}</span>
+    </a>
+    {% if folder.children %}
+        {% for child in folder.children %}
+            {{ render_tree_item(child, coll_id, depth + 1) }}
+        {% endfor %}
+    {% endif %}
+    {% endmacro %}
+        {% for folder in folder_tree %}
+            {{ render_tree_item(folder, c.id|string) }}
+        {% endfor %}
+    {% endif %}
+    {% endfor %}
+
+    <a href="/ui/collections" style="display: block; padding: 4px 8px; margin-top: 10px; font-size: 0.68rem; color: var(--edms-text-light); text-decoration: none;">
+        Manage Collections &rarr;
+    </a>
+</div>
+
+<!-- ── MAIN CONTENT ───────────────────────────────────────── -->
+<div style="flex: 1; min-width: 0;">
+
+<!-- Filter bar -->
+<div class="edms-card" style="display: flex; gap: 12px; align-items: end; padding: 12px 16px; margin-bottom: 16px;">
+    <div style="flex: 1;">
+        <label class="edms-label">Context Reference</label>
+        <input type="text" class="edms-input" id="filter-context" placeholder="e.g., submission:00000001-..." value="{{ filter_context or '' }}">
+    </div>
+    <div style="width: 180px;">
+        <label class="edms-label">Document Type</label>
+        <select class="edms-input edms-select" id="filter-type">
+            <option value="">All Types</option>
+            {% for dt in document_types %}
+            <option value="{{ dt.type_key }}" {% if filter_type == dt.type_key %}selected{% endif %}>{{ dt.display_name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <button class="edms-btn edms-btn-secondary" onclick="applyFilters()">Filter</button>
+    {% if filter_context or filter_type or filter_folder %}
+    <a href="/ui/" class="edms-btn edms-btn-secondary edms-btn-sm">Clear</a>
+    {% endif %}
+</div>
+
+<script>
+function applyFilters() {
+    const ctx = document.getElementById('filter-context').value;
+    const type = document.getElementById('filter-type').value;
+    let url = '/ui/?';
+    if (ctx) url += 'context_ref=' + encodeURIComponent(ctx) + '&';
+    if (type) url += 'document_type=' + encodeURIComponent(type) + '&';
+    window.location = url;
+}
+function toggleAll(source) {
+    document.querySelectorAll('.doc-checkbox').forEach(cb => cb.checked = source.checked);
+    updateBulkBar();
+}
+function updateBulkBar() {
+    const checked = document.querySelectorAll('.doc-checkbox:checked').length;
+    document.getElementById('bulk-bar').style.display = checked > 0 ? 'flex' : 'none';
+    document.getElementById('bulk-count').textContent = checked;
+}
+</script>
+
+<!-- Bulk action bar (hidden until items selected) -->
+<form method="POST" action="/ui/bulk-delete" id="bulk-form"
+      onsubmit="return confirm('Delete ' + document.getElementById('bulk-count').textContent + ' selected documents?')">
+    <div id="bulk-bar" style="display: none; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; padding: 8px 16px; margin-bottom: 12px; align-items: center; gap: 12px;">
+        <span style="font-size: 0.82rem; font-weight: 500;"><span id="bulk-count">0</span> selected</span>
+        <button type="submit" class="edms-btn edms-btn-danger edms-btn-sm">Delete Selected</button>
+    </div>
+
+{% if documents %}
+<table class="edms-table">
+    <thead>
+        <tr>
+            <th style="width: 30px;"><input type="checkbox" onchange="toggleAll(this)"></th>
+            <th>Filename</th>
+            <th>Type</th>
+            <th>Context</th>
+            <th>Size</th>
+            <th>Tags</th>
+            <th>Uploaded</th>
+            <th style="width: 40px;"></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for doc in documents %}
+        <tr>
+            <td onclick="event.stopPropagation();">
+                <input type="checkbox" class="doc-checkbox" name="doc_ids" value="{{ doc.id }}" form="bulk-form" onchange="updateBulkBar()">
+            </td>
+            <td>
+                <a href="/ui/documents/{{ doc.id }}" style="font-weight: 600; color: var(--edms-blue); text-decoration: none;">
+                    {{ doc.filename }}
+                </a>
+                {% if doc.content_type == 'application/pdf' %}
+                <span class="edms-badge edms-badge-pdf">PDF</span>
+                {% elif doc.content_type == 'text/plain' %}
+                <span class="edms-badge edms-badge-txt">TXT</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if doc.document_type %}
+                <span style="font-size: 0.78rem;">{{ doc.document_type }}</span>
+                {% else %}
+                <span style="color: var(--edms-text-light); font-size: 0.75rem;">unclassified</span>
+                {% endif %}
+            </td>
+            <td style="font-size: 0.72rem; font-family: monospace; max-width: 180px; overflow: hidden; text-overflow: ellipsis;">
+                {{ doc.context_ref }}
+            </td>
+            <td style="font-size: 0.75rem;">
+                {% if doc.file_size_bytes %}{{ "%.1f"|format(doc.file_size_bytes / 1024) }} KB{% else %}-{% endif %}
+            </td>
+            <td style="font-size: 0.68rem;">
+                {% if doc.tags and doc.tags is mapping and doc.tags != {} %}
+                    {% for key, values in doc.tags.items() %}
+                    <span style="color: var(--edms-text-light);">{{ key }}:</span>
+                    {% if values is iterable and values is not string %}{{ values | join(', ') }}{% else %}{{ values }}{% endif %}
+                    {% if not loop.last %}<br>{% endif %}
+                    {% endfor %}
+                {% else %}-{% endif %}
+            </td>
+            <td style="font-size: 0.72rem; color: var(--edms-text-light);">
+                {{ doc.uploaded_at.strftime('%m-%d %H:%M') if doc.uploaded_at else '-' }}
+            </td>
+            <td onclick="event.stopPropagation();">
+                <form method="POST" action="/ui/documents/{{ doc.id }}/delete"
+                      onsubmit="return confirm('Delete {{ doc.filename }}?')" style="display: inline;">
+                    <button type="submit" style="background: none; border: none; color: var(--edms-red); cursor: pointer; font-size: 0.85rem;" title="Delete">&times;</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</form>
+{% else %}
+<div class="edms-empty">
+    <div style="font-size: 2rem; opacity: 0.3;">&#128196;</div>
+    <div style="font-size: 0.9rem; margin-top: 8px;">No documents found.</div>
+    {% if filter_context or filter_type or filter_folder %}
+    <div style="font-size: 0.8rem; margin-top: 4px;">Try clearing the filters or uploading a document.</div>
+    {% else %}
+    <div style="font-size: 0.8rem; margin-top: 4px;"><a href="/ui/upload">Upload your first document</a></div>
+    {% endif %}
+</div>
+{% endif %}
+
+</div><!-- end main content -->
+</div><!-- end flex container -->
+
+{% endblock %}

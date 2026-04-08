@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block title %}Document Types - EDMS{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">></span>
+    <span>Document Types</span>
+{% endblock %}
+
+{% block page_title %}Document Types{% endblock %}
+
+{% block content %}
+
+<p class="edms-page-description">
+    Two-level document type hierarchy. Top-level types group related subtypes (e.g., "Application" groups "D&O Application" and "GL Application"). The classifier agent outputs subtype values. Documents reference the most specific type.
+</p>
+
+<!-- Add new type -->
+<div class="edms-card" style="margin-bottom: 20px;">
+    <h3 class="edms-section-title">Add Document Type</h3>
+    <form method="POST" action="/ui/document-types" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: end;">
+        <div>
+            <label class="edms-label">Type Key</label>
+            <input type="text" name="type_key" class="edms-input" style="width: 180px;" required placeholder="e.g., do_application">
+        </div>
+        <div>
+            <label class="edms-label">Display Name</label>
+            <input type="text" name="display_name" class="edms-input" style="width: 200px;" required placeholder="e.g., D&O Application">
+        </div>
+        <div>
+            <label class="edms-label">Parent Type (blank = top-level)</label>
+            <select name="parent_type_id" class="edms-input edms-select" style="width: 200px;">
+                <option value="">Top Level</option>
+                {% for t in top_level_types %}
+                <option value="{{ t.id }}">{{ t.display_name }} ({{ t.type_key }})</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label class="edms-label">Description</label>
+            <input type="text" name="description" class="edms-input" style="width: 250px;" placeholder="What this document type is">
+        </div>
+        <button type="submit" class="edms-btn edms-btn-primary edms-btn-sm">Add</button>
+    </form>
+</div>
+
+<!-- Type hierarchy -->
+{% if type_hierarchy %}
+{% for top_type in type_hierarchy %}
+<div class="edms-card" style="margin-bottom: 12px;">
+    <div style="display: flex; justify-content: space-between; align-items: start;">
+        <div>
+            <span style="font-size: 1rem;">&#128203;</span>
+            <span style="font-weight: 600; font-size: 0.95rem; margin-left: 4px;">{{ top_type.display_name }}</span>
+            <span style="font-family: monospace; font-size: 0.72rem; color: var(--edms-text-light); margin-left: 8px;">{{ top_type.type_key }}</span>
+            {% if top_type.description %}
+            <div style="font-size: 0.75rem; color: var(--edms-text-light); margin-top: 2px; margin-left: 28px;">{{ top_type.description }}</div>
+            {% endif %}
+        </div>
+        <form method="POST" action="/ui/document-types/{{ top_type.type_key }}/delete"
+              onsubmit="return confirm('Delete type \'{{ top_type.type_key }}\'? Subtypes will become top-level.')"
+              style="display: inline;">
+            <button type="submit" class="edms-btn edms-btn-danger edms-btn-sm">Delete</button>
+        </form>
+    </div>
+
+    {% if top_type.subtypes %}
+    <div style="margin-top: 10px; margin-left: 28px;">
+        {% for sub in top_type.subtypes %}
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-top: 1px solid var(--edms-border);">
+            <div>
+                <span style="color: var(--edms-text-light);">&#8627;</span>
+                <span style="font-weight: 500; margin-left: 4px;">{{ sub.display_name }}</span>
+                <span style="font-family: monospace; font-size: 0.7rem; color: var(--edms-text-light); margin-left: 8px;">{{ sub.type_key }}</span>
+                {% if sub.description %}
+                <span style="font-size: 0.72rem; color: var(--edms-text-light); margin-left: 8px;">- {{ sub.description }}</span>
+                {% endif %}
+            </div>
+            <form method="POST" action="/ui/document-types/{{ sub.type_key }}/delete"
+                  onsubmit="return confirm('Delete subtype \'{{ sub.type_key }}\'?')"
+                  style="display: inline;">
+                <button type="submit" class="edms-btn edms-btn-danger edms-btn-sm">Delete</button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div style="margin-top: 8px; margin-left: 28px; font-size: 0.75rem; color: var(--edms-text-light);">
+        No subtypes defined yet.
+    </div>
+    {% endif %}
+</div>
+{% endfor %}
+
+<!-- Types without parents (standalone) that aren't in the hierarchy -->
+{% set hierarchy_keys = [] %}
+{% for t in type_hierarchy %}
+    {% if hierarchy_keys.append(t.type_key) %}{% endif %}
+    {% for s in t.subtypes %}
+        {% if hierarchy_keys.append(s.type_key) %}{% endif %}
+    {% endfor %}
+{% endfor %}
+{% set standalone = [] %}
+{% for dt in document_types %}
+    {% if dt.type_key not in hierarchy_keys %}
+        {% if standalone.append(dt) %}{% endif %}
+    {% endif %}
+{% endfor %}
+{% if standalone %}
+<h3 class="edms-section-title" style="margin-top: 24px;">Standalone Types (no parent)</h3>
+{% for dt in standalone %}
+<div class="edms-card" style="margin-bottom: 8px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center;">
+    <div>
+        <span style="font-weight: 500;">{{ dt.display_name }}</span>
+        <span style="font-family: monospace; font-size: 0.72rem; color: var(--edms-text-light); margin-left: 8px;">{{ dt.type_key }}</span>
+        {% if dt.description %}<span style="font-size: 0.72rem; color: var(--edms-text-light); margin-left: 8px;">- {{ dt.description }}</span>{% endif %}
+    </div>
+    <form method="POST" action="/ui/document-types/{{ dt.type_key }}/delete" style="display: inline;"
+          onsubmit="return confirm('Delete type \'{{ dt.type_key }}\'?')">
+        <button type="submit" class="edms-btn edms-btn-danger edms-btn-sm">Delete</button>
+    </form>
+</div>
+{% endfor %}
+{% endif %}
+
+{% else %}
+<div class="edms-empty">
+    <div style="font-size: 0.9rem;">No document types defined yet. Add one above to get started.</div>
+</div>
+{% endif %}
+
+{% endblock %}

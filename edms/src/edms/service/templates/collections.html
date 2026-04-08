@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block title %}Collections - EDMS{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">></span>
+    <span>Collections</span>
+{% endblock %}
+
+{% block page_title %}Collections{% endblock %}
+
+{% block content %}
+
+<p class="edms-page-description">
+    Collections are governed storage domains. Each collection maps to a MinIO bucket and carries lifecycle status, default tags, and ownership. Documents must belong to exactly one collection. Security controls (future) will be at the collection level.
+</p>
+
+<!-- Create collection form -->
+<div class="edms-card" style="margin-bottom: 20px;">
+    <h3 class="edms-section-title">Create Collection</h3>
+    <form method="POST" action="/ui/collections" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: end;">
+        <div>
+            <label class="edms-label">Name (machine)</label>
+            <input type="text" name="name" class="edms-input" style="width: 150px;" required placeholder="e.g., submissions">
+        </div>
+        <div>
+            <label class="edms-label">Display Name</label>
+            <input type="text" name="display_name" class="edms-input" style="width: 200px;" required placeholder="e.g., Insurance Submissions">
+        </div>
+        <div>
+            <label class="edms-label">MinIO Bucket</label>
+            <input type="text" name="storage_container" class="edms-input" style="width: 150px;" required placeholder="e.g., submissions">
+        </div>
+        <div>
+            <label class="edms-label">Owner</label>
+            <input type="text" name="owner_name" class="edms-input" style="width: 150px;" required placeholder="e.g., UW Team">
+        </div>
+        <div>
+            <label class="edms-label">Description</label>
+            <input type="text" name="description" class="edms-input" style="width: 250px;" placeholder="Purpose of this collection">
+        </div>
+        <button type="submit" class="edms-btn edms-btn-primary edms-btn-sm">Create</button>
+    </form>
+</div>
+
+<!-- Existing collections -->
+{% if collections %}
+{% for coll in collections %}
+<div class="edms-card" style="margin-bottom: 12px;">
+    <div style="display: flex; justify-content: space-between; align-items: start;">
+        <div>
+            <span style="font-weight: 600; font-size: 0.95rem;">{{ coll.display_name }}</span>
+            <span style="font-family: monospace; font-size: 0.72rem; color: var(--edms-text-light); margin-left: 8px;">{{ coll.name }}</span>
+
+            {% if coll.status == 'active' %}
+            <span class="edms-badge edms-badge-complete" style="margin-left: 8px;">active</span>
+            {% elif coll.status == 'readonly' %}
+            <span class="edms-badge edms-badge-pending" style="margin-left: 8px;">readonly</span>
+            {% elif coll.status == 'archived' %}
+            <span class="edms-badge edms-badge-failed" style="margin-left: 8px;">archived</span>
+            {% elif coll.status == 'locked' %}
+            <span class="edms-badge edms-badge-restricted" style="margin-left: 8px;">locked</span>
+            {% endif %}
+
+            <span style="font-size: 0.72rem; color: var(--edms-text-light); margin-left: 12px;">
+                {{ coll.doc_count or 0 }} document{{ 's' if (coll.doc_count or 0) != 1 else '' }}
+            </span>
+        </div>
+        <div style="display: flex; gap: 4px;">
+            <a href="/ui/?collection_id={{ coll.id }}" class="edms-btn edms-btn-secondary edms-btn-sm">Browse Docs</a>
+            <a href="/ui/folders?collection_id={{ coll.id }}" class="edms-btn edms-btn-secondary edms-btn-sm">Folders</a>
+            <form method="POST" action="/ui/collections/{{ coll.id }}/delete"
+                  onsubmit="return confirm('Delete collection \'{{ coll.display_name }}\'? All documents and folders in it will be deleted.')"
+                  style="display: inline;">
+                <button type="submit" class="edms-btn edms-btn-danger edms-btn-sm">Delete</button>
+            </form>
+        </div>
+    </div>
+
+    <div style="margin-top: 8px; display: flex; gap: 24px; font-size: 0.75rem; color: var(--edms-text-light);">
+        <div>
+            <span style="font-weight: 600;">Bucket:</span>
+            <span style="font-family: monospace;">{{ coll.storage_container }}</span>
+        </div>
+        <div>
+            <span style="font-weight: 600;">Owner:</span> {{ coll.owner_name }}
+        </div>
+        {% if coll.default_tags and coll.default_tags != {} and coll.default_tags is mapping %}
+        <div>
+            <span style="font-weight: 600;">Default Tags:</span>
+            {% for key, values in coll.default_tags.items() %}
+            {{ key }}: {% if values is iterable and values is not string %}{{ values | join(', ') }}{% else %}{{ values }}{% endif %}{% if not loop.last %}; {% endif %}
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+
+    {% if coll.description %}
+    <div style="margin-top: 4px; font-size: 0.75rem; color: var(--edms-text-light);">{{ coll.description }}</div>
+    {% endif %}
+</div>
+{% endfor %}
+{% else %}
+<div class="edms-empty">
+    <div style="font-size: 0.9rem;">No collections yet. Create one above to start organizing documents.</div>
+</div>
+{% endif %}
+
+{% endblock %}

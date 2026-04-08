@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_USER: verityuser
       POSTGRES_PASSWORD: veritypass123
-      POSTGRES_MULTIPLE_DATABASES: verity_db,pas_db
+      POSTGRES_MULTIPLE_DATABASES: verity_db,pas_db,edms_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init.sh
@@ -53,6 +53,38 @@ services:
       echo 'MinIO buckets created';
       "
 
+  # ── EDMS: Enterprise Document Management System ─────────────
+  # Runs as its own service on port 8002. Owns edms_db and MinIO access.
+  # All document operations go through this service's REST APIs.
+  edms:
+    build:
+      context: .
+      dockerfile: edms/Dockerfile
+    container_name: edms_service
+    restart: unless-stopped
+    environment:
+      EDMS_DB_URL: postgresql://verityuser:veritypass123@postgres:5432/edms_db
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      MINIO_SECURE: "false"
+      EDMS_DEFAULT_BUCKET: submissions
+    volumes:
+      - ./edms:/app/edms
+      - ./uw_demo/seed_docs:/app/seed_docs
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
   # ── VERITY: AI Governance Platform ──────────────────────────
   # Runs the Verity admin web UI + API on port 8000.
   # This is the governance platform — independent of any business app.
@@ -64,10 +96,6 @@ services:
     restart: unless-stopped
     environment:
       VERITY_DB_URL: postgresql://verityuser:veritypass123@postgres:5432/verity_db
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin123
-      MINIO_SECURE: "false"
       APP_ENV: demo
     volumes:
       - ./verity:/app/verity
@@ -101,10 +129,7 @@ services:
     environment:
       VERITY_DB_URL: postgresql://verityuser:veritypass123@postgres:5432/verity_db
       PAS_DB_URL: postgresql://verityuser:veritypass123@postgres:5432/pas_db
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin123
-      MINIO_SECURE: "false"
+      EDMS_URL: http://edms:8002
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       APP_ENV: demo
     volumes:
@@ -116,7 +141,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      minio:
+      edms:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]

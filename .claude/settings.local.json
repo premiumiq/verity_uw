@@ -4,7 +4,9 @@
       "Bash(chmod +x /home/avenugopal/verity_uw/scripts/init-multiple-dbs.sh)",
       "Bash(curl -s -X POST \"http://localhost:8000/uw/submissions/00000001-0001-0001-0001-000000000001/pipeline?mode=live\" -o /tmp/live_result.html -w \"HTTP %{http_code} in %{time_total}s\\\\n\")",
       "Read(//tmp/**)",
-      "Bash(python3 -c ':*)"
+      "Bash(python3 -c ':*)",
+      "Bash(mkdir -p /home/avenugopal/verity_uw/edms/src/edms/service)",
+      "Bash(mkdir -p /home/avenugopal/verity_uw/edms/src/edms/core)"
     ]
   }
 }

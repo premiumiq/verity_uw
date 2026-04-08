@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block title %}Upload Document - EDMS{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">></span>
+    <a href="/ui/">Documents</a>
+    <span class="separator">></span>
+    <span>Upload</span>
+{% endblock %}
+
+{% block page_title %}Upload Document{% endblock %}
+
+{% block content %}
+
+<div class="edms-card" style="max-width: 650px;">
+    <form method="POST" action="/ui/upload" enctype="multipart/form-data">
+
+        <div style="margin-bottom: 16px;">
+            <label class="edms-label">File</label>
+            <input type="file" name="file" class="edms-input" required>
+        </div>
+
+        <div style="margin-bottom: 16px;">
+            <label class="edms-label">Context Reference</label>
+            <input type="text" name="context_ref" class="edms-input" required
+                   placeholder="e.g., submission:00000001-0001-0001-0001-000000000001">
+            <div style="font-size: 0.7rem; color: var(--edms-text-light); margin-top: 2px;">
+                Business context this document belongs to. Format: type:identifier
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 16px; margin-bottom: 16px;">
+            <div style="flex: 1;">
+                <label class="edms-label">Context Type</label>
+                <select name="context_type" class="edms-input edms-select">
+                    <option value="">Select type...</option>
+                    {% for ct in context_types %}
+                    <option value="{{ ct.type_key }}">{{ ct.display_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div style="flex: 1;">
+                <label class="edms-label">Uploaded By</label>
+                <input type="text" name="uploaded_by" class="edms-input" value="manual_upload">
+            </div>
+        </div>
+
+        <!-- Collection selector (required - determines MinIO bucket) -->
+        <div style="margin-bottom: 16px;">
+            <label class="edms-label">Collection <span style="color: var(--edms-red);">*</span></label>
+            <select name="collection_id" class="edms-input edms-select" required>
+                <option value="">Select a collection...</option>
+                {% for c in collections %}
+                <option value="{{ c.id }}">{{ c.display_name }} ({{ c.storage_container }})</option>
+                {% endfor %}
+            </select>
+            <div style="font-size: 0.68rem; color: var(--edms-text-light); margin-top: 2px;">
+                Determines where the file is stored. <a href="/ui/collections">Manage collections</a>
+            </div>
+        </div>
+
+        <!-- Folder selector (optional - within the collection) -->
+        <div style="margin-bottom: 16px;">
+            <label class="edms-label">Folder</label>
+            <select name="folder_id" class="edms-input edms-select">
+                <option value="">Collection root (no folder)</option>
+                {% for f in all_folders %}
+                <option value="{{ f.id }}">{{ f.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <!-- Document type selector: two-level hierarchy -->
+        <div style="margin-bottom: 16px;">
+            <label class="edms-label">Document Type</label>
+            <select name="document_type" class="edms-input edms-select">
+                <option value="">Unclassified (will be classified later)</option>
+                {% if type_hierarchy %}
+                    {% for top_type in type_hierarchy %}
+                    <optgroup label="{{ top_type.display_name }}">
+                        <!-- Top-level type itself is selectable if it has no subtypes -->
+                        {% if not top_type.subtypes %}
+                        <option value="{{ top_type.type_key }}">{{ top_type.display_name }}</option>
+                        {% endif %}
+                        {% for sub in top_type.subtypes %}
+                        <option value="{{ sub.type_key }}">{{ sub.display_name }}</option>
+                        {% endfor %}
+                    </optgroup>
+                    {% endfor %}
+                {% endif %}
+                <!-- Standalone types (no parent) -->
+                {% for dt in document_types %}
+                    {% set has_parent = dt.parent_type_id is not none %}
+                    {% set is_parent = false %}
+                    {% for th in type_hierarchy if th.id == dt.id %}
+                        {% set is_parent = true %}
+                    {% endfor %}
+                    {% if not has_parent and not is_parent %}
+                    <option value="{{ dt.type_key }}">{{ dt.display_name }}</option>
+                    {% endif %}
+                {% endfor %}
+            </select>
+        </div>
+
+        <!-- Tags -->
+        {% if tag_definitions %}
+        <div style="margin-bottom: 16px;">
+            <label class="edms-label" style="margin-bottom: 8px;">Tags</label>
+            {% for td in tag_definitions %}
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                <label style="width: 140px; font-size: 0.78rem; font-weight: 500;">
+                    {{ td.display_name }}
+                    {% if td.is_required %}<span style="color: var(--edms-red);">*</span>{% endif %}
+                </label>
+                <div style="flex: 1;">
+                    {% if td.value_mode == 'restricted' %}
+                    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                        {% for av in td.allowed_values %}
+                        <label style="font-size: 0.78rem; display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                            <input type="checkbox" name="tag_{{ td.tag_key }}" value="{{ av.value }}">
+                            {{ av.display_name }}
+                        </label>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <input type="text" name="tag_{{ td.tag_key }}" class="edms-input"
+                           placeholder="Comma-separated values">
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <button type="submit" class="edms-btn edms-btn-primary">Upload</button>
+    </form>
+</div>
+
+{% endblock %}

@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}Tag Definitions - EDMS{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">></span>
+    <span>Tag Definitions</span>
+{% endblock %}
+
+{% block page_title %}Tag Definitions{% endblock %}
+
+{% block content %}
+
+<p class="edms-page-description">
+    Tag definitions control what tag keys are allowed on documents and how their values are managed. Restricted tags only accept predefined values (e.g., sensitivity levels). Freetext tags accept any string.
+</p>
+
+<!-- Add new tag definition -->
+<div class="edms-card" style="margin-bottom: 20px;">
+    <h3 class="edms-section-title">Add Tag Definition</h3>
+    <form method="POST" action="/ui/tags" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: end;">
+        <div>
+            <label class="edms-label">Tag Key</label>
+            <input type="text" name="tag_key" class="edms-input" style="width: 160px;" required placeholder="e.g., sensitivity">
+        </div>
+        <div>
+            <label class="edms-label">Display Name</label>
+            <input type="text" name="display_name" class="edms-input" style="width: 180px;" required placeholder="e.g., Sensitivity Level">
+        </div>
+        <div>
+            <label class="edms-label">Value Mode</label>
+            <select name="value_mode" class="edms-input edms-select">
+                <option value="restricted">Restricted (predefined values only)</option>
+                <option value="freetext">Freetext (any value)</option>
+            </select>
+        </div>
+        <div>
+            <label class="edms-label">Required?</label>
+            <select name="is_required" class="edms-input edms-select" style="width: 80px;">
+                <option value="false">No</option>
+                <option value="true">Yes</option>
+            </select>
+        </div>
+        <div>
+            <label class="edms-label">Description</label>
+            <input type="text" name="description" class="edms-input" style="width: 250px;" placeholder="What this tag means">
+        </div>
+        <button type="submit" class="edms-btn edms-btn-primary edms-btn-sm">Add</button>
+    </form>
+</div>
+
+<!-- Existing tag definitions -->
+{% if tag_definitions %}
+{% for td in tag_definitions %}
+<div class="edms-card" style="margin-bottom: 12px;">
+    <div style="display: flex; justify-content: space-between; align-items: start;">
+        <div>
+            <span style="font-weight: 600; font-size: 0.9rem;">{{ td.display_name }}</span>
+            <span style="font-family: monospace; font-size: 0.75rem; color: var(--edms-text-light); margin-left: 8px;">{{ td.tag_key }}</span>
+            <span class="edms-badge edms-badge-{{ td.value_mode }}" style="margin-left: 8px;">{{ td.value_mode }}</span>
+            {% if td.is_required %}<span class="edms-badge edms-badge-required" style="margin-left: 4px;">required</span>{% endif %}
+            {% if not td.active %}<span class="edms-badge edms-badge-failed" style="margin-left: 4px;">inactive</span>{% endif %}
+            {% if td.description %}
+            <div style="font-size: 0.75rem; color: var(--edms-text-light); margin-top: 2px;">{{ td.description }}</div>
+            {% endif %}
+        </div>
+        <form method="POST" action="/ui/tags/{{ td.tag_key }}/delete"
+              onsubmit="return confirm('Delete tag definition \'{{ td.tag_key }}\' and all its allowed values?')">
+            <button type="submit" class="edms-btn edms-btn-danger edms-btn-sm">Delete</button>
+        </form>
+    </div>
+
+    {% if td.value_mode == 'restricted' %}
+    <!-- Allowed values for this tag -->
+    <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--edms-border);">
+        <div style="font-size: 0.72rem; font-weight: 600; color: var(--edms-text-light); margin-bottom: 6px;">ALLOWED VALUES</div>
+
+        {% if td.allowed_values %}
+        <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">
+            {% for av in td.allowed_values %}
+            <div style="display: inline-flex; align-items: center; gap: 4px; background: #f0f4f8; padding: 3px 10px; border-radius: 12px; font-size: 0.75rem;">
+                <span style="font-weight: 500;">{{ av.display_name }}</span>
+                <span style="color: var(--edms-text-light); font-family: monospace; font-size: 0.65rem;">({{ av.value }})</span>
+                <form method="POST" action="/ui/tags/{{ td.tag_key }}/values/{{ av.value }}/delete" style="display: inline; margin: 0;">
+                    <button type="submit" style="background: none; border: none; color: var(--edms-red); cursor: pointer; font-size: 0.8rem; padding: 0 2px;"
+                            onclick="event.stopPropagation();">&times;</button>
+                </form>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- Add new value -->
+        <form method="POST" action="/ui/tags/{{ td.tag_key }}/values" style="display: flex; gap: 8px; align-items: end;">
+            <div>
+                <label class="edms-label">Value</label>
+                <input type="text" name="value" class="edms-input" style="width: 120px;" required placeholder="machine_name">
+            </div>
+            <div>
+                <label class="edms-label">Display Name</label>
+                <input type="text" name="display_name" class="edms-input" style="width: 150px;" required placeholder="Human Name">
+            </div>
+            <button type="submit" class="edms-btn edms-btn-secondary edms-btn-sm">Add Value</button>
+        </form>
+    </div>
+    {% endif %}
+</div>
+{% endfor %}
+{% else %}
+<div class="edms-empty">
+    <div style="font-size: 0.9rem;">No tag definitions yet. Add one above to get started.</div>
+</div>
+{% endif %}
+
+{% endblock %}

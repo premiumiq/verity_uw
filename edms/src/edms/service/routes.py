@@ -1,0 +1,360 @@
+"""EDMS REST API routes.
+
+All document operations are exposed as HTTP endpoints. These are what
+Verity calls as tool callbacks and what consuming apps use via EdmsClient.
+"""
+
+import os
+from pathlib import Path
+from typing import Optional
+from uuid import UUID
+
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+
+from edms.core.db import EdmsDatabase
+from edms.core.storage import StorageClient
+from edms.core.text_extractor import extract_text_from_bytes
+
+
+def create_routes(
+    db: EdmsDatabase,
+    storage: StorageClient,
+    default_bucket: str,
+) -> APIRouter:
+    """Create the EDMS API router with injected dependencies."""
+
+    router = APIRouter(prefix="/documents", tags=["documents"])
+
+    # ── LIST DOCUMENTS ────────────────────────────────────────
+
+    @router.get("")
+    async def list_documents(context_ref: str = Query(..., description="Business context reference")):
+        """List all documents for a business context.
+
+        Example: GET /documents?context_ref=submission:SUB-001
+        """
+        docs = await db.list_documents(context_ref)
+        return {"context_ref": context_ref, "count": len(docs), "documents": docs}
+
+    # ── GET DOCUMENT METADATA ─────────────────────────────────
+
+    @router.get("/{document_id}")
+    async def get_document(document_id: UUID):
+        """Get metadata for a single document."""
+        doc = await db.get_document(document_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+        return doc
+
+    # ── GET DOCUMENT TEXT ─────────────────────────────────────
+
+    @router.get("/{document_id}/text")
+    async def get_document_text(document_id: UUID):
+        """Get extracted text for a document.
+
+        If text hasn't been extracted yet, returns 404 with instructions
+        to call POST /documents/{id}/extract first.
+
+        This is the endpoint that Verity tool callbacks invoke when
+        an agent needs document content.
+        """
+        # Check if the document exists
+        doc = await db.get_document(document_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+
+        # Look for existing text extraction child
+        text_child = await db.get_text_child(document_id)
+        if not text_child:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No extracted text for document {document_id}. "
+                       f"Call POST /documents/{document_id}/extract first.",
+            )
+
+        # Read the extracted text from MinIO (bucket from collection)
+        try:
+            coll = await db.get_collection(doc["collection_id"])
+            bucket = coll["storage_container"] if coll else default_bucket
+            text = storage.download_text(bucket, text_child["storage_key"])
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to read text from storage: {e}")
+
+        return {
+            "document_id": str(document_id),
+            "text_document_id": str(text_child["id"]),
+            "text": text,
+            "char_count": len(text),
+        }
+
+    # ── GET CHILDREN (derived documents) ──────────────────────
+
+    @router.get("/{document_id}/children")
+    async def get_children(document_id: UUID):
+        """Get all documents derived from a parent document."""
+        doc = await db.get_document(document_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+
+        children = await db.get_children(document_id)
+        return {"parent_document_id": str(document_id), "count": len(children), "children": children}
+
+    # ── UPLOAD DOCUMENT ───────────────────────────────────────
+
+    @router.post("/upload")
+    async def upload_document(
+        file: UploadFile = File(...),
+        collection_id: str = Form(..., description="Collection UUID"),
+        context_ref: str = Form(..., description="Business context reference"),
+        context_type: str = Form(None), uploaded_by: str = Form("system"),
+        document_type: str = Form(None), folder_id: str = Form(None),
+        tags: str = Form("{}"),
+    ):
+        """Upload a document to a collection.
+
+        The MinIO bucket is determined by the collection's storage_container.
+        """
+        import io
+        import json as _json
+
+        # Resolve collection to get bucket
+        coll = await db.get_collection(UUID(collection_id))
+        if not coll:
+            raise HTTPException(status_code=400, detail=f"Collection not found")
+        if coll["status"] != "active":
+            raise HTTPException(status_code=400, detail=f"Collection '{coll['name']}' is {coll['status']}, cannot upload")
+
+        # Validate tags
+        try:
+            tags_dict = _json.loads(tags) if isinstance(tags, str) else tags
+        except _json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="tags must be valid JSON")
+        tag_errors = await db.validate_tags(tags_dict)
+        if tag_errors:
+            raise HTTPException(status_code=400, detail={"message": "Tag validation failed", "errors": tag_errors})
+
+        # Validate document type
+        if document_type:
+            type_error = await db.validate_document_type(document_type)
+            if type_error:
+                raise HTTPException(status_code=400, detail=type_error)
+
+        content = await file.read()
+        filename = file.filename or "unnamed"
+        bucket = coll["storage_container"]
+        safe_prefix = context_ref.replace(":", "/").replace(" ", "_")
+        storage_key = f"{safe_prefix}/{filename}"
+
+        stream = io.BytesIO(content)
+        storage.client.put_object(bucket, storage_key, stream, len(content),
+            content_type=file.content_type or "application/octet-stream")
+
+        fid = UUID(folder_id) if folder_id else None
+        doc = await db.insert_document(
+            collection_id=UUID(collection_id), folder_id=fid,
+            context_ref=context_ref, context_type=context_type,
+            filename=filename, content_type=file.content_type,
+            file_size_bytes=len(content), storage_key=storage_key,
+            document_type=document_type or None, uploaded_by=uploaded_by, tags=tags_dict,
+        )
+        return doc
+
+    # ── UPLOAD FROM LOCAL PATH (for seed scripts) ─────────────
+
+    @router.post("/upload-local")
+    async def upload_local(
+        file_path: str = Form(...), collection_id: str = Form(...),
+        context_ref: str = Form(...), context_type: str = Form(None),
+        uploaded_by: str = Form("system"), document_type: str = Form(None),
+        folder_id: str = Form(None), tags: str = Form("{}"),
+    ):
+        """Upload from a local server path. Collection determines the MinIO bucket."""
+        import json as _json
+
+        coll = await db.get_collection(UUID(collection_id))
+        if not coll:
+            raise HTTPException(status_code=400, detail="Collection not found")
+
+        try:
+            tags_dict = _json.loads(tags) if isinstance(tags, str) else tags
+        except _json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="tags must be valid JSON")
+        tag_errors = await db.validate_tags(tags_dict)
+        if tag_errors:
+            raise HTTPException(status_code=400, detail={"message": "Tag validation failed", "errors": tag_errors})
+        if document_type:
+            type_error = await db.validate_document_type(document_type)
+            if type_error:
+                raise HTTPException(status_code=400, detail=type_error)
+
+        path = Path(file_path)
+        if not path.exists():
+            raise HTTPException(status_code=400, detail=f"File not found: {file_path}")
+
+        filename = path.name
+        bucket = coll["storage_container"]
+        safe_prefix = context_ref.replace(":", "/").replace(" ", "_")
+        storage_key = f"{safe_prefix}/{filename}"
+        file_size = storage.upload_file(bucket, storage_key, path)
+
+        suffix = path.suffix.lower()
+        content_type = {".pdf": "application/pdf", ".txt": "text/plain", ".json": "application/json"}.get(suffix, "application/octet-stream")
+
+        fid = UUID(folder_id) if folder_id else None
+        doc = await db.insert_document(
+            collection_id=UUID(collection_id), folder_id=fid,
+            context_ref=context_ref, context_type=context_type,
+            filename=filename, content_type=content_type, file_size_bytes=file_size,
+            storage_key=storage_key, document_type=document_type or None,
+            uploaded_by=uploaded_by, tags=tags_dict,
+        )
+
+        return doc
+
+    # ── EXTRACT TEXT ───────────────────────────────────────────
+
+    @router.post("/{document_id}/extract")
+    async def extract_text(document_id: UUID):
+        """Extract text from a document and store as a child document.
+
+        Flow:
+        1. Download original file from MinIO
+        2. Extract text (PDF page text + form field values, or plain text)
+        3. Upload extracted text as {key}.extracted.txt in MinIO
+        4. Create child document record
+        5. Create lineage record (parent → child, type=text_extraction)
+
+        Returns the extracted text and the child document metadata.
+        Idempotent — if text already extracted, returns existing result.
+        """
+        parent = await db.get_document(document_id)
+        if not parent:
+            raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+
+        # Get the collection to find the MinIO bucket
+        coll = await db.get_collection(parent["collection_id"])
+        bucket = coll["storage_container"] if coll else default_bucket
+
+        # Check if already extracted
+        existing = await db.get_text_child(document_id)
+        if existing:
+            text = storage.download_text(bucket, existing["storage_key"])
+            return {
+                "document_id": str(document_id),
+                "text_document_id": str(existing["id"]),
+                "text": text,
+                "char_count": len(text),
+                "already_extracted": True,
+            }
+
+        try:
+            content = storage.download_bytes(bucket, parent["storage_key"])
+            text = extract_text_from_bytes(content, parent["filename"])
+
+            text_key = f"{parent['storage_key']}.extracted.txt"
+            text_size = storage.upload_text(bucket, text_key, text)
+
+            child = await db.insert_document(
+                collection_id=parent["collection_id"],
+                folder_id=parent.get("folder_id"),
+                context_ref=parent["context_ref"],
+                context_type=parent.get("context_type"),
+                filename=f"{parent['filename']}.extracted.txt",
+                content_type="text/plain",
+                file_size_bytes=text_size,
+                storage_key=text_key,
+                uploaded_by="edms:text_extraction",
+                tags={"transformation": ["text_extraction"], "source_document": [str(document_id)]},
+            )
+
+            char_count = len(text)
+            includes_form_fields = "FORM FIELD VALUES" in text
+            await db.insert_lineage(
+                parent_document_id=document_id,
+                child_document_id=child["id"],
+                transformation_type="text_extraction",
+                transformation_method="pymupdf_get_text",
+                transformation_status="complete",
+                transformation_metadata={
+                    "char_count": char_count,
+                    "includes_form_fields": includes_form_fields,
+                    "source_content_type": parent.get("content_type"),
+                },
+            )
+
+            return {
+                "document_id": str(document_id),
+                "text_document_id": str(child["id"]),
+                "text": text,
+                "char_count": char_count,
+                "already_extracted": False,
+            }
+
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Text extraction failed: {e}")
+
+    # ── UPDATE DOCUMENT TYPE (after classification) ───────────
+
+    @router.put("/{document_id}/type")
+    async def update_document_type(document_id: UUID, document_type: str = Form(...)):
+        """Update a document's classified type.
+
+        Called by the classifier agent after it determines the document type.
+        Validates against document_type_definition governance table.
+        """
+        doc = await db.get_document(document_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+
+        # Validate against governance table
+        type_error = await db.validate_document_type(document_type)
+        if type_error:
+            raise HTTPException(status_code=400, detail=type_error)
+
+        updated = await db.update_document_type(document_id, document_type)
+        return updated
+
+    # ── UPDATE TAGS ───────────────────────────────────────────
+
+    @router.put("/{document_id}/tags")
+    async def update_document_tags(document_id: UUID, tags: dict):
+        """Update tags on a document (replaces entire tags dict).
+
+        Validates against tag governance tables before applying.
+        """
+        doc = await db.get_document(document_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+
+        tag_errors = await db.validate_tags(tags)
+        if tag_errors:
+            raise HTTPException(status_code=400, detail={"message": "Tag validation failed", "errors": tag_errors})
+
+        updated = await db.update_document_tags(document_id, tags)
+        return updated
+
+    # ── DELETE DOCUMENT ───────────────────────────────────────
+
+    @router.delete("/{document_id}")
+    async def delete_document(document_id: UUID):
+        """Delete a document and its lineage records.
+
+        Also deletes the file from MinIO storage.
+        """
+        doc = await db.get_document(document_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+
+        # Delete from MinIO (bucket from collection)
+        try:
+            coll = await db.get_collection(doc["collection_id"])
+            bucket = coll["storage_container"] if coll else default_bucket
+            storage.client.remove_object(bucket, doc["storage_key"])
+        except Exception:
+            pass  # File may already be gone
+
+        # Delete from database (cascades lineage)
+        await db.delete_document(document_id)
+        return {"deleted": True, "document_id": str(document_id)}
+
+    return router

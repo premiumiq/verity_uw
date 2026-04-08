@@ -1,10 +1,17 @@
 #!/bin/bash
-# Creates multiple databases and enables pgvector extension.
+# Creates multiple databases and enables required extensions.
 # Mounted as /docker-entrypoint-initdb.d/init.sh in PostgreSQL container.
+#
+# Reads database names from POSTGRES_MULTIPLE_DATABASES environment variable.
+# Set in docker-compose.yml: POSTGRES_MULTIPLE_DATABASES: verity_db,pas_db,edms_db
 
 set -e
 
-for db in verity_db pas_db; do
+# Read database names from environment variable (comma-separated)
+IFS=',' read -ra DATABASES <<< "$POSTGRES_MULTIPLE_DATABASES"
+
+for db in "${DATABASES[@]}"; do
+  db=$(echo "$db" | xargs)  # trim whitespace
   echo "Creating database: $db"
   psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
     CREATE DATABASE $db;
@@ -12,11 +19,17 @@ for db in verity_db pas_db; do
 EOSQL
 done
 
-# Enable pgvector extension in verity_db
-echo "Enabling pgvector in verity_db..."
+# Enable extensions in verity_db (pgvector for embeddings, uuid-ossp for UUIDs)
+echo "Enabling extensions in verity_db..."
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "verity_db" <<-EOSQL
   CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
   CREATE EXTENSION IF NOT EXISTS "vector";
 EOSQL
 
-echo "Database initialization complete."
+# Enable uuid-ossp in edms_db (needed for uuid_generate_v4 in document tables)
+echo "Enabling extensions in edms_db..."
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "edms_db" <<-EOSQL
+  CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+EOSQL
+
+echo "Database initialization complete: ${DATABASES[*]}"

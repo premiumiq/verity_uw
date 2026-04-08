@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "edms"
+version = "0.1.0"
+description = "Enterprise Document Management System - storage, text extraction, metadata, and REST APIs"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "httpx>=0.27",
+    "python-multipart>=0.0.9",
+    "jinja2>=3.1",
+    "psycopg[binary]>=3.1",
+    "minio>=7.2",
+    "pymupdf>=1.24",
+    "pydantic>=2.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+edms = ["schema.sql", "service/templates/*.html"]
