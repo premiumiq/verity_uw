@@ -340,6 +340,10 @@ CREATE TABLE prompt_version (
                          patch_version::text) STORED,
 
     content             TEXT NOT NULL,
+    -- Declared template variables extracted from {{...}} placeholders in content.
+    -- Auto-populated on registration. Validated at execution time to catch
+    -- missing context values before sending prompts to Claude.
+    template_variables  TEXT[] DEFAULT '{}',
     api_role            api_role NOT NULL DEFAULT 'system',
     governance_tier     governance_tier NOT NULL DEFAULT 'behavioural',
 

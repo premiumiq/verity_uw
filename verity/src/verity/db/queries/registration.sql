@@ -83,12 +83,12 @@ RETURNING id, created_at;
 -- name: insert_prompt_version
 INSERT INTO prompt_version (
     prompt_id, major_version, minor_version, patch_version,
-    content, api_role, governance_tier,
+    content, template_variables, api_role, governance_tier,
     lifecycle_state, change_summary, sensitivity_level, author_name
 )
 VALUES (
     %(prompt_id)s, %(major_version)s, %(minor_version)s, %(patch_version)s,
-    %(content)s, %(api_role)s, %(governance_tier)s,
+    %(content)s, %(template_variables)s, %(api_role)s, %(governance_tier)s,
     %(lifecycle_state)s, %(change_summary)s, %(sensitivity_level)s, %(author_name)s
 )
 RETURNING id, version_label, created_at;

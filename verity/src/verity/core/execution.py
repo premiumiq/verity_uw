@@ -718,7 +718,12 @@ class ExecutionEngine:
 def _assemble_prompts(
     prompts: list[PromptAssignment], context: dict[str, Any]
 ) -> tuple[str, list[str]]:
-    """Assemble prompts into system prompt and user messages."""
+    """Assemble prompts into system prompt and user messages.
+
+    Validates that all declared template variables are present in the
+    context dict. Raises ValueError if any are missing, so the caller
+    gets a clear error instead of {{placeholder}} being sent to Claude.
+    """
     system_parts = []
     user_messages = []
     sorted_prompts = sorted(prompts, key=lambda p: p.execution_order)
@@ -727,6 +732,17 @@ def _assemble_prompts(
         if not prompt.is_required and prompt.condition_logic:
             if not _evaluate_condition(prompt.condition_logic, context):
                 continue
+
+        # Validate: check that all declared template variables are in context
+        if prompt.template_variables:
+            missing = [v for v in prompt.template_variables if v not in context]
+            if missing:
+                raise ValueError(
+                    f"Prompt '{prompt.prompt_name}' requires template variables "
+                    f"{missing} but they are not in the execution context. "
+                    f"Available context keys: {sorted(context.keys())}"
+                )
+
         content = _substitute_variables(prompt.content, context)
         if prompt.api_role == "system":
             system_parts.append(content)

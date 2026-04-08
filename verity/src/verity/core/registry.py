@@ -5,6 +5,7 @@ No agent, task, prompt, or tool exists outside of Verity's registry.
 """
 
 import json
+import re
 from typing import Any, Optional
 from uuid import UUID
 
@@ -250,7 +251,25 @@ class Registry:
         return await self.db.execute_returning("insert_prompt", kwargs)
 
     async def register_prompt_version(self, **kwargs) -> dict:
-        """Register a prompt version."""
+        """Register a prompt version.
+
+        Auto-extracts {{variable}} placeholders from the prompt content
+        and stores them in template_variables. These are validated at
+        execution time to catch missing context values.
+        """
+        # Auto-extract template variables from content if not explicitly provided
+        if "template_variables" not in kwargs and "content" in kwargs:
+            variables = re.findall(r"\{\{(\w+)\}\}", kwargs["content"])
+            # Deduplicate while preserving order
+            seen = set()
+            unique_vars = []
+            for v in variables:
+                if v not in seen:
+                    seen.add(v)
+                    unique_vars.append(v)
+            kwargs["template_variables"] = unique_vars
+        elif "template_variables" not in kwargs:
+            kwargs["template_variables"] = []
         return await self.db.execute_returning("insert_prompt_version", kwargs)
 
     async def assign_prompt(self, **kwargs) -> dict:

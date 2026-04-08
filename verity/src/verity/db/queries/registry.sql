@@ -181,6 +181,7 @@ SELECT
     pv.major_version AS prompt_version_number,
     pv.version_label AS prompt_version_label,
     pv.content,
+    pv.template_variables,
     pv.lifecycle_state AS prompt_lifecycle_state,
     p.name AS prompt_name,
     p.description AS prompt_description

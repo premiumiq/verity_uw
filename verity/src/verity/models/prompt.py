@@ -62,6 +62,7 @@ class PromptAssignment(BaseModel):
     prompt_version_number: Optional[int] = None
     version_label: Optional[str] = None
     content: str
+    template_variables: list[str] = []
     api_role: ApiRole
     governance_tier: GovernanceTier
     execution_order: int = 1
