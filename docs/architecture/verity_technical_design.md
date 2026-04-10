@@ -1,0 +1,1521 @@
+# Verity Technical Design
+
+## Document Purpose
+
+This document describes the internal architecture of the Verity AI governance platform at the code level: how components are wired, how data flows through the system, what each layer does, and what is and is not supported today.
+
+---
+
+## System Overview
+
+```
++-----------------------------------------------------------------------+
+|                          Verity Package                                |
+|                     (verity/src/verity/)                               |
+|                                                                       |
+|  +------------------+     +------------------+     +----------------+ |
+|  | core/            |     | models/          |     | db/            | |
+|  |                  |     |                  |     |                | |
+|  | client.py    <---+---->| agent.py         |     | connection.py  | |
+|  | execution.py     |     | task.py          |     | schema.sql     | |
+|  | registry.py      |     | prompt.py        |     | migrate.py     | |
+|  | lifecycle.py     |     | tool.py          |     | queries/       | |
+|  | decisions.py     |     | decision.py      |     |   registry.sql | |
+|  | pipeline_exec.py |     | lifecycle.py     |     |   decisions.sql| |
+|  | mock_context.py  |     | inference_config |     |   lifecycle.sql| |
+|  | testing.py       |     | pipeline.py      |     |   reporting.sql| |
+|  | reporting.py     |     | testing.py       |     |   testing.sql  | |
+|  +--------+---------+     | reporting.py     |     +-------+--------+ |
+|           |                | application.py   |             |          |
+|           |                +------------------+             |          |
+|           |                                                 |          |
+|  +--------+-------------------------------------------------+--------+|
+|  | web/                                                              | |
+|  |  app.py          - FastAPI sub-app factory                        | |
+|  |  routes.py       - 26 HTML routes                                 | |
+|  |  templates/      - 21 Jinja2 templates                            | |
+|  |  static/         - verity.css                                     | |
+|  +-------------------------------------------------------------------+|
++-----------------------------------------------------------------------+
+```
+
+---
+
+## 1. Core Layer (`verity/src/verity/core/`)
+
+### 1.1 Client (`client.py`)
+
+The main entry point for all SDK operations. Every business application instantiates one `Verity` client.
+
+```python
+verity = Verity(
+    database_url="postgresql://...",
+    anthropic_api_key="sk-...",
+    application="uw_demo"
+)
+await verity.connect()
+```
+
+**What it does:** Facade over all core modules. Holds shared instances of Database, Registry, Lifecycle, Decisions, ExecutionEngine, PipelineExecutor, Reporting, and Testing. All public methods delegate to these modules.
+
+**Module initialization (in constructor):**
+
+```
+Verity.__init__()
+    |
+    +-- self.db = Database(database_url)
+    +-- self.registry = Registry(self.db)
+    +-- self.lifecycle = Lifecycle(self.db)
+    +-- self.decisions = Decisions(self.db)
+    +-- self.reporting = Reporting(self.db)
+    +-- self.testing = Testing(self.db)
+    +-- self.execution = ExecutionEngine(
+    |       registry=self.registry,
+    |       decisions=self.decisions,
+    |       anthropic_api_key=api_key,
+    |       application=application
+    |   )
+    +-- self.pipeline_executor = PipelineExecutor(
+            registry=self.registry,
+            execution_engine=self.execution
+        )
+```
+
+**Key dependency flow:** ExecutionEngine depends on Registry (to resolve configs) and Decisions (to log results). PipelineExecutor depends on Registry (to load pipeline definitions) and ExecutionEngine (to run individual steps).
+
+**Public method count:** ~50 methods across registry, execution, lifecycle, decisions, reporting, applications.
+
+---
+
+### 1.2 Execution Engine (`execution.py`)
+
+The runtime that invokes Claude and tools. Three execution modes: agent (multi-turn), task (single-turn), tool (no LLM).
+
+#### Gateway Architecture
+
+All external calls pass through gateway functions that check MockContext before executing:
+
+```
+run_agent() / run_task() / run_tool()
+        |
+        v
++-------------------+         +-------------------+
+| _gateway_llm_call |         | _gateway_tool_call|
+|                   |         |                   |
+| if mock.has_llm:  |         | if mock has tool:  |
+|   return mock     |         |   return mock     |
+| else:             |         | elif mock_all:    |
+|   call Claude API |         |   return DB mock  |
++-------------------+         | else:             |
+                              |   call real func  |
+                              +-------------------+
+```
+
+#### Agent Execution Flow (`run_agent`)
+
+```
+1. Resolve agent config (champion version from registry)
+2. Assemble prompts (_assemble_prompts)
+   a. Sort by execution_order
+   b. Evaluate condition_logic for optional prompts
+   c. Validate template variables against context
+   d. Substitute {{variables}} with context values
+   e. Split into system prompt + user messages
+3. Build tool definitions from authorized tools
+4. Enter agentic loop (max 10 turns):
+   a. Call _gateway_llm_call (Claude API or mock)
+   b. If stop_reason == "end_turn": extract output, break
+   c. If stop_reason == "tool_use":
+      - For each tool_use block in response:
+        - Call _gateway_tool_call (real or mock)
+        - Append tool result to messages
+      - Continue loop with updated messages
+5. Log decision via _log_decision
+6. Return ExecutionResult
+```
+
+**What is NOT supported:**
+- Sub-agent delegation (FC-1: planned, not implemented)
+- Session continuity across calls (FC-2: planned)
+- Retry/fallback on failure (FC-4: planned)
+- Vision/image input (FC-5: planned)
+- Batch API (FC-6: planned)
+- Streaming with tool calls (partial - events emitted but no streaming tool results)
+
+#### Task Execution Flow (`run_task`)
+
+```
+1. Resolve task config (champion version from registry)
+2. Assemble prompts (same as agent)
+3. If task has valid JSON Schema output_schema:
+   - Use tool_choice to force structured output
+4. Single LLM call (no loop)
+5. Parse response as JSON
+6. Log decision
+7. Return ExecutionResult
+```
+
+**Key difference from agent:** Tasks cannot call tools. Single turn only. If the task needs external data, it must be in the context dict.
+
+#### Tool Execution Flow (`run_tool`)
+
+```
+1. Look up tool definition from registry
+2. Build tool authorization record
+3. Call _gateway_tool_call (mock or real)
+4. Log decision with entity_type='tool'
+5. Return ExecutionResult
+```
+
+**Used for:** Pipeline steps that are pure data operations (no LLM reasoning needed).
+
+#### Decision Logging (`_log_decision`)
+
+Every execution path ends here. Creates a `DecisionLogCreate` with:
+
+```
+_log_decision()
+    |
+    +-- Determine version_id from config
+    +-- Snapshot inference config (full copy, not just ID)
+    +-- Extract prompt_version_ids from config.prompts
+    +-- Build DecisionLogCreate with ALL fields
+    +-- Call decisions.log_decision() -> INSERT into agent_decision_log
+    +-- Return {decision_log_id, created_at}
+```
+
+**Critical invariant:** The inference_config_snapshot is a JSONB copy of the full config at execution time, not a reference to the config ID. If the config is later modified, the snapshot preserves what was actually used.
+
+#### Prompt Assembly (`_assemble_prompts`)
+
+```
+_assemble_prompts(prompts: [PromptAssignment], context: dict)
+    |
+    +-- Sort prompts by execution_order
+    +-- For each prompt:
+    |     +-- If not required and has condition_logic:
+    |     |     evaluate condition against context, skip if false
+    |     +-- Validate template_variables against context keys
+    |     |     (raises ValueError if any declared variable is missing)
+    |     +-- Substitute {{variable}} placeholders with context values
+    |     +-- Route to system_parts[] or user_messages[] by api_role
+    +-- Return (system_prompt, [user_messages])
+```
+
+**Template variable validation:** When a prompt_version is registered, `{{variable}}` placeholders are auto-extracted via regex and stored in the `template_variables TEXT[]` column. At execution time, these are checked against the context dict. A missing variable produces a clear error message instead of sending `{{document_text}}` literally to Claude.
+
+#### Tool Registration
+
+Tools are registered as Python function references at app startup:
+
+```python
+verity.register_tool_implementation("get_submission_context", get_submission_context)
+```
+
+Stored in: `self.execution.tool_implementations["get_submission_context"] = func`
+
+At execution time, the gateway looks up by name and calls the function:
+
+```python
+func = self.tool_implementations.get(tool_name)
+if asyncio.iscoroutinefunction(func):
+    result = await func(**tool_input)
+else:
+    result = func(**tool_input)
+```
+
+**What this means:** Tool implementations live in the consuming application's process, not in Verity. Verity holds the function pointer. The tool's database connections, API keys, and state belong to the app.
+
+---
+
+### 1.3 Registry (`registry.py`)
+
+The source of truth for all AI asset definitions. Handles registration (write) and config resolution (read).
+
+#### Config Resolution (3-Tier)
+
+```
+get_agent_config(agent_name, effective_date=None, version_id=None)
+    |
+    +-- If version_id provided:
+    |     Direct lookup: get_agent_version_by_id(version_id)
+    |     (Ignores dates, ignores champion pointer)
+    |
+    +-- If effective_date provided:
+    |     Temporal lookup: get_agent_champion_at_date(name, date)
+    |     WHERE valid_from <= date AND valid_to > date
+    |     (SCD Type 2 - returns the version that was champion on that date)
+    |
+    +-- Default (no args):
+          Champion pointer: get_agent_champion(name)
+          Follows agent.current_champion_version_id pointer
+          (Fastest - single join, no date comparison)
+```
+
+After resolving the version, config assembly adds:
+
+```
+AgentConfig = {
+    agent_id, agent_name, display_name, description,
+    materiality_tier, purpose, domain,
+    agent_version_id, version_label, lifecycle_state,
+    inference_config: InferenceConfig,        # resolved by ID
+    prompts: [PromptAssignment],              # from entity_prompt_assignment
+    tools: [ToolAuthorization],               # from agent_version_tool
+    authority_thresholds: dict,               # from agent_version.authority_thresholds
+    output_schema: dict                       # from agent_version.output_schema
+}
+```
+
+#### Prompt Version Auto-Extraction
+
+When `register_prompt_version()` is called:
+
+```python
+if "template_variables" not in kwargs and "content" in kwargs:
+    variables = re.findall(r"\{\{(\w+)\}\}", kwargs["content"])
+    kwargs["template_variables"] = deduplicated(variables)
+```
+
+This populates the `template_variables TEXT[]` column automatically. The caller never has to declare them manually.
+
+---
+
+### 1.4 Lifecycle (`lifecycle.py`)
+
+Manages the 7-state promotion workflow.
+
+#### State Machine
+
+```
+                            +------------+
+                            | deprecated |
+                            +------+-----+
+                                   ^
+                   +---------------+----------------+
+                   |               |                |
++-------+    +-----------+    +---------+    +------------+    +---------+
+| draft |--->| candidate |--->| staging |--->| shadow     |--->|challngr |
++-------+    +-----+-----+    +---------+    +------------+    +----+----+
+                   |                                                |
+                   +------------------+                             |
+                                      |                             v
+                                      +----------------------> +---------+
+                                       (fast-track for demo)   | champion|
+                                                               +---------+
+```
+
+**Valid transitions:**
+
+| From | To |
+|------|-----|
+| draft | candidate |
+| candidate | staging, champion (fast-track), deprecated |
+| staging | shadow, deprecated |
+| shadow | challenger, deprecated |
+| challenger | champion, deprecated |
+| champion | deprecated |
+
+#### Gate Requirements
+
+Each transition checks prerequisites on the version record:
+
+| Transition | Gate Checks |
+|-----------|------------|
+| Any -> Shadow | `staging_tests_passed == TRUE`, approver reviewed staging results |
+| Any -> Challenger | `shadow_period_complete == TRUE`, approver reviewed shadow metrics |
+| Challenger -> Champion | `ground_truth_passed == TRUE`, model card reviewed, challenger metrics reviewed |
+| Candidate -> Champion | Minimal (fast-track for demo seeding) |
+
+Gate check returns `list[str]` of issues. Empty list = pass.
+
+#### Champion Promotion
+
+When promoting to champion:
+
+```
+_set_champion(entity_type, current_version, new_version_id)
+    |
+    +-- Find prior champion (get_current_champion_agent_version)
+    +-- If prior exists and is different from new:
+    |     deprecate_agent_version(prior_id)
+    |     Sets: lifecycle_state='deprecated', valid_to=NOW()
+    +-- set_agent_champion(new_version_id, agent_id)
+          Sets: lifecycle_state='champion', valid_from=NOW(),
+                valid_to='2999-12-31', channel='production'
+          Updates: agent.current_champion_version_id = new_version_id
+```
+
+**SCD Type 2 temporal management:** Only champion versions have `valid_from`/`valid_to` set. Pre-champion versions have NULL dates. At any point in time, exactly one version has `valid_from <= NOW() AND valid_to > NOW()`.
+
+---
+
+### 1.5 Decisions (`decisions.py`)
+
+Audit trail management. Every AI invocation produces an immutable record.
+
+#### Log Decision Serialization
+
+```
+log_decision(DecisionLogCreate)
+    |
+    +-- Serialize entity_type as .value (enum -> string)
+    +-- Serialize UUIDs as strings
+    +-- Serialize dicts/lists as JSON strings:
+    |     inference_config_snapshot, input_json, output_json,
+    |     risk_factors, tool_calls_made, message_history
+    +-- Serialize run_purpose as .value
+    +-- INSERT into agent_decision_log RETURNING id, created_at
+    +-- Return {decision_log_id, created_at}
+```
+
+**31 columns** inserted per decision (after removing business keys).
+
+#### Audit Trail Queries
+
+Two ways to query audit trails:
+
+```
+get_audit_trail_by_run(pipeline_run_id)
+    WHERE adl.pipeline_run_id = :pipeline_run_id
+    → Shows one specific pipeline execution (4 steps)
+
+get_audit_trail(execution_context_id)
+    WHERE adl.execution_context_id = :execution_context_id
+    → Shows ALL runs for a business context (e.g., all pipeline runs for a submission)
+```
+
+Both return `[AuditTrailEntry]` with: entity name, version, capability type, channel, reasoning, confidence, tool calls, duration, status.
+
+**What was removed:** `submission_id`, `policy_id`, `renewal_id`, `business_entity` - all business keys were removed from `agent_decision_log`. Business context is linked exclusively through `execution_context_id`.
+
+---
+
+### 1.6 Pipeline Executor (`pipeline_executor.py`)
+
+Orchestrates multi-step pipelines with dependency resolution.
+
+#### Execution Flow
+
+```
+run_pipeline(pipeline_name, context, ...)
+    |
+    +-- Resolve pipeline champion version from registry
+    +-- Parse steps from pipeline_version.steps JSONB
+    +-- Generate pipeline_run_id (UUID)
+    +-- Build execution groups (group by step_order)
+    +-- For each group (sequential):
+    |     +-- If pipeline_failed: skip all steps in group
+    |     +-- Check dependencies (depends_on list vs accumulated_results)
+    |     +-- Evaluate conditions (condition dict vs context)
+    |     +-- If single step: execute directly
+    |     +-- If multiple steps: asyncio.gather(*tasks)
+    |     +-- Accumulate results (step output added to step_context for downstream)
+    +-- Determine overall status:
+          - All complete → "complete"
+          - pipeline_failed → "failed"
+          - Some failed → "partial"
+```
+
+#### Step Context Propagation
+
+Each step receives the original pipeline context PLUS outputs from all prior completed steps:
+
+```python
+step_context = dict(context)  # original pipeline context
+for dep_name, dep_result in accumulated_results.items():
+    if dep_result.execution_result and dep_result.execution_result.output:
+        step_context[dep_name] = dep_result.execution_result.output
+```
+
+This means Step 3 (triage) can see the outputs of Step 1 (classify) and Step 2 (extract) in its context.
+
+**What is NOT supported:**
+- Long-running async execution (all steps run synchronously in one request)
+- Pipeline-level status persistence (no pipeline_run table - only step-level decision logs)
+- Complex DAG patterns (only sequential groups with optional parallelism within a group)
+- Retry on failure
+- Dynamic step generation
+
+**Architecture decision pending:** Pipeline should become a lightweight container for cooperating agents/tasks, not a DAG orchestrator. See `project_pipeline_rethink.md`.
+
+---
+
+### 1.7 Mock Context (`mock_context.py`)
+
+Two independent mocking dimensions for testing.
+
+#### Dimension 1: LLM Mocking
+
+```
+MockContext(llm_responses=[
+    {"risk_score": "Green", "confidence": 0.89},  # Simple: 1 response = skip loop
+])
+
+MockContext(llm_responses=[
+    {"type": "tool_use", "name": "get_submission", "input": {...}},  # Replay: tool request
+    {"risk_score": "Green", "confidence": 0.89},                      # Then final answer
+])
+```
+
+- `has_llm_mock`: True if responses provided
+- `is_simple_mock`: True if 1 response that's not a tool_use (skips entire agentic loop)
+- Responses consumed in order via `_llm_call_index`
+
+#### Dimension 2: Tool Mocking
+
+```
+MockContext(tool_responses={
+    "get_submission_context": {"named_insured": "Acme Corp", ...},
+    "get_loss_history": [                       # List = multi-call
+        {"year": 2023, "claims": 0},
+        {"year": 2024, "claims": 1},
+    ],
+})
+```
+
+- Per-tool by name. Tools NOT in the dict make REAL calls.
+- `mock_all_tools=True`: All tools use DB-registered mock responses
+- List values support multi-call patterns (consumed in order)
+
+#### Gateway Priority (when MockContext provided)
+
+```
+_gateway_tool_call():
+    1. Check mock.tool_responses[tool_name]  → runtime mock
+    2. Check mock.mock_all_tools             → DB mock
+    3. Neither                               → REAL call (DB flag ignored)
+```
+
+When NO MockContext: check `tool.mock_mode_enabled` DB flag, then real call.
+
+#### Replay from Decision Log
+
+```python
+mock = MockContext.from_decision_log(prior_decision, mock_llm=True, mock_tools=True)
+```
+
+Reconstructs a MockContext from a stored decision's `message_history` and `tool_calls_made`. Three replay patterns:
+
+| mock_llm | mock_tools | Use Case |
+|----------|-----------|----------|
+| True | True | Full replay: audit reproducibility |
+| False | True | New prompt test: real Claude + original tool data |
+| True | False | New tool test: original LLM behavior + new tool implementation |
+
+---
+
+### 1.8 Testing (`testing.py`)
+
+SQL wrappers for test suite management. **No test execution logic yet** - that's the planned TestRunner (Phase 5).
+
+**Methods:** list_test_suites, list_test_cases, log_test_result, list_test_results, get_latest_validation, list_model_cards.
+
+---
+
+### 1.9 Reporting (`reporting.py`)
+
+Dashboard and model inventory queries.
+
+**Methods:** dashboard_counts (9 entity counts), model_inventory_agents, model_inventory_tasks, override_analysis (grouped by reason_code over N days).
+
+---
+
+## 2. Data Layer
+
+### 2.1 Database Connection (`db/connection.py`)
+
+```python
+class Database:
+    def __init__(self, database_url):
+        self.pool = None  # AsyncConnectionPool (psycopg v3)
+        self.queries = {}  # {query_name: sql_text}
+```
+
+**Connection pooling:** Uses `psycopg.AsyncConnectionPool` with min_size=2, max_size=10.
+
+**Named query system:** All SQL lives in `.sql` files under `db/queries/`. Each file contains multiple queries separated by `-- name: query_name` comments. On `connect()`, all files are loaded and parsed into the `queries` dict.
+
+**Methods:**
+- `fetch_one(query_name, params)` - Execute named query, return first row as dict
+- `fetch_all(query_name, params)` - Return all rows as list of dicts
+- `execute_returning(query_name, params)` - INSERT/UPDATE with RETURNING clause
+- `fetch_one_raw(sql, params)` - Raw SQL (escape hatch, used sparingly)
+- `fetch_all_raw(sql, params)` - Raw SQL
+
+**Row format:** All queries return `dict_row` (psycopg row_factory). No ORM mapping - dicts flow directly to Pydantic models via `**row` unpacking.
+
+### 2.2 Schema (`db/schema.sql`)
+
+**33 tables** across 6 functional groups:
+
+#### Asset Registry (12 tables)
+
+| Table | Purpose | Key Columns |
+|-------|---------|-------------|
+| inference_config | Named LLM parameter sets | name, model_name, temperature, max_tokens |
+| agent | Agent header (one per agent) | name, materiality_tier, current_champion_version_id |
+| agent_version | Agent versions with lifecycle | lifecycle_state, channel, inference_config_id, valid_from/to |
+| task | Task header | name, capability_type, materiality_tier |
+| task_version | Task versions | lifecycle_state, channel, output_schema |
+| prompt | Prompt header | name, governance_tier |
+| prompt_version | Prompt content versions | content, template_variables[], api_role |
+| entity_prompt_assignment | Links prompts to agent/task versions | entity_type, entity_version_id, execution_order, condition_logic |
+| tool | Tool definitions | name, input_schema, output_schema, mock_mode_enabled |
+| agent_version_tool | Tool authorization for agents | agent_version_id, tool_id |
+| task_version_tool | Tool authorization for tasks | task_version_id, tool_id |
+| pipeline / pipeline_version | Pipeline definitions | steps JSONB, lifecycle_state |
+
+#### Multi-App & Context (3 tables)
+
+| Table | Purpose |
+|-------|---------|
+| application | Registered consuming apps (uw_demo, ai_ops, model_validation, compliance_audit) |
+| application_entity | Maps entities to applications |
+| execution_context | Business operation context (context_ref, context_type, metadata JSONB) |
+
+#### Testing & Validation (9 tables)
+
+| Table | Purpose |
+|-------|---------|
+| test_suite | Test suite containers |
+| test_case | Individual test cases (input_data, expected_output, metric_type) |
+| test_execution_log | Test run results |
+| ground_truth_dataset | Dataset metadata (quality_tier, status lifecycle, IAA metrics) |
+| ground_truth_record | Input items (no labels - labels are in annotation table) |
+| ground_truth_annotation | Annotator labels (human_sme, llm_judge, adjudicator) with is_authoritative flag |
+| validation_run | Aggregate validation metrics (precision, recall, F1, kappa) |
+| validation_record_result | Per-record predictions for drill-down |
+| metric_threshold | Pass/fail thresholds per entity (with optional field_name for extraction) |
+
+#### Decisions & Audit (3 tables)
+
+| Table | Purpose |
+|-------|---------|
+| agent_decision_log | Every AI invocation (31 columns including full snapshots) |
+| override_log | Human overrides of AI decisions |
+| approval_record | Lifecycle promotion approvals with evidence review flags |
+
+#### Quality & Monitoring (4 tables)
+
+| Table | Purpose |
+|-------|---------|
+| evaluation_run | Shadow/challenger production monitoring |
+| model_card | Per-version documentation |
+| field_extraction_config | Per-field tolerance for extraction validation |
+| incident | Incident tracking with rollback records |
+
+#### Infrastructure (2 tables)
+
+| Table | Purpose |
+|-------|---------|
+| description_similarity_log | pgvector similarity checks between entity descriptions |
+
+### 2.3 Named Queries (`db/queries/`)
+
+**6 SQL files, 117 named queries total.**
+
+| File | Count | Purpose |
+|------|-------|---------|
+| registry.sql | ~40 | Config resolution, entity listing, cross-references |
+| registration.sql | ~35 | INSERT operations for all entity types |
+| decisions.sql | ~15 | Decision logging, audit trails, overrides, pipeline runs |
+| lifecycle.sql | ~12 | State updates, champion setting, deprecation |
+| reporting.sql | ~10 | Dashboard aggregations, model inventory |
+| testing.sql | ~5 | Test suite/case queries, validation runs |
+
+### 2.4 Enumerations
+
+All defined as PostgreSQL ENUMs and mirrored as Python `str, Enum` classes:
+
+| Enum | Values |
+|------|--------|
+| lifecycle_state | draft, candidate, staging, shadow, challenger, champion, deprecated |
+| deployment_channel | development, staging, shadow, evaluation, production |
+| materiality_tier | high, medium, low |
+| capability_type | classification, extraction, generation, summarisation, matching, validation |
+| entity_type | agent, task, prompt, pipeline, tool |
+| governance_tier | behavioural, contextual, formatting |
+| api_role | system, user, assistant_prefill |
+| metric_type | exact_match, schema_valid, field_accuracy, classification_f1, semantic_similarity, human_rubric |
+| run_purpose | production, test, validation, audit_rerun |
+| gt_dataset_status | collecting, labeling, adjudicating, ready, deprecated |
+| gt_quality_tier | silver, gold |
+| gt_source_type | document, submission, synthetic |
+| gt_annotator_type | human_sme, llm_judge, adjudicator |
+| data_classification | tier1_public, tier2_internal, tier3_confidential, tier4_pii_restricted |
+| trust_level | trusted, conditional, sandboxed, blocked |
+
+---
+
+## 3. Model Layer (`verity/src/verity/models/`)
+
+**9 model files, ~48 Pydantic model classes.**
+
+### Key Runtime Models
+
+| Model | Used By | Purpose |
+|-------|---------|---------|
+| AgentConfig | execution.run_agent | Complete resolved config: inference, prompts, tools, thresholds |
+| TaskConfig | execution.run_task | Complete resolved config for tasks |
+| PromptAssignment | _assemble_prompts | One prompt bound to a version (with content, role, order, conditions) |
+| ToolAuthorization | _gateway_tool_call | Tool definition with authorization and mock settings |
+| InferenceConfig | API call building | Model name, temperature, max tokens, extended params |
+| ExecutionResult | Return from all execution | decision_log_id, output, tokens, duration, status |
+| DecisionLogCreate | _log_decision | 31-field input for decision INSERT |
+| AuditTrailEntry | Audit trail queries | One step in a pipeline's audit trail |
+| MockContext | Testing/mocking | Two-dimensional mock control |
+| PipelineStep | Pipeline execution | Step definition (entity, order, dependencies, conditions) |
+| PromotionRequest | Lifecycle promotion | Target state + approver + evidence flags |
+
+### Key Enums
+
+| Enum | Values | Used For |
+|------|--------|----------|
+| LifecycleState | 7 states | Version promotion workflow |
+| RunPurpose | production, test, validation, audit_rerun | Separates governance executions from business executions |
+| GtAnnotatorType | human_sme, llm_judge, adjudicator | Ground truth labeling roles |
+
+---
+
+## 4. Web Layer (`verity/src/verity/web/`)
+
+### 4.1 App Factory (`app.py`)
+
+```python
+def create_verity_web(verity: Verity) -> FastAPI:
+    app = FastAPI(title="Verity Admin")
+    app.mount("/static", StaticFiles(directory=static_dir))
+    router = create_routes(verity)
+    app.include_router(router)
+    return app
+```
+
+The consuming application mounts this at `/admin/`:
+
+```python
+# In verity/src/verity/main.py (standalone server)
+verity_web = create_verity_web(verity)
+app.mount("/admin", verity_web)
+```
+
+### 4.2 Routes (`routes.py`)
+
+**26 routes** serving HTML pages via Jinja2 templates.
+
+| Route Group | Routes | Purpose |
+|-------------|--------|---------|
+| Dashboard | `/` | Landing page with 7 charts, KPIs, recent additions |
+| Registry | `/agents`, `/agents/{name}`, `/tasks`, `/tasks/{name}`, `/prompts`, `/prompts/{name}`, `/configs`, `/configs/{name}`, `/tools`, `/tools/{name}`, `/pipelines`, `/pipelines/{name}`, `/applications`, `/applications/{name}` | Browse and detail pages for all entity types |
+| Observability | `/decisions`, `/decisions/{id}`, `/pipeline-runs`, `/overrides` | Decision log, pipeline runs, human overrides |
+| Governance | `/model-inventory`, `/audit-trail/run/{id}`, `/audit-trail/context/{id}` | Model inventory report, audit trail views |
+| Placeholders | `/lifecycle`, `/test-results`, `/ground-truth` | In development |
+
+### 4.3 Template Rendering
+
+All routes use a `_render()` helper that wraps Starlette 1.0's TemplateResponse:
+
+```python
+def _render(templates, request, template_name, **context):
+    return templates.TemplateResponse(request, template_name, context)
+```
+
+Custom Jinja2 filters:
+- `_enum_value` (finalize filter): Converts `EntityType.AGENT` to `"agent"` for display
+- `_short_id`: Formats UUID as `"abcd...wxyz"` (first 4 + last 4)
+
+### 4.4 Shared Data Loaders
+
+Three helpers load cross-reference data used by multiple pages:
+
+```python
+_load_entity_apps()      # Maps (entity_type, entity_id) -> "App Display Name"
+_load_agent_summaries()  # Maps agent_id -> {prompt_names: "P1, P2", tool_names: "T1, T2"}
+_load_task_summaries()   # Maps task_id -> {prompt_names: "P1, P2"}
+```
+
+---
+
+## 5. Cross-Cutting Concerns
+
+### 5.1 Temporal Version Management (SCD Type 2)
+
+Only champion versions have temporal dates set:
+
+| Event | valid_from | valid_to |
+|-------|-----------|----------|
+| Version created (draft) | NULL | NULL |
+| Through candidate/staging/shadow/challenger | NULL | NULL |
+| Promoted to champion | NOW() | 2999-12-31 23:59:59 |
+| Superseded by new champion | unchanged | NOW() |
+
+Query for "champion on March 15, 2026":
+```sql
+WHERE valid_from <= '2026-03-15' AND valid_to > '2026-03-15'
+```
+
+### 5.2 Execution Context (Business Decoupling)
+
+Verity never stores business keys (submission_id, policy_id). The business app registers a context:
+
+```python
+ctx = await verity.create_execution_context(
+    context_ref="submission:00000001-...",   # opaque to Verity
+    context_type="submission",               # opaque to Verity
+    metadata={"named_insured": "Acme Corp"}, # opaque to Verity
+)
+```
+
+All decisions link to `execution_context_id`. The business app interprets the context_ref. Verity just groups decisions by it.
+
+### 5.3 Run Purpose
+
+Every decision is tagged with why it happened:
+
+| Purpose | Who | Why |
+|---------|-----|-----|
+| production | Business app (uw_demo) | Normal business operation |
+| test | AI Operations (ai_ops) | Test suite execution |
+| validation | Model Validation (model_validation) | Ground truth validation for promotion |
+| audit_rerun | Compliance & Audit (compliance_audit) | Regulatory reproduction |
+
+Three governance applications are seeded: ai_ops, model_validation, compliance_audit.
+
+### 5.4 Version Composition Immutability
+
+An agent/task version is a frozen snapshot of: prompts (specific versions) + inference config + tool authorizations + authority thresholds + output schema.
+
+Once promoted beyond draft, these bindings cannot change. A modification requires creating a new version. This ensures what was tested is what runs.
+
+**Current enforcement:** Application-level only. Database triggers for defense-in-depth are planned (FC-12).
+
+---
+
+## 6. What Is Not Built Yet
+
+| Feature | Status | Reference |
+|---------|--------|-----------|
+| Test Runner (execute test suites) | Planned Phase 5 | fc11_lifecycle_testing_validation.md |
+| Validation Runner (ground truth validation) | Planned Phase 6 | fc11_lifecycle_testing_validation.md |
+| Metrics Engine (F1, precision, recall, kappa) | Planned Phase 4 | fc11_lifecycle_testing_validation.md |
+| Lifecycle Management UI | Placeholder route exists | FC-11 |
+| Test Status UI | Placeholder route exists | FC-11 |
+| Ground Truth UI | Placeholder route exists | FC-11 |
+| Sub-agent delegation | Schema supports (parent_decision_id) | FC-1 |
+| Session continuity | Not started | FC-2 |
+| Execution hooks (pre/post) | Not started | FC-3 |
+| Retry/fallback | Not started | FC-4 |
+| Vision/image input | Not started | FC-5 |
+| Batch API | Not started | FC-6 |
+| Response caching | Not started | FC-7 |
+| Version-pinned execution | Partially (registry supports it, execution uses it) | FC-8 |
+| Composition immutability enforcement | Application-level only, no DB triggers | FC-12 |
+| Tool versioning | Not started | FC-13 |
+| Verity REST API | Not started (SDK only) | Phase 3b |
+| Pipeline run persistence table | Not started | Pipeline rethink pending |
+| Description similarity computation | Schema ready, pgvector columns present but NULL | Deferred |
+
+---
+
+## 7. Key Flows
+
+### 7.1 Asset Registration Flow
+
+**Use case:** A business application seeds its AI assets into Verity during initial setup. This is the "COMPOSE" pillar - nothing runs without being registered.
+
+**Example:** Registering the triage_agent with prompts, tools, and promoting to champion.
+
+**Input:** Agent definition (name, materiality tier, description), inference config reference, prompt content, tool references.
+
+**Output:** Agent with champion version ready for execution.
+
+**Tables involved:** agent, agent_version, inference_config, prompt, prompt_version, entity_prompt_assignment, tool, agent_version_tool, approval_record.
+
+#### Sequence
+
+```
+Business App (register_all.py)          Registry                    Database
+        |                                   |                          |
+        |  1. register_agent(name,          |                          |
+        |     display_name, materiality)    |                          |
+        |---------------------------------->|  INSERT agent            |
+        |                                   |------------------------->|
+        |                                   |                          |
+        |  2. register_agent_version(       |                          |
+        |     agent_id, version=1.0.0,      |                          |
+        |     inference_config_id,          |                          |
+        |     output_schema, thresholds)    |                          |
+        |---------------------------------->|  INSERT agent_version    |
+        |                                   |  (lifecycle_state=draft) |
+        |                                   |------------------------->|
+        |                                   |                          |
+        |  3. register_prompt_version(      |                          |
+        |     prompt_id, content,           |                          |
+        |     api_role="system")            |                          |
+        |---------------------------------->|  Auto-extract {{vars}}   |
+        |                                   |  from content via regex  |
+        |                                   |  INSERT prompt_version   |
+        |                                   |  (template_variables=[]) |
+        |                                   |------------------------->|
+        |                                   |                          |
+        |  4. assign_prompt(                |                          |
+        |     entity_type="agent",          |                          |
+        |     entity_version_id,            |                          |
+        |     prompt_version_id,            |                          |
+        |     execution_order=1)            |                          |
+        |---------------------------------->|  INSERT                  |
+        |                                   |  entity_prompt_assignment|
+        |                                   |------------------------->|
+        |                                   |                          |
+        |  5. authorize_agent_tool(         |                          |
+        |     agent_version_id, tool_id)    |                          |
+        |---------------------------------->|  INSERT                  |
+        |   (repeat for each tool)          |  agent_version_tool      |
+        |                                   |------------------------->|
+        |                                   |                          |
+        |  6. promote(AGENT, version_id,    |                          |
+        |     target=CANDIDATE)             |                          |
+        |---------------------------------->|                          |
+        |                                   |  Lifecycle               |
+        |                                   |     |                    |
+        |                                   |     | UPDATE             |
+        |                                   |     | agent_version      |
+        |                                   |     | state=candidate    |
+        |                                   |     |                    |
+        |                                   |     | INSERT             |
+        |                                   |     | approval_record    |
+        |                                   |     |------------------->|
+        |                                   |                          |
+        |  7. promote(AGENT, version_id,    |                          |
+        |     target=CHAMPION)              |                          |
+        |---------------------------------->|                          |
+        |                                   |  Lifecycle               |
+        |                                   |     |                    |
+        |                                   |     | Gate check:        |
+        |                                   |     | (fast-track =      |
+        |                                   |     |  minimal gates)    |
+        |                                   |     |                    |
+        |                                   |     | UPDATE             |
+        |                                   |     | agent_version      |
+        |                                   |     | state=champion     |
+        |                                   |     | valid_from=NOW()   |
+        |                                   |     | valid_to=2999-12-31|
+        |                                   |     |                    |
+        |                                   |     | Deprecate prior    |
+        |                                   |     | champion (if any)  |
+        |                                   |     | valid_to=NOW()     |
+        |                                   |     |                    |
+        |                                   |     | UPDATE agent       |
+        |                                   |     | champion_ptr =     |
+        |                                   |     | new_version_id     |
+        |                                   |     |                    |
+        |                                   |     | INSERT             |
+        |                                   |     | approval_record    |
+        |                                   |     |------------------->|
+```
+
+**Nuances:**
+- Template variables in prompts are auto-extracted during registration. A prompt with `"Assess {{submission_id}} for {{lob}}"` automatically gets `template_variables = ['submission_id', 'lob']`.
+- Champion promotion uses SCD Type 2: the new champion gets `valid_from=NOW(), valid_to=2999-12-31`. The prior champion gets `valid_to=NOW()` (end of its validity).
+- The `agent.current_champion_version_id` pointer is updated for fast runtime resolution.
+
+---
+
+### 7.2 Agent Execution Flow (Live)
+
+**Use case:** A business application runs an agent against real data, calling the Claude API and real tool implementations. Every call is logged to the decision trail.
+
+**Input:** Agent name, context dict (business data), channel, execution_context_id.
+
+**Output:** ExecutionResult with decision_log_id, structured output, tool calls, token usage, duration.
+
+**Tables read:** agent, agent_version, inference_config, entity_prompt_assignment, prompt_version, agent_version_tool, tool.
+
+**Tables written:** agent_decision_log (1 row per execution).
+
+#### Sequence
+
+```
+Business App             Verity SDK              Registry          Claude API       Tools          Decisions
+     |                       |                      |                  |              |                |
+     | execute_agent(        |                      |                  |              |                |
+     |   "triage_agent",     |                      |                  |              |                |
+     |   context={...})      |                      |                  |              |                |
+     |---------------------->|                      |                  |              |                |
+     |                       |                      |                  |              |                |
+     |                       | get_agent_config()   |                  |              |                |
+     |                       |--------------------->|                  |              |                |
+     |                       |                      | SQL: get_agent   |              |                |
+     |                       |                      |   _champion      |              |                |
+     |                       |                      | SQL: get_entity  |              |                |
+     |                       |                      |   _prompts       |              |                |
+     |                       |                      | SQL: get_entity  |              |                |
+     |                       |                      |   _tools         |              |                |
+     |                       |<- AgentConfig -------|                  |              |                |
+     |                       |                      |                  |              |                |
+     |                       | _assemble_prompts()  |                  |              |                |
+     |                       | - validate {{vars}}  |                  |              |                |
+     |                       | - substitute values  |                  |              |                |
+     |                       | - split system/user  |                  |              |                |
+     |                       |                      |                  |              |                |
+     |                       |===== TURN 1 ========================================= |                |
+     |                       |                      |                  |              |                |
+     |                       | _gateway_llm_call()  |                  |              |                |
+     |                       |-------------------------------->|       |              |                |
+     |                       |                      |  messages.create |              |                |
+     |                       |<--- response --------|----------|       |              |                |
+     |                       |                      |                  |              |                |
+     |                       | stop_reason="tool_use"                  |              |                |
+     |                       |                      |                  |              |                |
+     |                       | _gateway_tool_call("get_submission")    |              |                |
+     |                       |------------------------------------------------>|      |                |
+     |                       |                      |                  | get_sub()    |                |
+     |                       |<--- tool result -----|------------------|------|        |                |
+     |                       |                      |                  |              |                |
+     |                       | Append tool result to messages                         |                |
+     |                       |                      |                  |              |                |
+     |                       |===== TURN 2 =========================================  |                |
+     |                       |                      |                  |              |                |
+     |                       | _gateway_llm_call()  |                  |              |                |
+     |                       |-------------------------------->|       |              |                |
+     |                       |<--- response --------|----------|       |              |                |
+     |                       |                      |                  |              |                |
+     |                       | stop_reason="end_turn"                  |              |                |
+     |                       | Break loop                              |              |                |
+     |                       |                      |                  |              |                |
+     |                       | _log_decision()      |                  |              |                |
+     |                       |------------------------------------------------------------------------>|
+     |                       |                      |                  |              |  INSERT         |
+     |                       |                      |                  |              |  agent_decision |
+     |                       |                      |                  |              |  _log           |
+     |                       |<- {decision_log_id} -|------------------|--------------|----------------|
+     |                       |                      |                  |              |                |
+     |<- ExecutionResult ----|                      |                  |              |                |
+```
+
+**What gets logged (31 columns):**
+- Entity identity: entity_type, entity_version_id, prompt_version_ids[]
+- Config snapshot: inference_config_snapshot (full JSONB copy, not just ID)
+- Context: channel, pipeline_run_id, execution_context_id, step_name
+- Input/Output: input_json, output_json, input_summary, output_summary, reasoning_text
+- AI metrics: confidence_score, risk_factors, model_used, input_tokens, output_tokens, duration_ms
+- Tool audit: tool_calls_made[] (every call with input and output)
+- Replay data: message_history[] (full conversation for replay)
+- Governance: run_purpose, mock_mode, application, status
+
+---
+
+### 7.3 Agent Execution Flow (Mocked)
+
+**Use case:** Testing an agent without calling Claude API or real tools. Uses pre-built responses from MockContext.
+
+**Alternate case A - Simple mock (skip entire loop):**
+
+```
+mock = MockContext(
+    llm_responses=[{"risk_score": "Green", "confidence": 0.89}]
+)
+result = await verity.execute_agent("triage_agent", context, mock=mock)
+```
+
+```
+Business App             Verity SDK
+     |                       |
+     | execute_agent(        |
+     |   mock=MockContext)   |
+     |---------------------->|
+     |                       |
+     |                       | get_agent_config()   (same as live)
+     |                       |
+     |                       | is_simple_mock?
+     |                       | YES (1 response, not tool_use)
+     |                       |
+     |                       | output = mock.llm_responses[0]
+     |                       |
+     |                       | _log_decision(mock_mode=True)
+     |                       |   (decision logged identically to live,
+     |                       |    but mock_mode=True flag set)
+     |                       |
+     |<- ExecutionResult ----|
+     |   (no Claude API call,
+     |    no tool calls,
+     |    instant return)
+```
+
+**Alternate case B - Replay mock (multi-turn with tool mocks):**
+
+```
+mock = MockContext(
+    llm_responses=[
+        [{"type": "tool_use", "name": "get_submission", ...}],  # Turn 1: tool request
+        [{"type": "text", "text": '{"risk_score": "Green"}'}],  # Turn 2: final answer
+    ],
+    tool_responses={
+        "get_submission": {"named_insured": "Acme Corp", ...},
+    }
+)
+```
+
+```
+Business App             Verity SDK
+     |                       |
+     | execute_agent(mock)   |
+     |---------------------->|
+     |                       |
+     |                       | is_simple_mock? NO (2 responses)
+     |                       |
+     |                       |== TURN 1 ==
+     |                       | _gateway_llm_call(mock)
+     |                       |   returns mock.llm_responses[0]   (tool_use)
+     |                       |
+     |                       | _gateway_tool_call("get_submission", mock)
+     |                       |   returns mock.tool_responses["get_submission"]
+     |                       |   (NO real tool call made)
+     |                       |
+     |                       |== TURN 2 ==
+     |                       | _gateway_llm_call(mock)
+     |                       |   returns mock.llm_responses[1]   (end_turn)
+     |                       |
+     |                       | _log_decision(mock_mode=True)
+     |                       |
+     |<- ExecutionResult ----|
+```
+
+**Alternate case C - Replay from prior decision:**
+
+```
+prior_decision = await verity.get_decision(decision_id)
+mock = MockContext.from_decision_log(prior_decision, mock_llm=True, mock_tools=True)
+result = await verity.execute_agent("triage_agent", context, mock=mock)
+```
+
+This reconstructs the mock from the stored decision's `message_history` (extracts assistant turns as LLM responses) and `tool_calls_made` (extracts tool outputs keyed by name).
+
+---
+
+### 7.4 Task Execution Flow
+
+**Use case:** Single-turn structured output. No tool calling, no multi-turn loop.
+
+**Input:** Task name, input_data dict.
+
+**Output:** ExecutionResult with structured JSON output.
+
+**Tables:** Same read tables as agent. Writes 1 row to agent_decision_log.
+
+#### Sequence
+
+```
+Business App             Verity SDK              Claude API
+     |                       |                       |
+     | execute_task(          |                       |
+     |   "document_classifier",                       |
+     |   input_data={...})   |                       |
+     |---------------------->|                       |
+     |                       |                       |
+     |                       | get_task_config()     |
+     |                       | _assemble_prompts()   |
+     |                       |                       |
+     |                       | Check output_schema:  |
+     |                       | Is it valid JSON Schema?
+     |                       | YES -> use tool_choice|
+     |                       |   to force structured |
+     |                       |   output              |
+     |                       |                       |
+     |                       | Single LLM call       |
+     |                       |---------------------->|
+     |                       |<--- response ---------|
+     |                       |                       |
+     |                       | Extract from          |
+     |                       | tool_use block        |
+     |                       | (structured output)   |
+     |                       |                       |
+     |                       | _log_decision()       |
+     |                       |                       |
+     |<- ExecutionResult ----|
+```
+
+**Structured output nuance:** If the task has a valid JSON Schema in `output_schema`, Verity creates a synthetic tool called `"structured_output"` with that schema and forces Claude to call it via `tool_choice`. This guarantees the output matches the schema. If the schema is informal (e.g., `"revenue": "number"` instead of `"revenue": {"type": "number"}`), the tool_choice is skipped and Claude returns freeform text that's parsed as JSON.
+
+---
+
+### 7.5 Pipeline Execution Flow
+
+**Use case:** Multi-step orchestration - run a sequence of agents and tasks as a governed unit.
+
+**Input:** Pipeline name, context dict, optional mock.
+
+**Output:** PipelineResult with per-step results, overall status, total duration.
+
+**Tables read:** pipeline, pipeline_version (for step definitions), plus all tables from agent/task execution per step.
+
+**Tables written:** agent_decision_log (1 row per step), all sharing the same pipeline_run_id.
+
+#### Sequence
+
+```
+Business App        Pipeline Executor       Execution Engine        Database
+     |                    |                       |                     |
+     | execute_pipeline(  |                       |                     |
+     |  "uw_submission")  |                       |                     |
+     |------------------->|                       |                     |
+     |                    |                       |                     |
+     |                    | Generate pipeline_run_id (UUID)             |
+     |                    |                       |                     |
+     |                    | Load pipeline version |                     |
+     |                    | Parse steps JSONB     |                     |
+     |                    |                       |                     |
+     |                    | Build execution groups|                     |
+     |                    | (group by step_order) |                     |
+     |                    |                       |                     |
+     |                    |=== GROUP 1 (order=1) =|===================  |
+     |                    |                       |                     |
+     |                    | Build step_context:   |                     |
+     |                    | original context      |                     |
+     |                    | (no prior outputs yet)|                     |
+     |                    |                       |                     |
+     |                    | run_agent(            |                     |
+     |                    |  "doc_classifier",    |                     |
+     |                    |  context=step_context, |                    |
+     |                    |  pipeline_run_id,     |                     |
+     |                    |  step_name="classify") |                    |
+     |                    |---------------------->|                     |
+     |                    |                       | (full agent flow)   |
+     |                    |<- StepResult ---------|                     |
+     |                    |                       |                     |
+     |                    | accumulated_results[  |                     |
+     |                    |   "classify_documents"|                     |
+     |                    | ] = step_result       |                     |
+     |                    |                       |                     |
+     |                    |=== GROUP 2 (order=2) =|===================  |
+     |                    |                       |                     |
+     |                    | Build step_context:   |                     |
+     |                    | original context +    |                     |
+     |                    | classify output       |                     |
+     |                    | (step_context[        |                     |
+     |                    |  "classify_documents"]|                     |
+     |                    |  = prior output)      |                     |
+     |                    |                       |                     |
+     |                    | run_agent(            |                     |
+     |                    |  "field_extractor",   |                     |
+     |                    |  context=step_context) |                    |
+     |                    |---------------------->|                     |
+     |                    |<- StepResult ---------|                     |
+     |                    |                       |                     |
+     |                    | ... (repeat for steps 3, 4)                |
+     |                    |                       |                     |
+     |                    | Determine overall:    |                     |
+     |                    | all complete? "complete"                    |
+     |                    | any failed?   "partial"                     |
+     |                    | pipeline_failed? "failed"                   |
+     |                    |                       |                     |
+     |<- PipelineResult --|                       |                     |
+     |   (pipeline_run_id,|                       |                     |
+     |    all_steps[],    |                       |                     |
+     |    status,         |                       |                     |
+     |    duration_ms)    |                       |                     |
+```
+
+**Context propagation nuance:** Each step receives the original pipeline context PLUS the output of every prior completed step, keyed by step_name. Step 3 (triage) sees: `context["classify_documents"] = {classifier output}`, `context["extract_fields"] = {extractor output}`, plus the original `context["submission_id"]`, `context["lob"]`, etc.
+
+**Parallel execution nuance:** Steps with the same `step_order` run concurrently via `asyncio.gather()`. They all receive the same accumulated_results from prior groups. Their individual outputs are collected after all complete.
+
+---
+
+### 7.6 Lifecycle Promotion Flow (Full Gates)
+
+**Use case:** Promoting a challenger version to champion after passing all validation gates. Requires evidence review by an approver.
+
+**Input:** Entity type, version ID, target state, approver identity, evidence review flags.
+
+**Output:** Approval record with from/to states.
+
+**Tables read:** agent_version (current state + gate flags), agent (for prior champion lookup).
+
+**Tables written:** agent_version (2 rows: new champion + deprecated prior), agent (champion pointer), approval_record.
+
+#### Sequence
+
+```
+Governance User          Verity SDK              Lifecycle              Database
+     |                       |                      |                      |
+     | promote(              |                      |                      |
+     |   AGENT,              |                      |                      |
+     |   version_id,         |                      |                      |
+     |   target=CHAMPION,    |                      |                      |
+     |   approver="S.Chen",  |                      |                      |
+     |   ground_truth_       |                      |                      |
+     |     reviewed=True,    |                      |                      |
+     |   model_card_         |                      |                      |
+     |     reviewed=True,    |                      |                      |
+     |   challenger_metrics_ |                      |                      |
+     |     reviewed=True)    |                      |                      |
+     |---------------------->|                      |                      |
+     |                       |--------------------->|                      |
+     |                       |                      |                      |
+     |                       |                      | 1. Fetch version     |
+     |                       |                      | SQL: get_agent_version
+     |                       |                      |--------------------->|
+     |                       |                      | state = "challenger" |
+     |                       |                      |                      |
+     |                       |                      | 2. Validate          |
+     |                       |                      | transition:          |
+     |                       |                      | challenger->champion |
+     |                       |                      | IS VALID             |
+     |                       |                      |                      |
+     |                       |                      | 3. Check gates:      |
+     |                       |                      | ground_truth_passed? |
+     |                       |                      |   YES (version flag) |
+     |                       |                      | ground_truth_reviewed|
+     |                       |                      |   YES (request flag) |
+     |                       |                      | model_card_reviewed? |
+     |                       |                      |   YES (request flag) |
+     |                       |                      | challenger_metrics   |
+     |                       |                      |   _reviewed? YES     |
+     |                       |                      | Gates: PASS          |
+     |                       |                      |                      |
+     |                       |                      | 4. Update version    |
+     |                       |                      | SQL: update_agent_   |
+     |                       |                      |   version_state      |
+     |                       |                      | state=champion       |
+     |                       |                      | channel=production   |
+     |                       |                      |--------------------->|
+     |                       |                      |                      |
+     |                       |                      | 5. Set champion      |
+     |                       |                      | SQL: get_current_    |
+     |                       |                      |   champion (prior)   |
+     |                       |                      |--------------------->|
+     |                       |                      |                      |
+     |                       |                      | SQL: deprecate_agent |
+     |                       |                      |   _version (prior)   |
+     |                       |                      | valid_to=NOW()       |
+     |                       |                      |--------------------->|
+     |                       |                      |                      |
+     |                       |                      | SQL: set_agent_      |
+     |                       |                      |   champion (new)     |
+     |                       |                      | valid_from=NOW()     |
+     |                       |                      | valid_to=2999-12-31  |
+     |                       |                      |--------------------->|
+     |                       |                      |                      |
+     |                       |                      | 6. Approval record   |
+     |                       |                      | SQL: create_approval |
+     |                       |                      |   _record            |
+     |                       |                      |--------------------->|
+     |                       |                      |                      |
+     |<- approval_record ----|<---------------------|                      |
+```
+
+**Gate check nuance:** Two sources of evidence are checked:
+1. **Version flags** (on `agent_version`): `ground_truth_passed`, `staging_tests_passed`, `shadow_period_complete` - set by the validation/testing framework after tests run.
+2. **Request flags** (on `PromotionRequest`): `ground_truth_reviewed`, `model_card_reviewed`, `challenger_metrics_reviewed` - asserted by the approver at promotion time.
+
+Both must be true. The version must have passed the tests AND the approver must confirm they reviewed the results.
+
+---
+
+### 7.7 Config Resolution Flow (Date-Pinned)
+
+**Use case:** Regulatory audit - need to know exactly which agent version was running on a specific historical date.
+
+**Input:** Agent name, effective_date (e.g., "2026-03-15").
+
+**Output:** AgentConfig with the version that was champion on that date.
+
+#### Sequence
+
+```
+Auditor                  Verity SDK              Registry               Database
+     |                       |                      |                      |
+     | get_agent_config(     |                      |                      |
+     |   "triage_agent",     |                      |                      |
+     |   effective_date=     |                      |                      |
+     |   "2026-03-15")       |                      |                      |
+     |---------------------->|                      |                      |
+     |                       |--------------------->|                      |
+     |                       |                      |                      |
+     |                       |                      | SQL: get_agent_      |
+     |                       |                      |   champion_at_date   |
+     |                       |                      |                      |
+     |                       |                      | WHERE agent.name =   |
+     |                       |                      |   'triage_agent'     |
+     |                       |                      | AND av.valid_from <= |
+     |                       |                      |   '2026-03-15'       |
+     |                       |                      | AND av.valid_to >    |
+     |                       |                      |   '2026-03-15'       |
+     |                       |                      |--------------------->|
+     |                       |                      |                      |
+     |                       |                      | Returns: v1.0.0      |
+     |                       |                      | (was champion from   |
+     |                       |                      |  2026-03-01 to       |
+     |                       |                      |  2026-04-15 when     |
+     |                       |                      |  v2.0.0 took over)   |
+     |                       |                      |                      |
+     |                       |                      | Assemble full config |
+     |                       |                      | (prompts, tools,     |
+     |                       |                      |  inference config    |
+     |                       |                      |  from that version)  |
+     |                       |                      |                      |
+     |<- AgentConfig --------|<---------------------|                      |
+     |   (v1.0.0 as of       |                      |                      |
+     |    March 15, 2026)    |                      |                      |
+```
+
+**SCD Type 2 nuance:** Only champion versions have `valid_from`/`valid_to` set. Pre-champion versions (draft, candidate, staging, etc.) have NULL dates and are never returned by temporal queries. This means the temporal query always returns the version that was actually in production on that date.
+
+**Three resolution modes compared:**
+
+| Mode | When to Use | Speed | SQL Query |
+|------|------------|-------|-----------|
+| Default (champion) | Runtime execution | Fastest (pointer follow) | get_agent_champion |
+| Date-pinned | Audit, regulatory | Medium (date range scan) | get_agent_champion_at_date |
+| Version-pinned | Replay, debugging | Fast (PK lookup) | get_agent_version_by_id |
+
+---
+
+### 7.8 Audit Replay Flow
+
+**Use case:** Compliance officer needs to reproduce a prior decision to verify it was correct, using the exact same inputs and configuration.
+
+**Input:** Original decision_id.
+
+**Output:** New ExecutionResult that should match the original (if deterministic).
+
+#### Sequence
+
+```
+Compliance Officer       Verity SDK              Mock Context         Execution
+     |                       |                      |                    |
+     | 1. get_decision(      |                      |                    |
+     |    decision_id)       |                      |                    |
+     |---------------------->|                      |                    |
+     |<- DecisionLogDetail --|                      |                    |
+     |   (full snapshot:     |                      |                    |
+     |    message_history,   |                      |                    |
+     |    tool_calls_made,   |                      |                    |
+     |    input_json, etc.)  |                      |                    |
+     |                       |                      |                    |
+     | 2. MockContext.from_  |                      |                    |
+     |    decision_log(      |                      |                    |
+     |    decision,          |                      |                    |
+     |    mock_llm=True,     |                      |                    |
+     |    mock_tools=True)   |                      |                    |
+     |---------------------->|--------------------->|                    |
+     |                       |                      |                    |
+     |                       |  Rebuild llm_responses:                   |
+     |                       |  Extract all assistant turns              |
+     |                       |  from message_history                     |
+     |                       |                      |                    |
+     |                       |  Rebuild tool_responses:                  |
+     |                       |  Extract outputs from                     |
+     |                       |  tool_calls_made, key by name             |
+     |                       |                      |                    |
+     |<- MockContext ------  |<---------------------|                    |
+     |                       |                      |                    |
+     | 3. execute_agent(     |                      |                    |
+     |    "triage_agent",    |                      |                    |
+     |    context=decision   |                      |                    |
+     |      .input_json,     |                      |                    |
+     |    mock=mock,         |                      |                    |
+     |    execution_context  |                      |                    |
+     |      _id=rerun_ctx)   |                      |                    |
+     |---------------------->|                      |                    |
+     |                       |                      |                    |
+     |                       | run_agent(mock=mock) |                    |
+     |                       |--------------------------------------------->|
+     |                       |                      |                    |
+     |                       | (Replays exact sequence:                  |
+     |                       |  Turn 1: mock LLM returns tool_use       |
+     |                       |  Tool call: mock returns stored result    |
+     |                       |  Turn 2: mock LLM returns final answer)  |
+     |                       |                      |                    |
+     |                       | _log_decision(                            |
+     |                       |   run_purpose="audit_rerun",              |
+     |                       |   reproduced_from_decision_id=            |
+     |                       |     original_decision_id,                 |
+     |                       |   application="compliance_audit")         |
+     |                       |                      |                    |
+     |<- ExecutionResult ----|                      |                    |
+     |                       |                      |                    |
+     | 4. Compare original   |                      |                    |
+     |    output vs replay   |                      |                    |
+     |    output             |                      |                    |
+```
+
+**Replay nuance:** The replayed decision is logged as a NEW decision with `run_purpose=audit_rerun` and `reproduced_from_decision_id` pointing to the original. This creates a direct FK link for auditors to compare. The original decision is never modified.
+
+**Three replay patterns:**
+
+| mock_llm | mock_tools | What it tests |
+|----------|-----------|---------------|
+| True | True | Full replay - verify audit trail is reproducible |
+| False | True | New prompt test - same tool data, different reasoning |
+| True | False | New tool test - same reasoning, different data source |
+
+---
+
+### 7.9 Override Recording Flow
+
+**Use case:** An underwriter disagrees with the AI's risk assessment and overrides it. Both the AI recommendation and the human decision must be preserved.
+
+**Input:** Decision log ID, overrider identity, AI recommendation, human decision, reason code.
+
+**Output:** Override record linked to the original decision.
+
+**Tables written:** override_log (1 row).
+
+#### Sequence
+
+```
+Underwriter              Business App            Verity SDK             Database
+     |                       |                      |                      |
+     | "I disagree with      |                      |                      |
+     |  the Red score.       |                      |                      |
+     |  This should be       |                      |                      |
+     |  Amber."              |                      |                      |
+     |---------------------->|                      |                      |
+     |                       |                      |                      |
+     |                       | record_override(     |                      |
+     |                       |   OverrideLogCreate( |                      |
+     |                       |     decision_log_id, |                      |
+     |                       |     entity_type=AGENT|                      |
+     |                       |     entity_version_id|                      |
+     |                       |     overrider_name=  |                      |
+     |                       |       "Lisa Wong",   |                      |
+     |                       |     overrider_role=  |                      |
+     |                       |       "Sr UW",       |                      |
+     |                       |     override_reason  |                      |
+     |                       |       _code=         |                      |
+     |                       |       "risk_disagree"|                      |
+     |                       |     ai_recommendation|                      |
+     |                       |       ={"risk_score":|                      |
+     |                       |         "Red"},      |                      |
+     |                       |     human_decision=  |                      |
+     |                       |       {"risk_score": |                      |
+     |                       |         "Amber"},    |                      |
+     |                       |   ))                 |                      |
+     |                       |--------------------->|                      |
+     |                       |                      | SQL: record_override |
+     |                       |                      | INSERT override_log  |
+     |                       |                      |--------------------->|
+     |                       |                      |                      |
+     |                       |<- {override_id} -----|                      |
+     |<- "Override recorded" |                      |                      |
+```
+
+**Audit trail nuance:** The override links to the original decision via `decision_log_id`. A query for the business context shows both: the AI's decision AND the human override, with the override's reason code explaining why they diverged.
+
+---
+
+## 8. Statistics
+
+| Metric | Count |
+|--------|-------|
+| Database tables | 33 |
+| Named SQL queries | 117 |
+| Pydantic models | ~48 |
+| Python enums | 15 |
+| Web routes | 26 |
+| Jinja2 templates | 21 |
+| Core modules | 9 (client, execution, registry, lifecycle, decisions, pipeline_executor, mock_context, testing, reporting) |
+| SDK public methods | ~50 |
+| agent_decision_log columns | 31 |
