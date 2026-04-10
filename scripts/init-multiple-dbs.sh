@@ -3,7 +3,7 @@
 # Mounted as /docker-entrypoint-initdb.d/init.sh in PostgreSQL container.
 #
 # Reads database names from POSTGRES_MULTIPLE_DATABASES environment variable.
-# Set in docker-compose.yml: POSTGRES_MULTIPLE_DATABASES: verity_db,pas_db,edms_db
+# Set in docker-compose.yml: POSTGRES_MULTIPLE_DATABASES: verity_db,uw_db,edms_db
 
 set -e
 
@@ -24,6 +24,12 @@ echo "Enabling extensions in verity_db..."
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "verity_db" <<-EOSQL
   CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
   CREATE EXTENSION IF NOT EXISTS "vector";
+EOSQL
+
+# Enable uuid-ossp in uw_db (needed for gen_random_uuid in submission tables)
+echo "Enabling extensions in uw_db..."
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "uw_db" <<-EOSQL
+  CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 EOSQL
 
 # Enable uuid-ossp in edms_db (needed for uuid_generate_v4 in document tables)
