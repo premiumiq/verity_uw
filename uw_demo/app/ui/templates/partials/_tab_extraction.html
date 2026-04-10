@@ -1,0 +1,155 @@
+<!-- Tab: Extracted Fields — extraction results + inline HITL review.
+     Dual-mode: review (editable form) or read-only (table with overrides). -->
+
+{% if not extractions %}
+<div class="verity-empty">
+    <div class="verity-empty-message">
+        No extracted fields yet. Click "Process Documents" to classify and extract fields from submission documents.
+    </div>
+</div>
+
+{% else %}
+
+<!-- Data Completeness Metric -->
+{% set total = extractions|length %}
+{% set present = extractions|selectattr('extracted_value')|list|length %}
+{% set pct = (present / total * 100) if total > 0 else 0 %}
+{% set flagged = extractions|selectattr('needs_review')|list %}
+{% set missing = extractions|rejectattr('extracted_value')|list %}
+
+<div class="verity-card">
+    <div class="verity-card-header">Data Completeness: {{ "%.1f"|format(pct) }}% ({{ present }}/{{ total }} fields)</div>
+    {% if missing %}
+    <div class="verity-detail-label">Missing: {{ missing|map(attribute='field_name')|join(', ') }}</div>
+    {% endif %}
+    {% if flagged %}
+    <div class="verity-detail-label">Flagged for Review: {{ flagged|length }} fields</div>
+    {% endif %}
+</div>
+
+
+{% if is_review_mode %}
+<!-- REVIEW MODE: Editable HITL form -->
+<div class="verity-card">
+    <div class="verity-card-header">Action Required — Review flagged fields and approve</div>
+</div>
+
+<form method="POST" action="/submissions/{{ sub.id }}/approve-extraction">
+    <input type="hidden" name="reviewer_name" value="Underwriter">
+
+    <table class="verity-table">
+        <thead>
+            <tr>
+                <th>Field</th>
+                <th>Extracted Value</th>
+                <th>Confidence</th>
+                <th>Status</th>
+                <th>Override Value</th>
+                <th>Reason</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ext in extractions %}
+            <tr>
+                <td><code>{{ ext.field_name }}</code></td>
+                <td>
+                    {% if ext.extracted_value %}
+                        {{ ext.extracted_value }}
+                    {% else %}
+                        <span class="verity-badge verity-badge-high">Not found</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if ext.confidence is not none %}
+                        {% if ext.confidence >= 0.85 %}
+                            <span class="verity-badge verity-badge-champion">{{ "%.0f"|format(ext.confidence * 100) }}%</span>
+                        {% elif ext.confidence >= 0.70 %}
+                            <span class="verity-badge verity-badge-shadow">{{ "%.0f"|format(ext.confidence * 100) }}%</span>
+                        {% else %}
+                            <span class="verity-badge verity-badge-high">{{ "%.0f"|format(ext.confidence * 100) }}%</span>
+                        {% endif %}
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+                <td>
+                    {% if ext.needs_review %}
+                        <span class="verity-badge verity-badge-shadow">{{ ext.review_reason or 'review' }}</span>
+                    {% else %}
+                        <span class="verity-badge verity-badge-champion">OK</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if ext.needs_review %}
+                        <input type="text" name="override_{{ ext.field_name }}"
+                               placeholder="Enter correct value..." class="verity-input">
+                    {% endif %}
+                </td>
+                <td>
+                    {% if ext.needs_review %}
+                        <input type="text" name="reason_{{ ext.field_name }}"
+                               placeholder="Optional" class="verity-input">
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="verity-action-bar">
+        <button type="submit" class="verity-btn verity-btn-primary">Approve & Continue</button>
+    </div>
+</form>
+
+
+{% else %}
+<!-- READ-ONLY MODE -->
+<table class="verity-table">
+    <thead>
+        <tr>
+            <th>Field</th>
+            <th>Value</th>
+            <th>Confidence</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for ext in extractions %}
+        <tr>
+            <td><code>{{ ext.field_name }}</code></td>
+            <td>
+                {% if ext.overridden %}
+                    {{ ext.override_value }}
+                    <span class="verity-badge verity-badge-shadow">overridden</span>
+                {% else %}
+                    {{ ext.extracted_value or '—' }}
+                {% endif %}
+            </td>
+            <td>
+                {% if ext.confidence is not none %}
+                    {% if ext.confidence >= 0.85 %}
+                        <span class="verity-badge verity-badge-champion">{{ "%.0f"|format(ext.confidence * 100) }}%</span>
+                    {% elif ext.confidence >= 0.70 %}
+                        <span class="verity-badge verity-badge-shadow">{{ "%.0f"|format(ext.confidence * 100) }}%</span>
+                    {% else %}
+                        <span class="verity-badge verity-badge-high">{{ "%.0f"|format(ext.confidence * 100) }}%</span>
+                    {% endif %}
+                {% else %}
+                    —
+                {% endif %}
+            </td>
+            <td>
+                {% if ext.overridden %}
+                    <span class="verity-badge verity-badge-shadow">Overridden</span>
+                {% elif ext.needs_review %}
+                    <span class="verity-badge verity-badge-high">{{ ext.review_reason }}</span>
+                {% else %}
+                    <span class="verity-badge verity-badge-champion">OK</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+{% endif %}

@@ -1,0 +1,67 @@
+<!-- Tab: Risk Assessment — triage and appetite results -->
+
+{% if not assessments %}
+<div class="verity-empty">
+    <div class="verity-empty-message">
+        No risk assessment yet. Complete document processing first, then click "Assess Risk".
+    </div>
+</div>
+
+{% else %}
+
+<div class="verity-stats-grid">
+
+    <!-- Triage Result -->
+    {% if assessments.get('triage') %}
+    {% set triage = assessments.triage %}
+    <div class="verity-card">
+        <div class="verity-card-header">
+            <span class="verity-badge verity-badge-agent">agent</span>
+            Risk Triage
+            {% if triage.risk_score == 'Green' %}
+                <span class="verity-badge verity-badge-champion">{{ triage.risk_score }}</span>
+            {% elif triage.risk_score == 'Amber' %}
+                <span class="verity-badge verity-badge-shadow">{{ triage.risk_score }}</span>
+            {% elif triage.risk_score == 'Red' %}
+                <span class="verity-badge verity-badge-high">{{ triage.risk_score }}</span>
+            {% endif %}
+        </div>
+        <div class="verity-detail-grid">
+            <div class="verity-detail-label">Routing</div>
+            <div class="verity-detail-value">{{ triage.routing | replace('_', ' ') | title if triage.routing else '—' }}</div>
+            <div class="verity-detail-label">Confidence</div>
+            <div class="verity-detail-value">{{ "%.0f"|format(triage.confidence * 100) }}%</div>
+        </div>
+        {% if triage.reasoning %}
+        <div class="verity-card-footer">{{ triage.reasoning }}</div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Appetite Result -->
+    {% if assessments.get('appetite') %}
+    {% set appetite = assessments.appetite %}
+    <div class="verity-card">
+        <div class="verity-card-header">
+            <span class="verity-badge verity-badge-agent">agent</span>
+            Appetite Assessment
+            {% if appetite.determination == 'within_appetite' %}
+                <span class="verity-badge verity-badge-champion">Within Appetite</span>
+            {% elif appetite.determination == 'borderline' %}
+                <span class="verity-badge verity-badge-shadow">Borderline</span>
+            {% elif appetite.determination == 'outside_appetite' %}
+                <span class="verity-badge verity-badge-high">Outside Appetite</span>
+            {% endif %}
+        </div>
+        <div class="verity-detail-grid">
+            <div class="verity-detail-label">Confidence</div>
+            <div class="verity-detail-value">{{ "%.0f"|format(appetite.confidence * 100) }}%</div>
+        </div>
+        {% if appetite.reasoning %}
+        <div class="verity-card-footer">{{ appetite.reasoning }}</div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+</div>
+{% endif %}

@@ -74,6 +74,24 @@
 
         </div><!-- end sidebar-nav -->
 
+        <!-- Pipeline mode toggle -->
+        <div id="pipeline-mode-toggle" style="padding: 8px 16px; border-top: 1px solid rgba(255,255,255,0.15);">
+            <div style="font-size: 0.6rem; text-transform: uppercase; color: rgba(255,255,255,0.4); letter-spacing: 0.3px; margin-bottom: 4px;">Pipeline Mode</div>
+            <form hx-post="/settings/pipeline-mode" hx-target="#pipeline-mode-toggle" hx-swap="innerHTML">
+                {% if pipeline_mode == 'live' %}
+                <button type="submit" name="mode" value="mock" class="verity-btn verity-btn-sm"
+                        style="background: var(--verity-green); color: white; border: none; width: 100%;">
+                    LIVE — Click for Mock
+                </button>
+                {% else %}
+                <button type="submit" name="mode" value="live" class="verity-btn verity-btn-sm"
+                        style="background: var(--verity-amber); color: white; border: none; width: 100%;">
+                    MOCK — Click for Live
+                </button>
+                {% endif %}
+            </form>
+        </div>
+
         <!-- Sidebar footer — link to Verity admin -->
         <div style="padding: 12px 16px; border-top: 1px solid rgba(255,255,255,0.15);">
             <a href="http://localhost:8000/admin/"

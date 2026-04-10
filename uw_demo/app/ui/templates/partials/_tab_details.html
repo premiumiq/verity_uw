@@ -1,0 +1,63 @@
+<!-- Tab: Submission Details — Company, Policy, Prior Coverage cards -->
+<div class="verity-stats-grid">
+
+    <!-- Company Details -->
+    <div class="verity-card">
+        <div class="verity-card-header">Company Details</div>
+        <div class="verity-detail-grid">
+            <div class="verity-detail-label">FEIN</div>
+            <div class="verity-detail-value">{{ sub.fein or '—' }}</div>
+            <div class="verity-detail-label">Entity Type</div>
+            <div class="verity-detail-value">{{ sub.entity_type or '—' }}</div>
+            <div class="verity-detail-label">State</div>
+            <div class="verity-detail-value">{{ sub.state_of_incorporation or '—' }}</div>
+            <div class="verity-detail-label">SIC Code</div>
+            <div class="verity-detail-value">{{ sub.sic_code or '—' }}</div>
+            <div class="verity-detail-label">Industry</div>
+            <div class="verity-detail-value">{{ sub.sic_description or '—' }}</div>
+            <div class="verity-detail-label">Revenue</div>
+            <div class="verity-detail-value">{{ "${:,.0f}".format(sub.annual_revenue) if sub.annual_revenue else '—' }}</div>
+            <div class="verity-detail-label">Employees</div>
+            <div class="verity-detail-value">{{ sub.employee_count or '—' }}</div>
+        </div>
+    </div>
+
+    <!-- Policy Details -->
+    <div class="verity-card">
+        <div class="verity-card-header">Policy Details</div>
+        <div class="verity-detail-grid">
+            <div class="verity-detail-label">LOB</div>
+            <div class="verity-detail-value">
+                <span class="verity-badge verity-badge-agent">{{ sub.lob }}</span>
+            </div>
+            <div class="verity-detail-label">Effective</div>
+            <div class="verity-detail-value">{{ sub.effective_date.strftime('%b %d, %Y') if sub.effective_date else '—' }}</div>
+            <div class="verity-detail-label">Expiration</div>
+            <div class="verity-detail-value">{{ sub.expiration_date.strftime('%b %d, %Y') if sub.expiration_date else '—' }}</div>
+            <div class="verity-detail-label">Limits</div>
+            <div class="verity-detail-value">{{ "${:,.0f}".format(sub.limits_requested) if sub.limits_requested else '—' }}</div>
+            <div class="verity-detail-label">Retention</div>
+            <div class="verity-detail-value">{{ "${:,.0f}".format(sub.retention_requested) if sub.retention_requested else '—' }}</div>
+        </div>
+    </div>
+
+    <!-- Prior Coverage + Board (D&O) -->
+    <div class="verity-card">
+        <div class="verity-card-header">Prior Coverage</div>
+        <div class="verity-detail-grid">
+            <div class="verity-detail-label">Carrier</div>
+            <div class="verity-detail-value">{{ sub.prior_carrier or '—' }}</div>
+            <div class="verity-detail-label">Premium</div>
+            <div class="verity-detail-value">{{ "${:,.0f}".format(sub.prior_premium) if sub.prior_premium else '—' }}</div>
+        </div>
+        {% if sub.lob == 'DO' %}
+        <div class="verity-card-header">Board Details</div>
+        <div class="verity-detail-grid">
+            <div class="verity-detail-label">Board Size</div>
+            <div class="verity-detail-value">{{ sub.board_size or '—' }}</div>
+            <div class="verity-detail-label">Independent</div>
+            <div class="verity-detail-value">{{ sub.independent_directors or '—' }}</div>
+        </div>
+        {% endif %}
+    </div>
+</div>

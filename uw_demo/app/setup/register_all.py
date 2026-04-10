@@ -2,7 +2,7 @@
 
 This script populates the Verity database with demo-ready data:
 - 5 inference configs
-- 8 tools
+- 11 tools (8 UW + 2 EDMS + 1 extraction storage)
 - 2 agents (triage, appetite) with 2 versions each
 - 2 tasks (classifier, extractor) with 2 versions each
 - 8 prompts with versioned content
@@ -105,8 +105,20 @@ async def main():
         print("Step 18-19: Seeding decision logs and overrides...")
         await seed_decisions(verity, agent_versions, task_versions)
 
+        # ── STEP 20: Seed UW database ─────────────────────────
+        print("Step 20: Seeding UW database (submissions + loss history)...")
+        from uw_demo.app.setup.seed_uw import seed_uw_db
+        await seed_uw_db()
+
+        # ── STEP 21: Seed EDMS documents ──────────────────────
+        print("Step 21: Uploading documents to EDMS...")
+        from uw_demo.app.setup.seed_edms import seed_edms
+        await seed_edms()
+
         print("\n✓ Seed complete. All demo data loaded.")
-        print("  Open http://localhost:8000/admin/ to see the data.")
+        print("  Verity:  http://localhost:8000/admin/")
+        print("  UW Demo: http://localhost:8001/")
+        print("  EDMS:    http://localhost:8002/ui/")
 
     finally:
         await verity.close()
@@ -278,6 +290,53 @@ async def seed_tools(verity: Verity) -> dict:
             "mock_mode_enabled": True, "mock_response_key": "default",
             "data_classification_max": "tier3_confidential",
             "is_write_operation": True, "requires_confirmation": False, "tags": ["write", "appetite"],
+        },
+        # ── EDMS document tools ──────────────────────────────────
+        {
+            "name": "list_documents",
+            "display_name": "List Documents (EDMS)",
+            "description": "Lists documents from EDMS for a business context. Returns metadata including IDs, filenames, types, and upload dates. Supports optional filtering by document type and context type.",
+            "input_schema": {"type": "object", "properties": {
+                "context_ref": {"type": "string", "description": "Business context reference, e.g. 'submission:00000001-0001-0001-0001-000000000001'"},
+                "document_type": {"type": "string", "description": "Optional filter by document type (do_application, gl_application, loss_run, etc.)"},
+                "context_type": {"type": "string", "description": "Optional filter by context type (submission, policy, claim)"},
+            }, "required": ["context_ref"]},
+            "output_schema": {"type": "object", "properties": {"documents": {"type": "array"}}},
+            "implementation_path": "uw_demo.app.tools.edms_tools.list_documents",
+            "mock_mode_enabled": True, "mock_response_key": "default",
+            "data_classification_max": "tier3_confidential",
+            "is_write_operation": False, "requires_confirmation": False, "tags": ["read", "documents", "edms"],
+        },
+        {
+            "name": "get_document_text",
+            "display_name": "Get Document Text (EDMS)",
+            "description": "Returns the extracted text content of a specific document from EDMS by its document ID. The document must have been previously uploaded and text-extracted.",
+            "input_schema": {"type": "object", "properties": {
+                "document_id": {"type": "string", "description": "UUID of the document to retrieve text for"},
+            }, "required": ["document_id"]},
+            "output_schema": {"type": "object", "properties": {"text": {"type": "string"}, "char_count": {"type": "integer"}}},
+            "implementation_path": "uw_demo.app.tools.edms_tools.get_document_text",
+            "mock_mode_enabled": True, "mock_response_key": "default",
+            "data_classification_max": "tier3_confidential",
+            "is_write_operation": False, "requires_confirmation": False, "tags": ["read", "documents", "edms"],
+        },
+        # ── Extraction storage tool ──────────────────────────────
+        {
+            "name": "store_extraction_result",
+            "display_name": "Store Extraction Result",
+            "description": "Writes extracted field values from the field extraction task to uw_db. Stores per-field confidence scores and flags low-confidence or missing fields for HITL review.",
+            "input_schema": {"type": "object", "properties": {
+                "submission_id": {"type": "string"},
+                "fields": {"type": "object", "description": "Dict of field_name -> {value, confidence, note}"},
+                "low_confidence_fields": {"type": "array", "items": {"type": "string"}},
+                "unextractable_fields": {"type": "array", "items": {"type": "string"}},
+                "source_document_id": {"type": "string", "description": "EDMS document ID the fields were extracted from"},
+            }, "required": ["submission_id", "fields"]},
+            "output_schema": {"type": "object", "properties": {"stored": {"type": "boolean"}, "fields_stored": {"type": "integer"}, "fields_flagged": {"type": "integer"}}},
+            "implementation_path": "uw_demo.app.tools.submission_tools.store_extraction_result",
+            "mock_mode_enabled": True, "mock_response_key": "default",
+            "data_classification_max": "tier3_confidential",
+            "is_write_operation": True, "requires_confirmation": False, "tags": ["write", "extraction"],
         },
     ]
 
@@ -577,8 +636,9 @@ async def seed_prompt_versions(verity: Verity, prompts: dict) -> dict:
     from uw_demo.app.prompts import (
         TRIAGE_SYSTEM_V1, TRIAGE_SYSTEM_V2, TRIAGE_CONTEXT_V1,
         APPETITE_SYSTEM_V1, APPETITE_CONTEXT_V1,
-        CLASSIFIER_SYSTEM_V1, CLASSIFIER_SYSTEM_V2, CLASSIFIER_INPUT_V1,
-        EXTRACTOR_SYSTEM_V1, EXTRACTOR_INPUT_V1,
+        CLASSIFIER_SYSTEM_V1, CLASSIFIER_SYSTEM_V2, CLASSIFIER_SYSTEM_V3,
+        CLASSIFIER_INPUT_V1, CLASSIFIER_INPUT_V2,
+        EXTRACTOR_SYSTEM_V1, EXTRACTOR_INPUT_V1, EXTRACTOR_INPUT_V2,
     )
 
     # ── Triage agent system prompt — v1 promoted then superseded by v2
@@ -641,13 +701,31 @@ async def seed_prompt_versions(verity: Verity, prompts: dict) -> dict:
         ("doc_classifier_instruction", 2),
     )
 
-    # ── Document classifier input template
+    # ── Document classifier input template — v1 then superseded by v2
     await _register_and_promote(
         prompts["doc_classifier_input"], 1, 0, 0,
         CLASSIFIER_INPUT_V1,
         "user", "formatting",
         "Document text input with classification instruction", "low", "Dev Team",
         ("doc_classifier_input", 1),
+    )
+
+    # v3 system: handles PDF content blocks (multi-document classification)
+    await _register_and_promote(
+        prompts["doc_classifier_instruction"], 3, 0, 0,
+        CLASSIFIER_SYSTEM_V3,
+        "system", "behavioural",
+        "Multi-document classifier with PDF content block support", "high", "James Okafor",
+        ("doc_classifier_instruction", 3),
+    )
+
+    # v2 input: for EDMS-integrated pipeline (no document_text, uses content blocks)
+    await _register_and_promote(
+        prompts["doc_classifier_input"], 2, 0, 0,
+        CLASSIFIER_INPUT_V2,
+        "user", "contextual",
+        "Multi-document classification input for EDMS-integrated pipeline", "medium", "James Okafor",
+        ("doc_classifier_input", 2),
     )
 
     # ── Field extractor system prompt
@@ -659,13 +737,22 @@ async def seed_prompt_versions(verity: Verity, prompts: dict) -> dict:
         ("field_extractor_instruction", 1),
     )
 
-    # ── Field extractor input template
+    # ── Field extractor input template — v1 then superseded by v2
     await _register_and_promote(
         prompts["field_extractor_input"], 1, 0, 0,
         EXTRACTOR_INPUT_V1,
         "user", "formatting",
         "D&O application text input with extraction instruction", "low", "Dev Team",
         ("field_extractor_input", 1),
+    )
+
+    # v2 input: includes submission context alongside document text
+    await _register_and_promote(
+        prompts["field_extractor_input"], 2, 0, 0,
+        EXTRACTOR_INPUT_V2,
+        "user", "contextual",
+        "Extraction input with submission context for EDMS-integrated pipeline", "medium", "James Okafor",
+        ("field_extractor_input", 2),
     )
 
     print(f"  + {len(pv)} prompt versions registered and promoted via lifecycle")
@@ -688,17 +775,17 @@ async def seed_prompt_assignments(verity, agent_versions, task_versions, prompt_
         ("agent", agent_versions[("appetite_agent", "1.0.0")],
          prompt_versions[("appetite_agent_context", 1)], "user", "contextual", 2, True),
 
-        # Document classifier v1.0.0 gets instruction v2 + input v1
+        # Document classifier v1.0.0 gets instruction v3 + input v2 (EDMS-integrated)
         ("task", task_versions[("document_classifier", "1.0.0")],
-         prompt_versions[("doc_classifier_instruction", 2)], "system", "behavioural", 1, True),
+         prompt_versions[("doc_classifier_instruction", 3)], "system", "behavioural", 1, True),
         ("task", task_versions[("document_classifier", "1.0.0")],
-         prompt_versions[("doc_classifier_input", 1)], "user", "formatting", 2, True),
+         prompt_versions[("doc_classifier_input", 2)], "user", "contextual", 2, True),
 
-        # Field extractor v1.0.0
+        # Field extractor v1.0.0 gets instruction v1 + input v2 (EDMS-integrated)
         ("task", task_versions[("field_extractor", "1.0.0")],
          prompt_versions[("field_extractor_instruction", 1)], "system", "behavioural", 1, True),
         ("task", task_versions[("field_extractor", "1.0.0")],
-         prompt_versions[("field_extractor_input", 1)], "user", "formatting", 2, True),
+         prompt_versions[("field_extractor_input", 2)], "user", "contextual", 2, True),
     ]
 
     for entity_type, version_id, pv_id, api_role, gov_tier, order, required in assignments:
@@ -737,45 +824,77 @@ async def seed_tool_authorizations(verity, agent_versions, tools):
 # ══════════════════════════════════════════════════════════════
 
 async def seed_pipeline(verity: Verity) -> dict:
-    """Register the UW submission pipeline."""
-    r = await verity.registry.register_pipeline(
-        name="uw_submission_pipeline",
-        display_name="Underwriting Submission Processing Pipeline",
-        description="Full submission processing pipeline from document classification through risk triage and appetite assessment. Orchestrates tasks and agents in dependency order.",
-    )
-    pipeline_id = r["id"]
+    """Register two UW pipelines: document processing + risk assessment.
 
-    steps = [
+    Pipeline 1 (uw_document_processing): classify → extract
+        Processes documents from EDMS. Results written to uw_db.
+        May trigger HITL review if extraction flags exist.
+
+    Pipeline 2 (uw_risk_assessment): triage → appetite
+        Uses finalized fields from uw_db (post-HITL).
+        Called by UW app after extraction is approved.
+    """
+    pipelines = {}
+
+    # ── Pipeline 1: Document Processing ──────────────────────
+    r = await verity.registry.register_pipeline(
+        name="uw_document_processing",
+        display_name="Document Processing Pipeline",
+        description="Classifies submission documents and extracts structured fields from applications. Results are written to uw_db for human review before risk assessment.",
+    )
+    pipelines["doc_processing"] = {"id": r["id"]}
+
+    doc_steps = [
         {"step_order": 1, "step_name": "classify_documents", "entity_type": "task",
          "entity_name": "document_classifier", "depends_on": [], "parallel_group": None,
          "error_policy": "fail_pipeline"},
         {"step_order": 2, "step_name": "extract_fields", "entity_type": "task",
          "entity_name": "field_extractor", "depends_on": ["classify_documents"], "parallel_group": None,
-         "error_policy": "continue_with_flag"},
-        {"step_order": 3, "step_name": "triage_submission", "entity_type": "agent",
-         "entity_name": "triage_agent", "depends_on": ["extract_fields"], "parallel_group": None,
          "error_policy": "fail_pipeline"},
-        {"step_order": 4, "step_name": "assess_appetite", "entity_type": "agent",
+    ]
+
+    pv1 = await verity.registry.register_pipeline_version(
+        pipeline_id=r["id"], version_number=1, lifecycle_state="draft",
+        steps=doc_steps, change_summary="2-step document pipeline: classify → extract. PDF input for classifier, extracted text for extractor.",
+        developer_name="Dev Team",
+    )
+    await verity.promote(entity_type="pipeline", entity_version_id=pv1["id"],
+        target_state="candidate", approver_name="Dev Team", rationale="Pipeline development complete")
+    await verity.promote(entity_type="pipeline", entity_version_id=pv1["id"],
+        target_state="champion", approver_name="Sarah Chen, Chief Actuary",
+        rationale="Document processing pipeline validated")
+    print(f"  + pipeline: uw_document_processing (2 steps)")
+
+    # ── Pipeline 2: Risk Assessment ──────────────────────────
+    r = await verity.registry.register_pipeline(
+        name="uw_risk_assessment",
+        display_name="Risk Assessment Pipeline",
+        description="Performs risk triage and appetite assessment using finalized submission fields (post-HITL). Called after document processing and human review.",
+    )
+    pipelines["risk_assessment"] = {"id": r["id"]}
+
+    risk_steps = [
+        {"step_order": 1, "step_name": "triage_submission", "entity_type": "agent",
+         "entity_name": "triage_agent", "depends_on": [], "parallel_group": None,
+         "error_policy": "fail_pipeline"},
+        {"step_order": 2, "step_name": "assess_appetite", "entity_type": "agent",
          "entity_name": "appetite_agent", "depends_on": ["triage_submission"], "parallel_group": None,
          "error_policy": "continue_with_flag"},
     ]
 
-    # Register pipeline version as draft, then promote through lifecycle
-    pv = await verity.registry.register_pipeline_version(
-        pipeline_id=pipeline_id, version_number=1, lifecycle_state="draft",
-        steps=steps, change_summary="Initial 4-step pipeline: classify → extract → triage → appetite",
+    pv2 = await verity.registry.register_pipeline_version(
+        pipeline_id=r["id"], version_number=1, lifecycle_state="draft",
+        steps=risk_steps, change_summary="2-step risk pipeline: triage → appetite. Uses finalized fields from uw_db.",
         developer_name="Dev Team",
     )
-
-    # Promote: draft → candidate → champion (lifecycle sets champion pointer + temporal fields)
-    await verity.promote(entity_type="pipeline", entity_version_id=pv["id"],
+    await verity.promote(entity_type="pipeline", entity_version_id=pv2["id"],
         target_state="candidate", approver_name="Dev Team", rationale="Pipeline development complete")
-    await verity.promote(entity_type="pipeline", entity_version_id=pv["id"],
+    await verity.promote(entity_type="pipeline", entity_version_id=pv2["id"],
         target_state="champion", approver_name="Sarah Chen, Chief Actuary",
-        rationale="Pipeline validated end-to-end")
+        rationale="Risk assessment pipeline validated")
+    print(f"  + pipeline: uw_risk_assessment (2 steps)")
 
-    print(f"  + pipeline: uw_submission_pipeline (4 steps, promoted via lifecycle)")
-    return {"id": pipeline_id}
+    return pipelines
 
 
 # ══════════════════════════════════════════════════════════════
@@ -809,9 +928,10 @@ async def seed_application(verity, agents, tasks, tools, prompts, pipeline):
         await verity.registry.map_entity_to_application(app_id, "tool", tool_id)
     print(f"  + mapped {len(tools)} tools")
 
-    # Map pipeline
-    await verity.registry.map_entity_to_application(app_id, "pipeline", pipeline["id"])
-    print(f"  + mapped 1 pipeline")
+    # Map pipelines (now two: doc_processing + risk_assessment)
+    for pname, pdata in pipeline.items():
+        await verity.registry.map_entity_to_application(app_id, "pipeline", pdata["id"])
+    print(f"  + mapped {len(pipeline)} pipelines")
 
     # Create execution contexts for the 4 seeded submissions
     submission_ids = [

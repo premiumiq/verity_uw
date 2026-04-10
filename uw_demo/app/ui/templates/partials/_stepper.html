@@ -1,0 +1,26 @@
+<!-- Workflow stepper — 5 circles connected by lines.
+     Included in submission_detail.html and OOB-swapped after pipeline actions. -->
+<div class="verity-stepper">
+    {% for step in workflow_steps %}
+    <div class="verity-step verity-step-{{ step.status }}">
+        <div class="verity-step-circle">
+            {% if step.status == 'complete' %}
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M3 8L6.5 11.5L13 4.5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            {% elif step.status == 'failed' %}
+                ✗
+            {% else %}
+                {{ step.step_order }}
+            {% endif %}
+        </div>
+        <div class="verity-step-label">{{ step.step_name | replace('_', ' ') | title }}</div>
+        {% if step.completed_at %}
+        <div class="verity-step-time">{{ step.completed_at.strftime('%b %d, %H:%M') if step.completed_at else '' }}</div>
+        {% endif %}
+    </div>
+    {% if not loop.last %}
+    <div class="verity-step-connector {% if step.status == 'complete' %}verity-connector-complete{% endif %}"></div>
+    {% endif %}
+    {% endfor %}
+</div>

@@ -1,0 +1,42 @@
+<!-- Tab: Audit Trail — Verity decision log entries -->
+
+{% if not trail %}
+<div class="verity-empty">
+    <div class="verity-empty-message">
+        No audit trail yet. Run a pipeline to generate decision records in Verity.
+    </div>
+</div>
+
+{% else %}
+
+{% for entry in trail %}
+<div class="verity-card">
+    <div class="verity-card-header">
+        <span class="verity-badge verity-badge-{{ entry.entity_type }}">{{ entry.entity_type }}</span>
+        {{ entry.step_name or entry.entity_name }}
+        <span class="verity-detail-label">{{ entry.entity_name }} v{{ entry.version_label }}</span>
+        {% if entry.confidence_score is not none %}
+            <span class="verity-detail-label">{{ "%.0f"|format(entry.confidence_score * 100) }}% confidence</span>
+        {% endif %}
+        <span class="verity-detail-label">{{ entry.duration_ms }}ms</span>
+    </div>
+    {% if entry.output_summary %}
+    <div class="verity-code">{{ entry.output_summary }}</div>
+    {% endif %}
+    <div class="verity-card-footer">
+        <a href="http://localhost:8000/admin/decisions/{{ entry.decision_id }}" target="_blank"
+           class="verity-btn verity-btn-secondary verity-btn-sm">Full detail ↗</a>
+    </div>
+</div>
+{% endfor %}
+
+{% if run_id %}
+<div class="verity-section">
+    <a href="http://localhost:8000/admin/audit-trail/run/{{ run_id }}"
+       class="verity-btn verity-btn-secondary" target="_blank">
+        View Full Audit Trail in Verity ↗
+    </a>
+</div>
+{% endif %}
+
+{% endif %}

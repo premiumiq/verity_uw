@@ -1,0 +1,37 @@
+<!-- Action bar — shows ONE contextual action button based on submission status.
+     Included in submission_detail.html and OOB-swapped after pipeline actions. -->
+<div class="verity-action-bar">
+    {% if next_action %}
+        {% if next_action.get('method') == 'POST' %}
+        <form method="POST" action="{{ next_action.url }}" style="display: inline;">
+            <button type="submit" class="verity-btn verity-btn-primary"
+                    hx-post="{{ next_action.url }}"
+                    hx-target="#tab-content"
+                    hx-swap="innerHTML"
+                    hx-indicator="#pipeline-spinner"
+                    hx-disabled-elt="this">
+                {{ next_action.label }}
+            </button>
+        </form>
+        <span id="pipeline-spinner" class="htmx-indicator" style="margin-left: 8px; color: var(--verity-text-light); font-size: 0.85rem;">
+            <span class="verity-spinner"></span> Running pipeline...
+        </span>
+        {% elif next_action.get('tab') %}
+        <button class="verity-btn verity-btn-primary"
+                onclick="document.querySelector('[data-tab={{ next_action.tab }}]').click()">
+            {{ next_action.label }}
+        </button>
+        {% endif %}
+    {% else %}
+        <span class="verity-badge verity-badge-champion" style="padding: 8px 16px; font-size: 0.85rem;">
+            Workflow Complete
+        </span>
+    {% endif %}
+
+    {% if run_id %}
+    <a href="http://localhost:8000/admin/audit-trail/run/{{ run_id }}"
+       class="verity-btn verity-btn-secondary" target="_blank" style="margin-left: auto;">
+        View in Verity ↗
+    </a>
+    {% endif %}
+</div>

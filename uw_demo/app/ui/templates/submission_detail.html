@@ -1,15 +1,7 @@
 <!--
-  SUBMISSION DETAIL PAGE — View one submission with AI results
+  SUBMISSION DETAIL — Main workflow page
 
-  Shows submission metadata at top, then each AI step's output
-  as a card (classifier, extractor, triage, appetite).
-  Includes override display if any human overrides exist.
-  Links to Verity admin for full audit trail.
-
-  DATA PASSED BY ROUTE:
-  - sub: dict with submission metadata
-  - trail: list of AuditTrailEntry from verity.get_audit_trail()
-  - overrides: list of override records (if any)
+  Layout: Stepper + Verity link → Summary cards → Action bar → Tabs
 -->
 {% extends "uw_base.html" %}
 
@@ -22,187 +14,262 @@
     <span>{{ sub.named_insured }}</span>
 {% endblock %}
 
-{% block page_title %}{{ sub.named_insured }}{% endblock %}
+{% block page_title %}
+    {{ sub.named_insured }}
+    <span class="verity-badge verity-badge-agent">{{ sub.lob }}</span>
+{% endblock %}
 
 {% block content %}
 
-<!-- ── SUBMISSION INFO CARD ───────────────────────────────── -->
-<div class="verity-card" style="margin-bottom: 24px;">
-    <div class="verity-detail-grid">
-        <div class="verity-detail-label">Named Insured</div>
-        <div class="verity-detail-value" style="font-weight: 600;">{{ sub.named_insured }}</div>
-
-        <div class="verity-detail-label">Line of Business</div>
-        <div class="verity-detail-value">
-            <span class="verity-badge verity-badge-agent">{{ sub.lob }}</span>
-        </div>
-
-        <div class="verity-detail-label">Risk Score</div>
-        <div class="verity-detail-value">
-            {% if sub.risk_score == 'Green' %}
-                <span class="verity-badge verity-badge-champion">Green</span>
-            {% elif sub.risk_score == 'Amber' %}
-                <span class="verity-badge verity-badge-shadow">Amber</span>
-            {% elif sub.risk_score == 'Red' %}
-                <span class="verity-badge verity-badge-high">Red</span>
-            {% endif %}
-        </div>
-
-        <div class="verity-detail-label">Revenue</div>
-        <div class="verity-detail-value">{{ sub.revenue }}</div>
-
-        <div class="verity-detail-label">Employees</div>
-        <div class="verity-detail-value">{{ sub.employees }}</div>
-
-        <div class="verity-detail-label">Pipeline Status</div>
-        <div class="verity-detail-value">{{ trail|length }} steps completed</div>
-    </div>
-
-    <!-- Action buttons -->
-    <div style="margin-top: 16px; display: flex; gap: 8px;">
-        <a href="/submissions/{{ sub.id }}/pipeline" class="verity-btn verity-btn-primary">
-            Run Pipeline
-        </a>
-        {% if sub.last_pipeline_run_id %}
-        <a href="http://localhost:8000/admin/audit-trail/run/{{ sub.last_pipeline_run_id }}" class="verity-btn verity-btn-secondary" target="_blank">
-            View Latest Run ↗
-        </a>
-        {% endif %}
-        {% if sub.last_execution_context_id %}
-        <a href="http://localhost:8000/admin/audit-trail/context/{{ sub.last_execution_context_id }}" class="verity-btn verity-btn-secondary" target="_blank" style="{% if sub.last_pipeline_run_id %}margin-left: 8px;{% endif %}">
-            View Full History ↗
-        </a>
-        {% endif %}
-        {% if not sub.last_pipeline_run_id and not sub.last_execution_context_id %}
-        <span class="verity-btn verity-btn-secondary" style="opacity: 0.4; cursor: default;">
-            No audit trail yet
-        </span>
-        {% endif %}
-    </div>
-</div>
-
-
-<!-- ── AI RESULTS ─────────────────────────────────────────── -->
-<div class="verity-section">
-    <h2 class="verity-section-title">AI Analysis Results</h2>
-
-    {% if trail %}
-        {% for entry in trail %}
-        <!-- One card per pipeline step -->
-        <div class="verity-card" style="margin-bottom: 12px; border-left: 3px solid {% if entry.entity_type == 'agent' %}var(--verity-blue-dark){% else %}var(--verity-blue){% endif %};">
-
-            <!-- Step header -->
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                <!-- Entity type badge -->
-                <span class="verity-badge verity-badge-{{ entry.entity_type }}">{{ entry.entity_type }}</span>
-
-                <!-- Step name and entity name -->
-                <span style="font-weight: 600;">
-                    {% if entry.step_name %}{{ entry.step_name }}{% else %}{{ entry.entity_display_name }}{% endif %}
-                </span>
-                <span style="color: var(--verity-text-light); font-size: 0.8rem;">
-                    {{ entry.entity_name }} v{{ entry.version_label }}
-                </span>
-
-                <!-- Status + confidence on the right -->
-                <span style="margin-left: auto; display: flex; gap: 6px; align-items: center;">
-                    {% if entry.confidence_score is not none %}
-                        <span style="font-size: 0.8rem; color: var(--verity-text-light);">
-                            {{ "%.0f"|format(entry.confidence_score * 100) }}% confidence
-                        </span>
+<!-- ── WORKFLOW STEPPER ───────────────────────────────────── -->
+<div class="verity-card verity-section">
+    <table class="verity-table">
+        <thead>
+            <tr>
+                <th>Step</th>
+                <th>Stage</th>
+                <th>Status</th>
+                <th>Completed</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for step in workflow_steps %}
+            <tr>
+                <td>
+                    {% if step.status == 'complete' %}
+                        <span class="verity-badge verity-badge-champion">{{ step.step_order }}</span>
+                    {% elif step.status == 'running' %}
+                        <span class="verity-badge verity-badge-pending">{{ step.step_order }}</span>
+                    {% elif step.status == 'skipped' %}
+                        <span class="verity-badge verity-badge-draft">{{ step.step_order }}</span>
+                    {% elif step.status == 'failed' %}
+                        <span class="verity-badge verity-badge-failed">{{ step.step_order }}</span>
+                    {% else %}
+                        <span class="verity-badge verity-badge-draft">{{ step.step_order }}</span>
                     {% endif %}
-                    {% if entry.duration_ms %}
-                        <span style="font-size: 0.75rem; color: var(--verity-text-light);">
-                            {{ entry.duration_ms }}ms
-                        </span>
+                </td>
+                <td class="verity-detail-value">{{ step.step_name | replace('_', ' ') | title }}</td>
+                <td>
+                    {% if step.status == 'complete' %}
+                        <span class="verity-badge verity-badge-complete">Complete</span>
+                    {% elif step.status == 'running' %}
+                        <span class="verity-badge verity-badge-pending">Running</span>
+                    {% elif step.status == 'skipped' %}
+                        <span class="verity-badge verity-badge-draft">Skipped</span>
+                    {% elif step.status == 'failed' %}
+                        <span class="verity-badge verity-badge-failed">Failed</span>
+                    {% else %}
+                        <span class="verity-badge verity-badge-draft">Pending</span>
                     {% endif %}
-                </span>
-            </div>
+                </td>
+                <td>
+                    {% if step.completed_at %}
+                        {{ step.completed_at.strftime('%b %d, %Y  %H:%M') }}
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
 
-            <!-- Output summary / key results -->
-            {% if entry.output_summary %}
-                {% set output = entry.output_summary %}
-
-                <!-- Try to show structured output nicely -->
-                {% if 'document_type' in output %}
-                    <!-- Classifier output -->
-                    <div class="verity-code" style="font-size: 0.85rem;">{{ output }}</div>
-
-                {% elif 'risk_score' in output %}
-                    <!-- Triage output — show risk score prominently -->
-                    <div class="verity-code" style="font-size: 0.85rem;">{{ output }}</div>
-
-                {% elif 'determination' in output %}
-                    <!-- Appetite output -->
-                    <div class="verity-code" style="font-size: 0.85rem;">{{ output }}</div>
-
-                {% else %}
-                    <!-- Generic output -->
-                    <div class="verity-code" style="font-size: 0.85rem;">{{ output }}</div>
-                {% endif %}
-            {% endif %}
-
-            <!-- Reasoning text (if available, for agents) -->
-            {% if entry.reasoning_text and entry.entity_type == 'agent' %}
-                <div style="margin-top: 8px; font-size: 0.85rem; color: var(--verity-text);">
-                    <strong>Reasoning:</strong> {{ entry.reasoning_text[:500] }}{% if entry.reasoning_text|length > 500 %}...{% endif %}
-                </div>
-            {% endif %}
-
-            <!-- Link to full decision in Verity -->
-            <div style="margin-top: 8px;">
-                <a href="http://localhost:8000/admin/decisions/{{ entry.decision_id }}"
-                   style="font-size: 0.75rem; color: var(--verity-blue-deep);"
-                   target="_blank">
-                    Full decision detail ↗
-                </a>
-            </div>
-        </div>
-        {% endfor %}
-    {% else %}
-        <!-- No AI results yet -->
-        <div class="verity-empty">
-            <div style="font-size: 2rem; opacity: 0.3;">⟿</div>
-            <div class="verity-empty-message">
-                No AI analysis yet. Click "Run Pipeline" to process this submission.
-            </div>
-        </div>
+    {% if run_id %}
+    <div class="verity-card-footer">
+        <a href="http://localhost:8000/admin/audit-trail/run/{{ run_id }}"
+           class="verity-btn verity-btn-secondary verity-btn-sm" target="_blank">
+            View in Verity ↗
+        </a>
+    </div>
     {% endif %}
 </div>
 
 
-<!-- ── OVERRIDES (if any) ─────────────────────────────────── -->
-{% if overrides %}
-<div class="verity-section">
-    <h2 class="verity-section-title">Human Overrides</h2>
+<!-- ── SUMMARY CARDS ─────────────────────────────────────── -->
+<div class="verity-stats-grid verity-section">
+    <div class="verity-card">
+        <div class="verity-card-value">{{ "${:,.0f}".format(sub.annual_revenue) if sub.annual_revenue else '—' }}</div>
+        <div class="verity-card-header">Annual Revenue</div>
+    </div>
+    <div class="verity-card">
+        <div class="verity-card-value">{{ sub.employee_count or '—' }}</div>
+        <div class="verity-card-header">Employees</div>
+    </div>
+    <div class="verity-card">
+        <div class="verity-card-value">{{ "${:,.0f}".format(sub.limits_requested) if sub.limits_requested else '—' }}</div>
+        <div class="verity-card-header">Limits Requested</div>
+    </div>
+    <div class="verity-card">
+        <div class="verity-card-value">{{ "${:,.0f}".format(sub.prior_premium) if sub.prior_premium else '—' }}</div>
+        <div class="verity-card-header">Prior Premium</div>
+    </div>
+</div>
 
-    {% for ov in overrides %}
-    <div class="verity-card" style="margin-bottom: 12px; border-left: 3px solid var(--verity-amber);">
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-            <span class="verity-badge verity-badge-shadow">override</span>
-            <span style="font-weight: 600;">{{ ov.overrider_name }}</span>
-            <span style="color: var(--verity-text-light); font-size: 0.8rem;">{{ ov.overrider_role }}</span>
+
+<!-- ── ASSESSMENT RESULTS (shown when available) ──────── -->
+{% if assessments %}
+<div class="verity-stats-grid verity-section">
+    {% if assessments.get('triage') %}
+    {% set triage = assessments.triage %}
+    <div class="verity-card">
+        <div class="verity-card-header">
+            Risk Triage
+            {% if triage.risk_score == 'Green' %}
+                <span class="verity-badge verity-badge-champion">{{ triage.risk_score }}</span>
+            {% elif triage.risk_score == 'Amber' %}
+                <span class="verity-badge verity-badge-shadow">{{ triage.risk_score }}</span>
+            {% elif triage.risk_score == 'Red' %}
+                <span class="verity-badge verity-badge-high">{{ triage.risk_score }}</span>
+            {% endif %}
         </div>
-
-        <div class="verity-detail-grid" style="margin-bottom: 8px;">
-            <div class="verity-detail-label">Reason</div>
-            <div class="verity-detail-value">{{ ov.override_reason_code | replace('_', ' ') | title }}</div>
-
-            <div class="verity-detail-label">AI Recommendation</div>
-            <div class="verity-detail-value verity-code" style="padding: 6px;">{{ ov.ai_recommendation }}</div>
-
-            <div class="verity-detail-label">Human Decision</div>
-            <div class="verity-detail-value verity-code" style="padding: 6px;">{{ ov.human_decision }}</div>
+        <div class="verity-detail-grid">
+            <div class="verity-detail-label">Routing</div>
+            <div class="verity-detail-value">{{ triage.routing | replace('_', ' ') | title if triage.routing else '—' }}</div>
+            <div class="verity-detail-label">Confidence</div>
+            <div class="verity-detail-value">{{ "%.0f"|format(triage.confidence * 100) if triage.confidence else '—' }}%</div>
         </div>
-
-        {% if ov.override_notes %}
-        <div style="font-size: 0.85rem; color: var(--verity-text); margin-top: 4px;">
-            <strong>Notes:</strong> {{ ov.override_notes }}
-        </div>
+        {% if triage.reasoning %}
+        <div class="verity-card-footer">{{ triage.reasoning }}</div>
         {% endif %}
     </div>
-    {% endfor %}
+    {% endif %}
+
+    {% if assessments.get('appetite') %}
+    {% set appetite = assessments.appetite %}
+    <div class="verity-card">
+        <div class="verity-card-header">
+            Appetite Assessment
+            {% if appetite.determination == 'within_appetite' %}
+                <span class="verity-badge verity-badge-champion">Within Appetite</span>
+            {% elif appetite.determination == 'borderline' %}
+                <span class="verity-badge verity-badge-shadow">Borderline</span>
+            {% elif appetite.determination == 'outside_appetite' %}
+                <span class="verity-badge verity-badge-high">Outside Appetite</span>
+            {% endif %}
+        </div>
+        <div class="verity-detail-grid">
+            <div class="verity-detail-label">Confidence</div>
+            <div class="verity-detail-value">{{ "%.0f"|format(appetite.confidence * 100) if appetite.confidence else '—' }}%</div>
+        </div>
+        {% if appetite.reasoning %}
+        <div class="verity-card-footer">{{ appetite.reasoning }}</div>
+        {% endif %}
+    </div>
+    {% endif %}
 </div>
 {% endif %}
+
+
+<!-- ── ACTION BAR ────────────────────────────────────────── -->
+<div class="verity-action-bar verity-section" id="action-bar">
+    {% if next_action %}
+        {% if next_action.get('method') == 'POST' %}
+        <form method="POST" action="{{ next_action.url }}" id="pipeline-form"
+              onsubmit="return handlePipelineSubmit()">
+            <button type="submit" class="verity-btn verity-btn-primary" id="pipeline-btn">
+                {{ next_action.label }}
+            </button>
+        </form>
+        <div id="pipeline-status" hidden>
+            <span class="verity-spinner"></span>
+            <span class="verity-detail-label">Pipeline running — this may take 15-30 seconds...</span>
+        </div>
+        {% elif next_action.get('tab') %}
+        <button class="verity-btn verity-btn-primary"
+                onclick="document.querySelector('[data-tab={{ next_action.tab }}]').click()">
+            {{ next_action.label }}
+        </button>
+        {% endif %}
+    {% else %}
+        <span class="verity-badge verity-badge-champion">Workflow Complete</span>
+    {% endif %}
+</div>
+
+
+<!-- ── TABS ──────────────────────────────────────────────── -->
+<div class="verity-tabs">
+    <button class="verity-tab active" data-tab="details"
+            hx-get="/submissions/{{ sub.id }}/tab/details"
+            hx-target="#tab-content"
+            hx-swap="innerHTML"
+            onclick="setActiveTab(this)">
+        Submission Details
+    </button>
+    <button class="verity-tab" data-tab="extraction"
+            hx-get="/submissions/{{ sub.id }}/tab/extraction"
+            hx-target="#tab-content"
+            hx-swap="innerHTML"
+            onclick="setActiveTab(this)">
+        Extracted Fields
+        {% if review_count > 0 %}
+            <span class="verity-tab-badge">{{ review_count }}</span>
+        {% endif %}
+    </button>
+    <button class="verity-tab" data-tab="assessment"
+            hx-get="/submissions/{{ sub.id }}/tab/assessment"
+            hx-target="#tab-content"
+            hx-swap="innerHTML"
+            onclick="setActiveTab(this)">
+        Risk Assessment
+    </button>
+    <button class="verity-tab" data-tab="loss-history"
+            hx-get="/submissions/{{ sub.id }}/tab/loss-history"
+            hx-target="#tab-content"
+            hx-swap="innerHTML"
+            onclick="setActiveTab(this)">
+        Loss History
+    </button>
+    <button class="verity-tab" data-tab="audit-trail"
+            hx-get="/submissions/{{ sub.id }}/tab/audit-trail"
+            hx-target="#tab-content"
+            hx-swap="innerHTML"
+            onclick="setActiveTab(this)">
+        Audit Trail
+    </button>
+</div>
+
+
+<!-- ── TAB CONTENT ───────────────────────────────────────── -->
+<div id="tab-content" class="verity-section">
+    {% include 'partials/_tab_details.html' %}
+</div>
+
+
+<script>
+function setActiveTab(el) {
+    document.querySelectorAll('.verity-tab').forEach(function(t) { t.classList.remove('active'); });
+    el.classList.add('active');
+}
+
+function handlePipelineSubmit() {
+    // Disable button to prevent double-click
+    var btn = document.getElementById('pipeline-btn');
+    var status = document.getElementById('pipeline-status');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Running...';
+        btn.classList.remove('verity-btn-primary');
+        btn.classList.add('verity-btn-secondary');
+    }
+    // Show running status
+    if (status) {
+        status.hidden = false;
+    }
+    // Also update the workflow step table to show "running"
+    var rows = document.querySelectorAll('#workflow-stepper tbody tr');
+    for (var i = 0; i < rows.length; i++) {
+        var statusCell = rows[i].querySelectorAll('td')[2];
+        if (statusCell) {
+            var badge = statusCell.querySelector('.verity-badge');
+            if (badge && badge.textContent.trim() === 'Pending') {
+                badge.className = 'verity-badge verity-badge-pending';
+                badge.textContent = 'Running';
+                break; // Only update the first pending step
+            }
+        }
+    }
+    return true; // Allow form submission
+}
+</script>
 
 {% endblock %}

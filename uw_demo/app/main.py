@@ -50,6 +50,7 @@ verity = Verity(
 from uw_demo.app.tools.submission_tools import (
     get_submission_context,
     get_loss_history,
+    store_extraction_result,
     store_triage_result,
     update_submission_event,
 )
@@ -62,11 +63,19 @@ verity.register_tool_implementation("get_loss_history", get_loss_history)
 verity.register_tool_implementation("get_underwriting_guidelines", get_underwriting_guidelines)
 verity.register_tool_implementation("get_documents_for_submission", get_documents_for_submission)
 verity.register_tool_implementation("get_enrichment_data", get_enrichment_data)
+verity.register_tool_implementation("store_extraction_result", store_extraction_result)
 verity.register_tool_implementation("store_triage_result", store_triage_result)
 verity.register_tool_implementation("update_submission_event", update_submission_event)
 verity.register_tool_implementation("update_appetite_status",
     lambda submission_id, determination, citations=None: {"stored": True, "determination": determination}
 )
+
+# ── EDMS DOCUMENT TOOLS ──────────────────────────────────────
+# Calls the EDMS service over HTTP (no package dependency).
+# In production, EDMS runs on a separate server.
+from uw_demo.app.tools.edms_tools import list_documents, get_document_text
+verity.register_tool_implementation("list_documents", list_documents)
+verity.register_tool_implementation("get_document_text", get_document_text)
 
 
 @asynccontextmanager

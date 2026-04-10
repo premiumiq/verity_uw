@@ -1,11 +1,11 @@
 <!--
-  SUBMISSIONS LIST PAGE — Browse all insurance submissions
+  SUBMISSIONS LIST — Underwriting queue dashboard
 
-  Shows a table of submissions with risk status badges,
-  line of business, named insured, and pipeline completion.
+  KPI summary cards (verity-stats-grid) then submissions table.
 
   DATA PASSED BY ROUTE:
-  - submissions: list of dicts with submission metadata and status
+  - submissions: list from uw_db enriched with risk_score, appetite
+  - status_counts: dict of status -> count
 -->
 {% extends "uw_base.html" %}
 
@@ -15,40 +15,70 @@
 
 {% block content %}
 
-<div style="margin-bottom: 16px; font-size: 0.85rem; color: var(--verity-text-light);">
-    {{ submissions|length }} submissions
+<!-- KPI Summary Cards -->
+<div class="verity-stats-grid">
+    <div class="verity-card">
+        <div class="verity-card-value">{{ status_counts.get('intake', 0) }}</div>
+        <div class="verity-card-header">Intake</div>
+    </div>
+    <div class="verity-card">
+        <div class="verity-card-value">{{ status_counts.get('documents_processed', 0) }}</div>
+        <div class="verity-card-header">Processing</div>
+    </div>
+    <div class="verity-card">
+        <div class="verity-card-value">{{ status_counts.get('review', 0) }}</div>
+        <div class="verity-card-header">Pending Review</div>
+    </div>
+    <div class="verity-card">
+        <div class="verity-card-value">{{ status_counts.get('approved', 0) }}</div>
+        <div class="verity-card-header">Ready to Assess</div>
+    </div>
+    <div class="verity-card">
+        <div class="verity-card-value">{{ status_counts.get('triaged', 0) + status_counts.get('assessed', 0) }}</div>
+        <div class="verity-card-header">Assessed</div>
+    </div>
+    <div class="verity-card">
+        <div class="verity-card-value">{{ submissions|length }}</div>
+        <div class="verity-card-header">Total</div>
+    </div>
 </div>
 
+<!-- Submissions Table -->
 <table class="verity-table">
     <thead>
         <tr>
-            <th>Submission</th>
             <th>Named Insured</th>
-            <th>Line of Business</th>
+            <th>LOB</th>
+            <th>Effective Date</th>
+            <th>Industry</th>
+            <th>Status</th>
             <th>Risk Score</th>
             <th>Appetite</th>
-            <th>Pipeline</th>
             <th></th>
         </tr>
     </thead>
     <tbody>
         {% for sub in submissions %}
         <tr class="clickable" onclick="window.location='/submissions/{{ sub.id }}'">
-
-            <!-- Short submission ID -->
-            <td style="font-family: monospace; font-size: 0.8rem;">
-                {{ sub.id[:8] }}...
-            </td>
-
-            <!-- Named insured -->
-            <td style="font-weight: 500;">{{ sub.named_insured }}</td>
-
-            <!-- Line of business badge -->
+            <td class="verity-detail-value">{{ sub.named_insured }}</td>
+            <td><span class="verity-badge verity-badge-agent">{{ sub.lob }}</span></td>
+            <td>{{ sub.effective_date.strftime('%b %d, %Y') if sub.effective_date else '—' }}</td>
+            <td>{{ sub.sic_description[:30] if sub.sic_description else '—' }}{% if sub.sic_description and sub.sic_description|length > 30 %}...{% endif %}</td>
             <td>
-                <span class="verity-badge verity-badge-agent">{{ sub.lob }}</span>
+                {% if sub.status == 'assessed' %}
+                    <span class="verity-badge verity-badge-champion">Assessed</span>
+                {% elif sub.status == 'triaged' %}
+                    <span class="verity-badge verity-badge-staging">Triaged</span>
+                {% elif sub.status == 'approved' %}
+                    <span class="verity-badge verity-badge-candidate">Approved</span>
+                {% elif sub.status == 'review' %}
+                    <span class="verity-badge verity-badge-shadow">Review</span>
+                {% elif sub.status == 'documents_processed' %}
+                    <span class="verity-badge verity-badge-staging">Docs Done</span>
+                {% else %}
+                    <span class="verity-badge verity-badge-draft">Intake</span>
+                {% endif %}
             </td>
-
-            <!-- Risk score badge (RAG colors) -->
             <td>
                 {% if sub.risk_score == 'Green' %}
                     <span class="verity-badge verity-badge-champion">Green</span>
@@ -57,33 +87,20 @@
                 {% elif sub.risk_score == 'Red' %}
                     <span class="verity-badge verity-badge-high">Red</span>
                 {% else %}
-                    <span class="verity-badge verity-badge-draft">—</span>
+                    —
                 {% endif %}
             </td>
-
-            <!-- Appetite determination -->
             <td>
                 {% if sub.appetite == 'within_appetite' %}
-                    <span class="verity-badge verity-badge-champion">within</span>
+                    <span class="verity-badge verity-badge-champion">Within</span>
                 {% elif sub.appetite == 'borderline' %}
-                    <span class="verity-badge verity-badge-shadow">borderline</span>
+                    <span class="verity-badge verity-badge-shadow">Borderline</span>
                 {% elif sub.appetite == 'outside_appetite' %}
-                    <span class="verity-badge verity-badge-high">outside</span>
+                    <span class="verity-badge verity-badge-high">Outside</span>
                 {% else %}
-                    <span class="verity-badge verity-badge-draft">—</span>
+                    —
                 {% endif %}
             </td>
-
-            <!-- Pipeline step count -->
-            <td>
-                {% if sub.has_override %}
-                    {{ sub.steps_complete }}/4 ⚠
-                {% else %}
-                    {{ sub.steps_complete }}/4
-                {% endif %}
-            </td>
-
-            <!-- View button -->
             <td>
                 <a href="/submissions/{{ sub.id }}" class="verity-btn verity-btn-secondary verity-btn-sm">View</a>
             </td>

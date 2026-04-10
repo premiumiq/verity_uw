@@ -19,7 +19,7 @@
 :root {
     /* Backgrounds */
     --verity-bg:            #FFFFFF;
-    --verity-bg-alt:        #8FAADC;
+    --verity-bg-alt:        #EDEDED;
     --verity-bg-sidebar:    #3A3A3A;
     --verity-bg-hover:      #E8EEF8;
     --verity-bg-selected:   #D2DDF1;
@@ -146,10 +146,11 @@ a:hover {
 
 .verity-sidebar-brand .verity-subtitle {
     color: var(--verity-blue);
-    font-size: 0.7rem;
+    font-size: 1.0rem;
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 2px;
     margin-top: 2px;
+    margin-left: 16px;
 }
 
 /* Navigation section in sidebar */
@@ -467,6 +468,15 @@ a:hover {
     margin-top: 8px;
 }
 
+/* Page description paragraph shown above tables on registry pages */
+.verity-page-description {
+    font-size: 0.82rem;
+    color: var(--verity-text-light);
+    line-height: 1.5;
+    margin: 0 0 16px 0;
+    max-width: 100%;
+}
+
 
 /* ── FORMS ─────────────────────────────────────────────────── */
 
@@ -529,4 +539,273 @@ a:hover {
     margin-bottom: 12px;
     padding-bottom: 6px;
     border-bottom: 1px solid var(--verity-border-light);
+}
+
+
+/* ── WORKFLOW STEPPER ────────────────────────────────────────
+   Horizontal step indicator with numbered circles and connectors.
+   Used on submission detail pages to show workflow progression.
+
+   States: -complete (green check), -active (blue pulse), -pending (gray)
+*/
+
+.verity-stepper {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 16px 0 20px;
+}
+
+.verity-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 110px;
+}
+
+.verity-step-circle {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border: 2px solid var(--verity-border);
+    background: var(--verity-bg);
+    color: var(--verity-text-light);
+    z-index: 1;
+    transition: all 0.3s ease;
+}
+
+.verity-step-complete .verity-step-circle {
+    background: var(--verity-green);
+    border-color: var(--verity-green);
+    color: white;
+}
+
+.verity-step-active .verity-step-circle {
+    background: var(--verity-blue-dark);
+    border-color: var(--verity-blue-dark);
+    color: white;
+    animation: verity-pulse 2s ease-in-out infinite;
+}
+
+.verity-step-failed .verity-step-circle {
+    background: var(--verity-red);
+    border-color: var(--verity-red);
+    color: white;
+}
+
+.verity-step-skipped .verity-step-circle {
+    background: var(--verity-gray-light);
+    border-color: var(--verity-gray-light);
+    color: white;
+}
+
+.verity-step-label {
+    margin-top: 6px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--verity-text-light);
+    text-align: center;
+    max-width: 100px;
+}
+
+.verity-step-complete .verity-step-label {
+    color: var(--verity-text);
+}
+
+.verity-step-time {
+    font-size: 0.6rem;
+    color: var(--verity-text-light);
+    margin-top: 2px;
+}
+
+.verity-step-connector {
+    flex: 1;
+    height: 2px;
+    background: var(--verity-border);
+    margin-top: 18px;
+    min-width: 30px;
+}
+
+.verity-step-connector.verity-connector-complete {
+    background: var(--verity-green);
+}
+
+@keyframes verity-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(64, 90, 138, 0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(64, 90, 138, 0); }
+}
+
+
+/* ── TABS ────────────────────────────────────────────────────
+   Horizontal tab navigation with underline indicator.
+   Works with HTMX for content swapping without page reload.
+*/
+
+.verity-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid var(--verity-border);
+    margin-bottom: 0;
+}
+
+.verity-tab {
+    padding: 10px 20px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--verity-text-light);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    cursor: pointer;
+    font-family: var(--verity-font);
+    transition: color 0.15s, border-color 0.15s;
+    position: relative;
+}
+
+.verity-tab:hover {
+    color: var(--verity-blue-dark);
+}
+
+.verity-tab.active {
+    color: var(--verity-blue-deep);
+    border-bottom-color: var(--verity-blue-deep);
+    font-weight: 600;
+}
+
+.verity-tab-badge {
+    display: inline-block;
+    background: var(--verity-red);
+    color: white;
+    font-size: 0.6rem;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
+
+/* ── ACTION BAR ──────────────────────────────────────────────
+   Contextual action button strip. Shows the next workflow action.
+*/
+
+.verity-action-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: var(--verity-gray-pale);
+    border: 1px solid var(--verity-border-light);
+    border-radius: 6px;
+    margin-bottom: 20px;
+}
+
+
+/* ── SPINNER ─────────────────────────────────────────────────
+   CSS-only loading spinner for async operations.
+*/
+
+.verity-spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--verity-border);
+    border-top: 2px solid var(--verity-blue-dark);
+    border-radius: 50%;
+    animation: verity-spin 0.8s linear infinite;
+    vertical-align: middle;
+}
+
+@keyframes verity-spin {
+    to { transform: rotate(360deg); }
+}
+
+
+/* ── KPI CARDS ───────────────────────────────────────────────
+   Summary metric cards for dashboards and list pages.
+*/
+
+.verity-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.verity-kpi-card {
+    background: var(--verity-bg);
+    border: 1px solid var(--verity-border);
+    border-radius: 6px;
+    padding: 12px 16px;
+    text-align: center;
+}
+
+.verity-kpi-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--verity-blue-deep);
+    line-height: 1.2;
+}
+
+.verity-kpi-label {
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--verity-text-light);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 4px;
+}
+
+
+/* ── SUMMARY CARDS ROW ───────────────────────────────────────
+   Horizontal row of key metric cards (revenue, employees, etc.)
+*/
+
+.verity-summary-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.verity-summary-card {
+    background: var(--verity-bg);
+    border: 1px solid var(--verity-border);
+    border-radius: 6px;
+    padding: 12px 16px;
+}
+
+.verity-summary-label {
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--verity-text-light);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.verity-summary-value {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--verity-text);
+    margin-top: 2px;
+}
+
+
+/* ── HTMX INDICATOR ──────────────────────────────────────────
+   Hidden by default, shown during HTMX requests.
+*/
+
+.htmx-indicator {
+    display: none;
+}
+
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator {
+    display: inline-block;
 }

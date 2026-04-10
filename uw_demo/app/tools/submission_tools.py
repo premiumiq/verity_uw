@@ -1,184 +1,287 @@
-"""Submission Tools — return realistic insurance submission data.
+"""Submission Tools — read/write submission data from uw_db.
 
 These are the tool implementations that Claude calls during agent execution.
-For the demo, they return hardcoded realistic data keyed by submission_id.
-In production, these would query pas_db and external APIs.
+Each function queries uw_db (the underwriting database) for real data.
+
+All functions are async because they use psycopg3 async connections.
+The execution engine checks asyncio.iscoroutinefunction() and awaits them.
 
 Each function's signature must match the tool's registered input_schema.
-The execution engine calls these as: func(**tool_input) where tool_input
-is the dict Claude provides.
+The execution engine calls these as: await func(**tool_input) where
+tool_input is the dict Claude provides.
 """
 
+import psycopg
 
-# ── MOCK SUBMISSION DATA ──────────────────────────────────────
-# Realistic D&O and GL submission profiles for the 4 demo submissions.
-
-_SUBMISSIONS = {
-    "00000001-0001-0001-0001-000000000001": {
-        "account": {
-            "name": "Acme Dynamics LLC",
-            "fein": "12-3456789",
-            "entity_type": "LLC",
-            "state_of_incorporation": "Delaware",
-            "sic_code": "3559",
-            "sic_description": "Special Industry Machinery",
-            "years_in_business": 15,
-        },
-        "submission": {
-            "id": "00000001-0001-0001-0001-000000000001",
-            "lob": "DO",
-            "named_insured": "Acme Dynamics LLC",
-            "annual_revenue": 50000000,
-            "employee_count": 250,
-            "board_size": 7,
-            "independent_directors": 4,
-            "effective_date": "2026-07-01",
-            "expiration_date": "2027-07-01",
-            "limits_requested": 5000000,
-            "retention_requested": 100000,
-            "prior_carrier": "National Union",
-            "prior_premium": 45000,
-        },
-        "loss_history": [
-            {"year": 2023, "claims": 0, "incurred": 0, "paid": 0, "reserves": 0},
-            {"year": 2024, "claims": 0, "incurred": 0, "paid": 0, "reserves": 0},
-            {"year": 2025, "claims": 0, "incurred": 0, "paid": 0, "reserves": 0},
-        ],
-    },
-    "00000002-0002-0002-0002-000000000002": {
-        "account": {
-            "name": "TechFlow Industries Inc",
-            "fein": "98-7654321",
-            "entity_type": "Corporation",
-            "state_of_incorporation": "California",
-            "sic_code": "7372",
-            "sic_description": "Prepackaged Software",
-            "years_in_business": 8,
-        },
-        "submission": {
-            "id": "00000002-0002-0002-0002-000000000002",
-            "lob": "DO",
-            "named_insured": "TechFlow Industries Inc",
-            "annual_revenue": 120000000,
-            "employee_count": 800,
-            "board_size": 9,
-            "independent_directors": 5,
-            "effective_date": "2026-06-01",
-            "expiration_date": "2027-06-01",
-            "limits_requested": 10000000,
-            "retention_requested": 250000,
-            "prior_carrier": "AIG",
-            "prior_premium": 125000,
-            "regulatory_investigation": "SEC inquiry pending — routine review of revenue recognition practices",
-            "board_changes": "3 directors replaced in last 12 months",
-        },
-        "loss_history": [
-            {"year": 2023, "claims": 1, "incurred": 75000, "paid": 50000, "reserves": 25000},
-            {"year": 2024, "claims": 0, "incurred": 0, "paid": 0, "reserves": 0},
-            {"year": 2025, "claims": 1, "incurred": 150000, "paid": 0, "reserves": 150000},
-        ],
-    },
-    "00000003-0003-0003-0003-000000000003": {
-        "account": {
-            "name": "Meridian Holdings Corp",
-            "fein": "55-1234567",
-            "entity_type": "Corporation",
-            "state_of_incorporation": "New York",
-            "sic_code": "6159",
-            "sic_description": "Federal-Sponsored Credit Agencies",
-            "years_in_business": 22,
-        },
-        "submission": {
-            "id": "00000003-0003-0003-0003-000000000003",
-            "lob": "GL",
-            "named_insured": "Meridian Holdings Corp",
-            "annual_revenue": 25000000,
-            "employee_count": 150,
-            "effective_date": "2026-09-01",
-            "expiration_date": "2027-09-01",
-            "limits_requested": 2000000,
-            "retention_requested": 50000,
-            "prior_carrier": "Hartford",
-            "prior_premium": 35000,
-            "going_concern_opinion": True,
-            "auditor_note": "Qualified opinion — substantial doubt about ability to continue as going concern",
-        },
-        "loss_history": [
-            {"year": 2023, "claims": 5, "incurred": 320000, "paid": 280000, "reserves": 40000},
-            {"year": 2024, "claims": 4, "incurred": 185000, "paid": 150000, "reserves": 35000},
-            {"year": 2025, "claims": 3, "incurred": 95000, "paid": 60000, "reserves": 35000},
-        ],
-    },
-    "00000004-0004-0004-0004-000000000004": {
-        "account": {
-            "name": "Acme Dynamics LLC",
-            "fein": "12-3456789",
-            "entity_type": "LLC",
-            "state_of_incorporation": "Delaware",
-            "sic_code": "3559",
-            "sic_description": "Special Industry Machinery",
-            "years_in_business": 15,
-        },
-        "submission": {
-            "id": "00000004-0004-0004-0004-000000000004",
-            "lob": "GL",
-            "named_insured": "Acme Dynamics LLC",
-            "annual_revenue": 50000000,
-            "employee_count": 250,
-            "effective_date": "2026-07-01",
-            "expiration_date": "2027-07-01",
-            "limits_requested": 3000000,
-            "retention_requested": 75000,
-            "prior_carrier": "Travelers",
-            "prior_premium": 28000,
-            "manufacturing_operations": True,
-            "products_liability_exposure": "Industrial machinery components sold to OEMs",
-        },
-        "loss_history": [
-            {"year": 2023, "claims": 1, "incurred": 45000, "paid": 45000, "reserves": 0},
-            {"year": 2024, "claims": 2, "incurred": 80000, "paid": 60000, "reserves": 20000},
-            {"year": 2025, "claims": 2, "incurred": 65000, "paid": 40000, "reserves": 25000},
-        ],
-    },
-}
+from uw_demo.app.config import settings
 
 
-# ── TOOL IMPLEMENTATIONS ──────────────────────────────────────
+async def _get_conn():
+    """Get an async database connection to uw_db."""
+    return await psycopg.AsyncConnection.connect(settings.UW_DB_URL)
 
-def get_submission_context(submission_id: str) -> dict:
-    """Returns full submission data: account, submission details, loss history.
+
+# ── READ TOOLS ───────────────────────────────────────────────
+
+async def get_submission_context(submission_id: str) -> dict:
+    """Returns full submission data: account info, policy details, loss history.
 
     Called by triage_agent and appetite_agent to gather context
-    before making their assessment.
+    before making their assessment. Reads finalized data from uw_db
+    (post-HITL if any extraction overrides were made).
     """
-    data = _SUBMISSIONS.get(submission_id)
-    if not data:
-        return {"error": f"Submission {submission_id} not found"}
-    return data
+    async with await _get_conn() as conn:
+        async with conn.cursor() as cur:
+            # Get submission record
+            await cur.execute(
+                "SELECT * FROM submission WHERE id = %s", (submission_id,)
+            )
+            row = await cur.fetchone()
+            if not row:
+                return {"error": f"Submission {submission_id} not found"}
+
+            # Column names from cursor description
+            cols = [d.name for d in cur.description]
+            sub = dict(zip(cols, row))
+
+            # Get finalized extracted fields (overridden values take precedence)
+            await cur.execute(
+                """SELECT field_name,
+                    CASE WHEN overridden THEN override_value ELSE extracted_value END AS value,
+                    confidence, overridden, needs_review
+                FROM submission_extraction
+                WHERE submission_id = %s""",
+                (submission_id,),
+            )
+            extractions = await cur.fetchall()
+            extracted_fields = {}
+            for field_name, value, confidence, overridden, needs_review in extractions:
+                extracted_fields[field_name] = {
+                    "value": value,
+                    "confidence": float(confidence) if confidence else None,
+                    "overridden": overridden,
+                }
+
+            # Get loss history
+            await cur.execute(
+                """SELECT policy_year, claims_count, incurred, paid, reserves
+                FROM loss_history
+                WHERE submission_id = %s
+                ORDER BY policy_year""",
+                (submission_id,),
+            )
+            loss_rows = await cur.fetchall()
+            loss_history = [
+                {"year": y, "claims": c, "incurred": float(i), "paid": float(p), "reserves": float(r)}
+                for y, c, i, p, r in loss_rows
+            ]
+
+    # Build response in the same structure agents expect
+    return {
+        "account": {
+            "name": sub["named_insured"],
+            "fein": sub.get("fein"),
+            "entity_type": sub.get("entity_type"),
+            "state_of_incorporation": sub.get("state_of_incorporation"),
+            "sic_code": sub.get("sic_code"),
+            "sic_description": sub.get("sic_description"),
+        },
+        "submission": {
+            "id": str(sub["id"]),
+            "lob": sub["lob"],
+            "named_insured": sub["named_insured"],
+            "annual_revenue": sub.get("annual_revenue"),
+            "employee_count": sub.get("employee_count"),
+            "board_size": sub.get("board_size"),
+            "independent_directors": sub.get("independent_directors"),
+            "effective_date": str(sub["effective_date"]) if sub.get("effective_date") else None,
+            "expiration_date": str(sub["expiration_date"]) if sub.get("expiration_date") else None,
+            "limits_requested": sub.get("limits_requested"),
+            "retention_requested": sub.get("retention_requested"),
+            "prior_carrier": sub.get("prior_carrier"),
+            "prior_premium": sub.get("prior_premium"),
+            "status": sub.get("status"),
+        },
+        "extracted_fields": extracted_fields,
+        "loss_history": loss_history,
+    }
 
 
-def get_loss_history(account_id: str) -> dict:
-    """Returns loss history for an account.
+async def get_loss_history(account_id: str) -> dict:
+    """Returns loss history for a submission.
 
     Note: In the demo, account_id maps to submission_id since
     we don't have a separate account table.
     """
-    data = _SUBMISSIONS.get(account_id)
-    if data:
-        return {
-            "account": data["account"]["name"],
-            "years": data["loss_history"],
-            "total_claims": sum(y["claims"] for y in data["loss_history"]),
-            "total_incurred": sum(y["incurred"] for y in data["loss_history"]),
-        }
-    return {"error": f"Account {account_id} not found", "years": [], "total_claims": 0, "total_incurred": 0}
+    async with await _get_conn() as conn:
+        async with conn.cursor() as cur:
+            # Get insured name
+            await cur.execute(
+                "SELECT named_insured FROM submission WHERE id = %s",
+                (account_id,),
+            )
+            row = await cur.fetchone()
+            account_name = row[0] if row else "Unknown"
+
+            # Get loss history
+            await cur.execute(
+                """SELECT policy_year, claims_count, incurred, paid, reserves
+                FROM loss_history
+                WHERE submission_id = %s
+                ORDER BY policy_year""",
+                (account_id,),
+            )
+            rows = await cur.fetchall()
+
+    years = [
+        {"year": y, "claims": c, "incurred": float(i), "paid": float(p), "reserves": float(r)}
+        for y, c, i, p, r in rows
+    ]
+    return {
+        "account": account_name,
+        "years": years,
+        "total_claims": sum(y["claims"] for y in years),
+        "total_incurred": sum(y["incurred"] for y in years),
+    }
 
 
-def store_triage_result(submission_id: str, risk_score: str, routing: str = "", reasoning: str = "") -> dict:
-    """Stores the triage result. In demo, just acknowledges the write."""
+# ── WRITE TOOLS ──────────────────────────────────────────────
+
+async def store_extraction_result(
+    submission_id: str,
+    fields: dict,
+    low_confidence_fields: list = None,
+    unextractable_fields: list = None,
+    source_document_id: str = None,
+) -> dict:
+    """Store extracted fields in uw_db.
+
+    Writes one row per field to submission_extraction. Flags
+    low-confidence and missing fields for HITL review.
+
+    Args:
+        submission_id: UUID of the submission.
+        fields: Dict of field_name -> {value, confidence, note}.
+        low_confidence_fields: List of field names with low confidence.
+        unextractable_fields: List of field names that couldn't be extracted.
+        source_document_id: EDMS document ID the fields came from.
+    """
+    low_conf = set(low_confidence_fields or [])
+    unextractable = set(unextractable_fields or [])
+    stored = 0
+    flagged = 0
+
+    async with await _get_conn() as conn:
+        async with conn.cursor() as cur:
+            for field_name, field_data in fields.items():
+                value = field_data.get("value") if isinstance(field_data, dict) else field_data
+                confidence = field_data.get("confidence", 0.0) if isinstance(field_data, dict) else 0.0
+                note = field_data.get("note", "") if isinstance(field_data, dict) else ""
+
+                # Determine if this field needs review
+                needs_review = False
+                review_reason = None
+                if field_name in unextractable:
+                    needs_review = True
+                    review_reason = "missing"
+                elif field_name in low_conf:
+                    needs_review = True
+                    review_reason = "low_confidence"
+                elif confidence is not None and confidence < 0.70:
+                    needs_review = True
+                    review_reason = "low_confidence"
+
+                if needs_review:
+                    flagged += 1
+
+                # Upsert — update if re-running extraction
+                await cur.execute(
+                    """INSERT INTO submission_extraction (
+                        submission_id, field_name, extracted_value,
+                        confidence, extraction_notes, needs_review, review_reason,
+                        source_document_id
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (submission_id, field_name)
+                    DO UPDATE SET
+                        extracted_value = EXCLUDED.extracted_value,
+                        confidence = EXCLUDED.confidence,
+                        extraction_notes = EXCLUDED.extraction_notes,
+                        needs_review = EXCLUDED.needs_review,
+                        review_reason = EXCLUDED.review_reason,
+                        source_document_id = EXCLUDED.source_document_id
+                    """,
+                    (
+                        submission_id, field_name, str(value) if value is not None else None,
+                        confidence, note, needs_review, review_reason,
+                        source_document_id,
+                    ),
+                )
+                stored += 1
+
+            # Update submission status
+            status = "review" if flagged > 0 else "documents_processed"
+            await cur.execute(
+                "UPDATE submission SET status = %s, updated_at = NOW() WHERE id = %s",
+                (status, submission_id),
+            )
+
+        await conn.commit()
+
+    return {"stored": True, "fields_stored": stored, "fields_flagged": flagged}
+
+
+async def store_triage_result(
+    submission_id: str,
+    risk_score: str,
+    routing: str = "",
+    reasoning: str = "",
+) -> dict:
+    """Stores the triage agent's risk assessment in uw_db."""
+    import json
+
+    result = {
+        "risk_score": risk_score,
+        "routing": routing,
+        "reasoning": reasoning,
+    }
+
+    async with await _get_conn() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """INSERT INTO submission_assessment (
+                    submission_id, assessment_type, result,
+                    risk_score, routing, reasoning
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (submission_id, assessment_type)
+                DO UPDATE SET
+                    result = EXCLUDED.result,
+                    risk_score = EXCLUDED.risk_score,
+                    routing = EXCLUDED.routing,
+                    reasoning = EXCLUDED.reasoning,
+                    created_at = NOW()
+                """,
+                (
+                    submission_id, "triage", json.dumps(result),
+                    risk_score, routing, reasoning,
+                ),
+            )
+            await cur.execute(
+                "UPDATE submission SET status = 'triaged', updated_at = NOW() WHERE id = %s",
+                (submission_id,),
+            )
+        await conn.commit()
+
     return {"stored": True, "submission_id": submission_id, "risk_score": risk_score}
 
 
-def update_submission_event(submission_id: str, event_type: str, details: dict = None) -> dict:
-    """Logs a workflow event. In demo, just acknowledges."""
-    return {"event_id": f"evt-{submission_id[:8]}", "event_type": event_type, "logged": True}
+async def update_submission_event(
+    submission_id: str,
+    event_type: str,
+    details: dict = None,
+) -> dict:
+    """Logs a workflow event. Currently just acknowledges."""
+    return {
+        "event_id": f"evt-{submission_id[:8]}",
+        "event_type": event_type,
+        "logged": True,
+    }

@@ -33,13 +33,14 @@ class Settings:
     VERITY_DB_URL: str = os.getenv(
         "VERITY_DB_URL", "postgresql://verityuser:veritypass123@localhost:5432/verity_db"
     )
-    PAS_DB_URL: str = os.getenv(
-        "PAS_DB_URL", "postgresql://verityuser:veritypass123@localhost:5432/pas_db"
+    UW_DB_URL: str = os.getenv(
+        "UW_DB_URL", "postgresql://verityuser:veritypass123@localhost:5432/uw_db"
     )
     MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "localhost:9000")
     MINIO_ACCESS_KEY: str = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
     MINIO_SECRET_KEY: str = os.getenv("MINIO_SECRET_KEY", "minioadmin123")
     MINIO_SECURE: bool = os.getenv("MINIO_SECURE", "false").lower() == "true"
+    EDMS_URL: str = os.getenv("EDMS_URL", "http://localhost:8002")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
     APP_ENV: str = os.getenv("APP_ENV", "demo")
 

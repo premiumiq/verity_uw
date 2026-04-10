@@ -1,0 +1,40 @@
+<!-- Tab: Loss History — claims data per policy year -->
+
+{% if not loss_history %}
+<div class="verity-empty">
+    <div class="verity-empty-message">No loss history data available.</div>
+</div>
+
+{% else %}
+<table class="verity-table">
+    <thead>
+        <tr>
+            <th>Policy Year</th>
+            <th>Claims</th>
+            <th>Incurred</th>
+            <th>Paid</th>
+            <th>Reserves</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for loss in loss_history %}
+        <tr>
+            <td>{{ loss.policy_year }}</td>
+            <td>{{ loss.claims_count }}</td>
+            <td>{{ "${:,.2f}".format(loss.incurred) }}</td>
+            <td>{{ "${:,.2f}".format(loss.paid) }}</td>
+            <td>{{ "${:,.2f}".format(loss.reserves) }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+    <tfoot>
+        <tr>
+            <td><strong>Total</strong></td>
+            <td><strong>{{ total_claims }}</strong></td>
+            <td><strong>{{ "${:,.2f}".format(total_incurred) }}</strong></td>
+            <td><strong>{{ "${:,.2f}".format(total_paid) }}</strong></td>
+            <td><strong>{{ "${:,.2f}".format(total_reserves) }}</strong></td>
+        </tr>
+    </tfoot>
+</table>
+{% endif %}
