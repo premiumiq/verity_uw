@@ -6,6 +6,7 @@ support via asyncio.gather. Each step is a governed Verity execution
 """
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -13,7 +14,10 @@ from uuid import UUID, uuid4
 
 from verity.core.execution import ExecutionEngine, ExecutionResult
 from verity.core.registry import Registry
+from verity.utils.logging import pipeline_run_id_var, step_name_var
 from verity.models.pipeline import PipelineStep
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -68,6 +72,7 @@ class PipelineExecutor:
         """
         start_ms = _now_ms()
         pipeline_run_id = uuid4()
+        pipeline_run_id_var.set(str(pipeline_run_id))
 
         # Load pipeline config
         pipeline = await self.registry.get_pipeline_by_name(pipeline_name)
@@ -83,6 +88,10 @@ class PipelineExecutor:
 
         steps = [PipelineStep(**s) if isinstance(s, dict) else s for s in steps_json]
         version_number = pipeline.get("champion_version_number", 1)
+
+        step_names = [s.step_name if isinstance(s, PipelineStep) else s.get("step_name", "?") for s in steps]
+        logger.info("Pipeline run starting: %s (run_id=%s, steps=%s, mock=%s)",
+                     pipeline_name, str(pipeline_run_id)[:8], step_names, mock is not None)
 
         # Build execution plan: group by step_order, resolve dependencies
         execution_groups = _build_execution_groups(steps)
@@ -207,6 +216,11 @@ class PipelineExecutor:
         else:
             overall_status = "complete"
 
+        logger.info("Pipeline run complete: %s (run_id=%s, status=%s, %dms, "
+                     "completed=%d, failed=%d, skipped=%d)",
+                     pipeline_name, str(pipeline_run_id)[:8], overall_status,
+                     duration_ms, len(completed), len(failed), len(skipped))
+
         return PipelineResult(
             pipeline_run_id=pipeline_run_id,
             pipeline_name=pipeline_name,
@@ -231,6 +245,8 @@ class PipelineExecutor:
     ) -> StepResult:
         """Execute a single pipeline step (agent, task, or tool)."""
         start_ms = _now_ms()
+        step_name_var.set(step.step_name)
+        logger.info("Step starting: %s (%s: %s)", step.step_name, step.entity_type, step.entity_name)
 
         # Build step context: original context + accumulated outputs from prior steps
         step_context = dict(context)
@@ -284,7 +300,13 @@ class PipelineExecutor:
                     duration_ms=_now_ms() - start_ms,
                 )
 
+            duration_ms = _now_ms() - start_ms
             status = "complete" if exec_result.status == "complete" else "failed"
+            if status == "complete":
+                logger.info("Step complete: %s (%dms)", step.step_name, duration_ms)
+            else:
+                logger.error("Step failed: %s (%dms) — %s",
+                              step.step_name, duration_ms, exec_result.error_message)
             return StepResult(
                 step_name=step.step_name,
                 entity_type=entity_type,
@@ -292,17 +314,19 @@ class PipelineExecutor:
                 status=status,
                 execution_result=exec_result,
                 error_message=exec_result.error_message,
-                duration_ms=_now_ms() - start_ms,
+                duration_ms=duration_ms,
             )
 
         except Exception as e:
+            duration_ms = _now_ms() - start_ms
+            logger.error("Step exception: %s (%dms)", step.step_name, duration_ms, exc_info=True)
             return StepResult(
                 step_name=step.step_name,
                 entity_type=step.entity_type.value,
                 entity_name=step.entity_name,
                 status="failed",
                 error_message=str(e),
-                duration_ms=_now_ms() - start_ms,
+                duration_ms=duration_ms,
             )
 
 

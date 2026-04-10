@@ -16,8 +16,11 @@ NOTE ON STARLETTE 1.0: TemplateResponse signature is:
     (request is the FIRST argument, not inside the context dict)
 """
 
+import logging
 from enum import Enum
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
@@ -202,7 +205,7 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
                 prompts = config.prompts
                 tools = config.tools
             except Exception:
-                pass
+                logger.warning("Could not load champion config for detail page", exc_info=True)
 
             model_cards = await verity.testing.list_model_cards("agent", champion_id)
             validation = await verity.testing.get_latest_validation("agent", champion_id)
@@ -254,7 +257,7 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
                 prompts = config.prompts
                 tools = config.tools
             except Exception:
-                pass
+                logger.warning("Could not load champion config for detail page", exc_info=True)
 
             model_cards = await verity.testing.list_model_cards("task", champion_id)
             validation = await verity.testing.get_latest_validation("task", champion_id)

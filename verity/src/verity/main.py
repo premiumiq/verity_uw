@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 
 from verity.core.client import Verity
+from verity.utils.logging import CorrelationMiddleware, setup_logging
 from verity.web.app import create_verity_web
 
 
@@ -33,6 +34,8 @@ if _env_file.exists():
             if key.strip() not in os.environ:
                 os.environ[key.strip()] = value.strip()
 
+# Configure structured logging before anything else
+setup_logging(service_name="verity")
 
 # Database URL — Verity's own database
 VERITY_DB_URL = os.getenv(
@@ -58,6 +61,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Correlation ID middleware — generates/propagates trace IDs across requests
+app.add_middleware(CorrelationMiddleware)
 
 
 # Root redirects to the admin UI

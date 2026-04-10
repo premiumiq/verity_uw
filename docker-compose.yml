@@ -62,6 +62,11 @@ services:
       dockerfile: edms/Dockerfile
     container_name: edms_service
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     environment:
       EDMS_DB_URL: postgresql://verityuser:veritypass123@postgres:5432/edms_db
       MINIO_ENDPOINT: minio:9000
@@ -94,6 +99,11 @@ services:
       dockerfile: Dockerfile
     container_name: verity_app
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     environment:
       VERITY_DB_URL: postgresql://verityuser:veritypass123@postgres:5432/verity_db
       APP_ENV: demo
@@ -126,6 +136,11 @@ services:
       dockerfile: Dockerfile
     container_name: uw_demo_app
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     environment:
       VERITY_DB_URL: postgresql://verityuser:veritypass123@postgres:5432/verity_db
       UW_DB_URL: postgresql://verityuser:veritypass123@postgres:5432/uw_db

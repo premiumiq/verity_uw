@@ -21,6 +21,7 @@ All modes log decisions identically — the governance trail is the same.
 
 import asyncio
 import json
+import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -28,6 +29,8 @@ from typing import Any, AsyncGenerator, Callable, Optional
 from uuid import UUID
 
 import anthropic
+
+logger = logging.getLogger(__name__)
 
 from verity.core.decisions import Decisions
 from verity.core.mock_context import MockContext
@@ -130,9 +133,6 @@ class ExecutionEngine:
                 "No Anthropic API key configured. Pass mock=MockContext(...) "
                 "to run without Claude, or set ANTHROPIC_API_KEY."
             )
-
-        import logging
-        logger = logging.getLogger("verity.execution")
 
         max_retries = 3
         base_delay = 2.0  # seconds
@@ -253,10 +253,13 @@ class ExecutionEngine:
                 "error": True,
             }
         try:
+            logger.info("Tool call starting: %s (call_order=%d)", tool_name, call_order)
+            tool_start = _now_ms()
             if asyncio.iscoroutinefunction(impl):
                 result = await impl(**tool_input)
             else:
                 result = impl(**tool_input)
+            logger.info("Tool call complete: %s (%dms)", tool_name, _now_ms() - tool_start)
             return {
                 "tool_name": tool_name,
                 "call_order": call_order,
@@ -264,6 +267,7 @@ class ExecutionEngine:
                 "output_data": result,
             }
         except Exception as e:
+            logger.error("Tool execution failed: %s", tool_name, exc_info=True)
             return {
                 "tool_name": tool_name,
                 "call_order": call_order,
@@ -292,6 +296,9 @@ class ExecutionEngine:
     ) -> ExecutionResult:
         """Execute an agent with full governance and mock support."""
         start_ms = _now_ms()
+        is_mock = mock is not None and mock.is_simple_mock
+        logger.info("Agent execution starting: %s (step=%s, mock=%s)",
+                     agent_name, step_name or "standalone", is_mock)
         config = await self.registry.get_agent_config(agent_name)
         system_prompt, user_messages = _assemble_prompts(config.prompts, context)
         tools = _build_tool_definitions(config.tools)
@@ -408,6 +415,9 @@ class ExecutionEngine:
                 execution_context_id=execution_context_id,
             )
 
+            logger.info("Agent execution complete: %s (%dms, %d tool calls, %d+%d tokens)",
+                         agent_name, duration_ms, len(tool_calls_made),
+                         total_input_tokens, total_output_tokens)
             return ExecutionResult(
                 decision_log_id=log_result["decision_log_id"],
                 entity_type="agent", entity_name=agent_name,
@@ -423,6 +433,7 @@ class ExecutionEngine:
 
         except Exception as e:
             duration_ms = _now_ms() - start_ms
+            logger.error("Agent execution failed: %s (%dms)", agent_name, duration_ms, exc_info=True)
             log_result = await self._log_decision(
                 entity_type=EntityType.AGENT, config=config, context=context,
                 output={}, output_text="", tool_calls_made=[], message_history=[],
@@ -461,6 +472,8 @@ class ExecutionEngine:
         execution_context_id: Optional[UUID] = None,
     ) -> ExecutionResult:
         """Execute a task with single-turn structured output and mock support."""
+        logger.info("Task execution starting: %s (step=%s, mock=%s)",
+                     task_name, step_name or "standalone", mock is not None)
         start_ms = _now_ms()
         config = await self.registry.get_task_config(task_name)
         system_prompt, user_messages = _assemble_prompts(config.prompts, input_data)
@@ -546,6 +559,9 @@ class ExecutionEngine:
                 execution_context_id=execution_context_id,
             )
 
+            logger.info("Task execution complete: %s (%dms, %d+%d tokens)",
+                         task_name, duration_ms,
+                         response.usage.input_tokens, response.usage.output_tokens)
             return ExecutionResult(
                 decision_log_id=log_result["decision_log_id"],
                 entity_type="task", entity_name=task_name,
@@ -558,11 +574,12 @@ class ExecutionEngine:
 
         except Exception as e:
             duration_ms = _now_ms() - start_ms
+            logger.error("Task execution failed: %s (%dms)", task_name, duration_ms, exc_info=True)
             log_result = await self._log_decision(
                 entity_type=EntityType.TASK, config=config, context=input_data,
                 output={}, output_text="", tool_calls_made=[], message_history=[],
                 total_input_tokens=0, total_output_tokens=0,
-                duration_ms=duration_ms, 
+                duration_ms=duration_ms,
                 channel=channel, pipeline_run_id=pipeline_run_id,
                 parent_decision_id=parent_decision_id,
                 decision_depth=decision_depth, step_name=step_name,
