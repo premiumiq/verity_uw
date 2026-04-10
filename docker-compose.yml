@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_USER: verityuser
       POSTGRES_PASSWORD: veritypass123
-      POSTGRES_MULTIPLE_DATABASES: verity_db,pas_db,edms_db
+      POSTGRES_MULTIPLE_DATABASES: verity_db,uw_db,edms_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init.sh
@@ -128,10 +128,9 @@ services:
     restart: unless-stopped
     environment:
       VERITY_DB_URL: postgresql://verityuser:veritypass123@postgres:5432/verity_db
-      PAS_DB_URL: postgresql://verityuser:veritypass123@postgres:5432/pas_db
+      UW_DB_URL: postgresql://verityuser:veritypass123@postgres:5432/uw_db
       EDMS_URL: http://edms:8002
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      APP_ENV: demo
     volumes:
       - ./verity:/app/verity
       - ./uw_demo:/app/uw_demo

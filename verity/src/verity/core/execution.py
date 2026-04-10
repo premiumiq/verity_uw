@@ -122,13 +122,52 @@ class ExecutionEngine:
             if next_response is not None:
                 return _build_mock_llm_response(next_response)
 
-        # No mock — make real Claude API call (async — won't block event loop)
+        # No mock — make real Claude API call with retry + exponential backoff.
+        # Handles transient errors: 429 (rate limited), 529 (overloaded),
+        # 500 (server error), and network timeouts.
         if not self.client:
             raise RuntimeError(
                 "No Anthropic API key configured. Pass mock=MockContext(...) "
                 "to run without Claude, or set ANTHROPIC_API_KEY."
             )
-        return await self.client.messages.create(**api_params)
+
+        import logging
+        logger = logging.getLogger("verity.execution")
+
+        max_retries = 3
+        base_delay = 2.0  # seconds
+
+        for attempt in range(max_retries + 1):
+            try:
+                return await self.client.messages.create(**api_params)
+            except anthropic.APIStatusError as e:
+                # Retry on transient errors (429, 529, 500, 502, 503)
+                retryable = e.status_code in (429, 500, 502, 503, 529)
+                if retryable and attempt < max_retries:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(
+                        f"Claude API error {e.status_code} (attempt {attempt + 1}/{max_retries + 1}), "
+                        f"retrying in {delay:.1f}s: {e.message}"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                # Non-retryable or exhausted retries
+                logger.error(
+                    f"Claude API error {e.status_code} after {attempt + 1} attempts: {e.message}"
+                )
+                raise
+            except anthropic.APIConnectionError as e:
+                # Network error — always retry
+                if attempt < max_retries:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(
+                        f"Claude API connection error (attempt {attempt + 1}/{max_retries + 1}), "
+                        f"retrying in {delay:.1f}s: {e}"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                logger.error(f"Claude API connection error after {attempt + 1} attempts: {e}")
+                raise
 
     async def _gateway_tool_call(
         self,
@@ -717,12 +756,21 @@ class ExecutionEngine:
 
 def _assemble_prompts(
     prompts: list[PromptAssignment], context: dict[str, Any]
-) -> tuple[str, list[str]]:
+) -> tuple[str, list]:
     """Assemble prompts into system prompt and user messages.
 
     Validates that all declared template variables are present in the
     context dict. Raises ValueError if any are missing, so the caller
     gets a clear error instead of {{placeholder}} being sent to Claude.
+
+    If the context contains a "_documents" key (list of dicts with
+    "data" and "media_type"), document content blocks are prepended
+    to the first user message. This enables sending PDFs to Claude
+    for native document understanding (form layout, checkboxes, etc.).
+
+    Returns:
+        (system_prompt, user_messages) where each user message is either
+        a string (text-only) or a list of content blocks (documents + text).
     """
     system_parts = []
     user_messages = []
@@ -734,8 +782,10 @@ def _assemble_prompts(
                 continue
 
         # Validate: check that all declared template variables are in context
+        # Skip keys starting with "_" — those are internal (e.g., _documents)
         if prompt.template_variables:
-            missing = [v for v in prompt.template_variables if v not in context]
+            missing = [v for v in prompt.template_variables
+                       if v not in context and not v.startswith("_")]
             if missing:
                 raise ValueError(
                     f"Prompt '{prompt.prompt_name}' requires template variables "
@@ -752,6 +802,25 @@ def _assemble_prompts(
     system_prompt = "\n\n".join(system_parts) if system_parts else ""
     if not user_messages:
         user_messages = [json.dumps(context, default=str)]
+
+    # If context includes _documents, prepend document content blocks
+    # to the first user message. This sends PDFs/images to Claude as
+    # native document content blocks alongside the text prompt.
+    if "_documents" in context and context["_documents"]:
+        doc_blocks = []
+        for doc in context["_documents"]:
+            doc_blocks.append({
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": doc.get("media_type", "application/pdf"),
+                    "data": doc["data"],
+                },
+            })
+        # Convert first user message from string to content block array
+        first_msg = user_messages[0] if user_messages else ""
+        user_messages[0] = doc_blocks + [{"type": "text", "text": first_msg}]
+
     return system_prompt, user_messages
 
 

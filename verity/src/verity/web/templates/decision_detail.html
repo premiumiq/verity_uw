@@ -34,7 +34,17 @@
             <div class="verity-detail-label">Entity</div>
             <div class="verity-detail-value">
                 <span class="verity-badge verity-badge-{{ decision.entity_type }}">{{ decision.entity_type }}</span>
-                {{ decision.agent_name or decision.task_name or '—' }}
+                {% if decision.entity_type == 'agent' and decision.agent_name %}
+                    <a href="/admin/agents/{{ decision.agent_name }}" target="_blank">
+                        {{ decision.agent_display_name or decision.agent_name }}
+                    </a>
+                {% elif decision.entity_type == 'task' and decision.task_name %}
+                    <a href="/admin/tasks/{{ decision.task_name }}" target="_blank">
+                        {{ decision.task_display_name or decision.task_name }}
+                    </a>
+                {% else %}
+                    {{ decision.entity_display_name or decision.agent_name or decision.task_name or '—' }}
+                {% endif %}
             </div>
 
             <div class="verity-detail-label">Version</div>
@@ -42,7 +52,7 @@
 
             {% if decision.step_name %}
             <div class="verity-detail-label">Pipeline Step</div>
-            <div class="verity-detail-value">{{ decision.step_name }}</div>
+            <div class="verity-detail-value">{{ decision.step_name | replace('_', ' ') | title }}</div>
             {% endif %}
 
             <div class="verity-detail-label">Status</div>
