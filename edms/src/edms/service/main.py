@@ -27,6 +27,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+# Configure structured logging before anything else
+from edms.utils.logging import CorrelationMiddleware, setup_logging
+setup_logging(service_name="edms")
+
 from edms.core.db import EdmsDatabase
 from edms.core.storage import StorageClient
 from edms.service.routes import create_routes
@@ -82,6 +86,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Correlation ID middleware
+app.add_middleware(CorrelationMiddleware)
 
 
 # ── HEALTH CHECK ──────────────────────────────────────────────
