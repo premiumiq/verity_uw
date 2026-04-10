@@ -1506,7 +1506,437 @@ Underwriter              Business App            Verity SDK             Database
 
 ---
 
-## 8. Statistics
+## 8. Data Model Reference
+
+The 33 tables are organized into 6 functional groups. An Excalidraw diagram (`verity_db.excalidraw`) provides the visual ER view. This section documents the key relationships and JSONB field schemas.
+
+### 8.1 Key Foreign Key Relationships
+
+```
+agent --(1:N)--> agent_version --(N:1)--> inference_config
+                      |
+                      +--(N:M via entity_prompt_assignment)--> prompt_version --> prompt
+                      |
+                      +--(N:M via agent_version_tool)--> tool
+
+task  --(1:N)--> task_version  --(N:1)--> inference_config
+                      |
+                      +--(N:M via entity_prompt_assignment)--> prompt_version --> prompt
+                      |
+                      +--(N:M via task_version_tool)--> tool
+
+pipeline --(1:N)--> pipeline_version (steps stored as JSONB, not FK)
+
+application --(1:N)--> application_entity (maps to agent, task, tool, prompt, pipeline)
+            --(1:N)--> execution_context
+
+agent_decision_log --(N:1)--> execution_context
+                   --(self)--> parent_decision_id (for sub-agent hierarchy)
+                   --(self)--> reproduced_from_decision_id (for audit replay)
+
+override_log --(N:1)--> agent_decision_log (via decision_log_id)
+
+approval_record: no FK to version tables (entity_type + entity_version_id as soft FK)
+
+ground_truth_dataset --(1:N)--> ground_truth_record --(1:N)--> ground_truth_annotation
+validation_run --(N:1)--> ground_truth_dataset
+validation_record_result --(N:1)--> validation_run
+                         --(N:1)--> ground_truth_record
+```
+
+### 8.2 JSONB Field Schemas
+
+| Table.Column | Structure | Example |
+|---|---|---|
+| agent_version.output_schema | JSON Schema for agent output | `{"risk_score": {"type": "string"}, "confidence": {"type": "number"}}` |
+| agent_version.authority_thresholds | Decision thresholds by category | `{"auto_approve_below": 0.7, "require_hitl_above": 0.9}` |
+| pipeline_version.steps | Array of PipelineStep objects | `[{"step_name": "classify", "entity_type": "agent", "entity_name": "doc_classifier", "step_order": 1, "depends_on": []}]` |
+| entity_prompt_assignment.condition_logic | Conditional prompt inclusion rules | `{"if_lob": "DO"}` or `null` (always include) |
+| tool.input_schema | JSON Schema for tool parameters | `{"type": "object", "properties": {"context_ref": {"type": "string"}}, "required": ["context_ref"]}` |
+| tool.mock_responses | Mock data keyed by scenario | `{"default": {"status": "success", "data": {...}}}` |
+| agent_decision_log.inference_config_snapshot | Full config copy at execution time | `{"model_name": "claude-sonnet-4-6", "temperature": 0.2, "max_tokens": 4096}` |
+| agent_decision_log.tool_calls_made | Array of tool call records | `[{"tool_name": "get_submission", "call_order": 1, "input_data": {...}, "output_data": {...}, "mock_mode": false}]` |
+| agent_decision_log.message_history | Full Claude conversation | `[{"role": "user", "content": "..."}, {"role": "assistant", "content": [{"type": "tool_use", ...}]}]` |
+| ground_truth_annotation.expected_output | Annotator's answer (matches entity output schema) | `{"document_type": "do_application", "confidence": 0.97}` |
+| validation_run.confusion_matrix | Classification results | `{"labels": ["do_app", "gl_app"], "matrix": [[48, 2], [1, 49]], "per_class": {...}}` |
+| validation_run.field_accuracy | Extraction results | `{"per_field": {"named_insured": {"correct": 48, "total": 50, "accuracy": 0.96}}, "overall_accuracy": 0.91}` |
+| execution_context.metadata | Business context (opaque to Verity) | `{"named_insured": "Acme Corp", "lob": "DO"}` |
+
+---
+
+## 9. Error Handling
+
+### 9.1 Claude API Errors
+
+**Where:** `_gateway_llm_call()` in execution.py.
+
+**Behavior:** If the Claude API call throws (network error, rate limit, invalid request), the exception propagates up to the `run_agent()` or `run_task()` try/except block.
+
+```
+_gateway_llm_call() throws
+    |
+    v
+run_agent() catches Exception:
+    1. Calculates duration_ms
+    2. Logs a FAILED decision to agent_decision_log:
+       - status = "failed"
+       - error_message = str(exception)
+       - output = {} (empty)
+       - tool_calls_made = [] (whatever completed before failure)
+    3. Returns ExecutionResult(status="failed", error_message=...)
+```
+
+**What this means:**
+- Failed API calls ARE logged to the decision trail (with status="failed")
+- The caller (pipeline executor or business app) sees a failed ExecutionResult
+- No retry. No fallback. The call fails once and that's it.
+- If failure happens mid-loop (e.g., turn 3 of 10), all prior tool calls are lost from the log - only the error is recorded.
+
+**Known gap:** If the _log_decision() call itself fails (database down), the error is unhandled and propagates as an unstructured exception. There is no circuit breaker.
+
+### 9.2 Tool Execution Errors
+
+**Where:** `_execute_real_tool()` and `_gateway_tool_call()` in execution.py.
+
+**Behavior:** Tool exceptions are caught and converted to error responses:
+
+```
+_execute_real_tool() catches Exception:
+    Returns: {
+        "tool_name": name,
+        "output_data": {"error": "Tool execution failed: <message>"},
+        "error": True
+    }
+```
+
+This error response is sent back to Claude as a `tool_result` with `is_error=True`. Claude sees the error and can:
+- Retry the tool call (next turn)
+- Provide a final answer noting the tool failure
+- Call a different tool
+
+**What this means:**
+- Tool failures do NOT crash the agent loop
+- Claude receives the error and decides how to proceed
+- The error is visible in tool_calls_made in the decision log
+- If ALL tools fail, Claude will eventually produce a final answer (likely low confidence) or hit the 10-turn limit
+
+### 9.3 Database Errors
+
+**Where:** All Database methods in connection.py.
+
+**Behavior:** Database errors from psycopg propagate as unhandled exceptions. The connection pool (`AsyncConnectionPool`) handles connection lifecycle:
+
+```
+async with self._pool.connection() as conn:
+    cursor = await conn.execute(sql, params)
+```
+
+The `async with` block checks out a connection from the pool and returns it when done (or on exception). The pool handles:
+- Connection recycling (stale connections are replaced)
+- Connection validation on checkout
+- Pool exhaustion (blocks until a connection is available, up to pool timeout)
+
+**What is NOT handled:**
+- Database down at startup: `await db.connect()` throws, app fails to start. No retry.
+- Database down mid-operation: Query throws `psycopg.OperationalError`, propagates to caller.
+- Connection pool exhaustion: Blocks, then times out with `PoolTimeout`.
+- No graceful degradation. If the database is unreachable, all operations fail.
+
+### 9.4 Prompt Validation Errors
+
+**Where:** `_assemble_prompts()` in execution.py.
+
+**Behavior:** If a prompt declares template variables (e.g., `template_variables = ['document_text']`) and the context dict doesn't contain that key, a `ValueError` is raised immediately:
+
+```
+ValueError: Prompt 'doc_classifier_input' requires template variables
+['document_text'] but they are not in the execution context.
+Available context keys: ['lob', 'named_insured', 'submission_id']
+```
+
+This happens BEFORE any Claude API call, so no tokens are wasted.
+
+### 9.5 Lifecycle Validation Errors
+
+**Where:** `promote()` in lifecycle.py.
+
+**Behavior:** Two types of validation errors:
+
+1. **Invalid transition:** Attempting a transition not in VALID_TRANSITIONS:
+   ```
+   ValueError: Invalid transition: draft -> champion.
+   Valid targets: ['candidate']
+   ```
+
+2. **Gate requirements not met:** Evidence flags are false:
+   ```
+   ValueError: Promotion gate requirements not met:
+   Ground truth validation has not passed; Model card not reviewed by approver
+   ```
+
+Both raise ValueError before any database writes. The version state is unchanged.
+
+### 9.6 Error Handling Summary
+
+| Error Source | Caught? | Logged to Decision Trail? | Retried? | Impact |
+|---|---|---|---|---|
+| Claude API failure | Yes (in run_agent/run_task) | Yes (status="failed") | No | ExecutionResult with status="failed" |
+| Tool execution failure | Yes (in _execute_real_tool) | Tool error sent to Claude | No (Claude may retry) | Claude sees error, decides next action |
+| Database failure | No (propagates) | No | No | Unstructured exception to caller |
+| Decision logging failure | No (propagates) | N/A | No | Execution result lost |
+| Template variable missing | Yes (ValueError) | No (fails before execution) | No | Clear error message |
+| Invalid lifecycle transition | Yes (ValueError) | No | No | Promotion rejected |
+| Config not found | Yes (ValueError) | No | No | Agent/task cannot execute |
+
+---
+
+## 10. Concurrency and Thread Safety
+
+### 10.1 Async Architecture
+
+Verity is fully async (Python asyncio). The FastAPI server runs on a single event loop. All I/O operations (database, Claude API, tool calls) use `await` and yield the event loop during waits.
+
+```
+One Python process
+    |
+    +-- One asyncio event loop
+    |       |
+    |       +-- FastAPI request handlers (concurrent via async)
+    |       +-- Claude API calls (concurrent via AsyncAnthropic)
+    |       +-- Database queries (concurrent via AsyncConnectionPool)
+    |       +-- Tool implementations (concurrent if async, blocking if sync)
+    |
+    +-- No threading, no multiprocessing
+```
+
+### 10.2 Database Concurrency
+
+**Connection pool:** `AsyncConnectionPool(min_size=2, max_size=10)`. Up to 10 concurrent database operations. The 11th request blocks until a connection is available.
+
+**Transaction isolation:** Each Database method (`fetch_one`, `execute_returning`, etc.) checks out a connection, executes, and returns it. There are no explicit transactions spanning multiple operations.
+
+**Race condition: champion promotion.** If two promotions execute concurrently for the same entity:
+1. Both call `get_current_champion_agent_version` - both see the same prior champion
+2. Both call `deprecate_agent_version` on the prior - one succeeds, one is a no-op (already deprecated)
+3. Both call `set_agent_champion` - last one wins
+
+**Impact:** The champion pointer could be set to a version that didn't properly deprecate its predecessor. No database-level locking prevents this. The risk is low in practice (promotions are human-initiated, not automated) but exists.
+
+**No explicit transactions:** The registration flow (insert agent, insert version, assign prompts, authorize tools) is not wrapped in a transaction. If the process crashes between steps, partial registration data exists. The seed script is idempotent and re-runnable to recover.
+
+### 10.3 Claude API Concurrency
+
+**AsyncAnthropic client:** Uses httpx under the hood with connection pooling. Multiple concurrent Claude API calls are supported.
+
+**Pipeline parallelism:** When a pipeline group has multiple steps with the same `step_order`, they execute via `asyncio.gather()`. This means multiple Claude API calls run concurrently - one per parallel step.
+
+**Rate limiting:** Not handled by Verity. If the Claude API returns a rate limit error (429), it propagates as an exception. No backoff, no retry queue. The caller (pipeline executor) sees a failed step.
+
+### 10.4 Tool Call Concurrency
+
+**Within one agent turn:** Tool calls within a single response are executed sequentially (for loop over `response.content` blocks). Even if Claude requests 3 tools in one turn, they run one at a time.
+
+**Across pipeline steps:** Parallel pipeline steps each run their own agent loop, so their tool calls run concurrently via `asyncio.gather()`.
+
+**Sync tool implementations:** If a registered tool implementation is synchronous (not async), it blocks the event loop during execution. For I/O-heavy tools (database queries, HTTP calls), this blocks ALL other concurrent operations until the tool returns. Always register async tool implementations.
+
+---
+
+## 11. Configuration and Environment
+
+### 11.1 Environment Variables
+
+| Variable | Default | Used By | Purpose |
+|----------|---------|---------|---------|
+| `VERITY_DB_URL` | `postgresql://verityuser:veritypass123@localhost:5432/verity_db` | verity/main.py, uw_demo config | PostgreSQL connection URL |
+| `ANTHROPIC_API_KEY` | `""` (empty) | uw_demo config | Claude API key for live execution |
+| `APP_ENV` | `demo` | uw_demo config | Environment identifier |
+| `LOG_LEVEL` | `INFO` | verity/logging.py | Logging level (DEBUG, INFO, WARNING, ERROR) |
+| `LOG_FORMAT` | `json` | verity/logging.py | Log format: `json` or `text` |
+| `LOG_FILE_ENABLED` | `false` | verity/logging.py | Write logs to file |
+| `LOG_DIR` | `./logs` | verity/logging.py | Log file directory |
+
+### 11.2 .env File Loading
+
+Both verity/main.py and uw_demo/config.py load `.env` from `Path.cwd()` (the current working directory at startup). Environment variables set by Docker take priority - the `.env` file only fills in values not already in `os.environ`.
+
+### 11.3 Missing API Key Behavior
+
+If `ANTHROPIC_API_KEY` is empty or not set:
+- The `AsyncAnthropic` client is initialized with an empty string
+- Live execution calls to Claude API fail with an authentication error
+- Mock mode works fine (no API call made)
+- The error propagates as a failed execution, logged to the decision trail
+
+### 11.4 Database URL Behavior
+
+If `VERITY_DB_URL` is wrong or the database is unreachable:
+- `await verity.connect()` fails during app startup
+- FastAPI lifespan raises the exception
+- The container exits and Docker restarts it (restart: unless-stopped)
+- No retry logic on startup
+
+---
+
+## 12. Known Limitations
+
+### 12.1 Scale Limitations
+
+| Area | Limitation | Impact |
+|------|-----------|--------|
+| List queries | Most have no pagination (return all rows) | Will slow down with >1000 entities |
+| Dashboard queries | Full table scans with GROUP BY | Slow with >10K decisions |
+| Decision log | Every AI call creates a row with JSONB columns | Table grows linearly; no archival strategy |
+| Connection pool | max_size=10 | Cannot exceed 10 concurrent database operations |
+| Pipeline execution | Synchronous on request thread | Long pipelines block the HTTP response |
+| No caching | Every request queries the database | Config resolution for every execution adds latency |
+
+### 12.2 Missing Infrastructure
+
+| Feature | Status | Impact |
+|---------|--------|--------|
+| Authentication | None | Any network-accessible client can call any endpoint |
+| Authorization | None | No role-based access (who can promote, who can override) |
+| Rate limiting | None | No protection against API abuse |
+| Background jobs | None | All operations synchronous on request thread |
+| Retry logic | None | Single failure = permanent failure |
+| Circuit breaker | None | Cascading failures possible if database or Claude API is down |
+| Health checks | Basic (`/health` returns 200) | No deep health (database connectivity, pool status) |
+| Metrics/telemetry | Logging only | No Prometheus, no OpenTelemetry |
+| Data encryption | None | Database, MinIO, and network traffic unencrypted |
+
+### 12.3 Functional Gaps
+
+| Gap | Description |
+|-----|-------------|
+| Pipeline status bug | Pipeline runs page shows "complete" while still running (only completed steps are in the DB) |
+| No pipeline_run table | Pipeline-level status is only in-memory; only step-level decisions are persisted |
+| Tool calls sequential within a turn | Claude may request 3 tools, but they execute one at a time |
+| No sub-agent support | `parent_decision_id` column exists, but no code creates sub-agent invocations |
+| No streaming with tools | Streaming emits events, but tool call results aren't streamed |
+| No cleanup/archival | Decision log, test results grow forever |
+| pgvector unused | Embedding columns exist but are always NULL; similarity checks not implemented |
+
+---
+
+## 13. Integration Contract
+
+### 13.1 Integrating a New Business Application
+
+A new business application (e.g., Claims App) integrates with Verity in 5 steps:
+
+**Step 1: Install Verity SDK**
+
+```bash
+pip install -e verity/
+```
+
+The Verity package is installed into the app's Python environment. No separate server needed for SDK mode.
+
+**Step 2: Initialize the Client**
+
+```python
+from verity import Verity
+
+verity = Verity(
+    database_url="postgresql://...@.../verity_db",  # Same verity_db
+    anthropic_api_key="sk-ant-...",                  # App's own key
+    application="claims_app",                         # App identity
+)
+await verity.connect()
+```
+
+All apps share the same `verity_db` database. The `application` parameter identifies this app in the decision trail.
+
+**Step 3: Register the Application**
+
+```python
+await verity.register_application(
+    name="claims_app",
+    display_name="Claims Processing Application",
+    description="Automated claims triage and assessment",
+)
+```
+
+This creates a row in the `application` table. The app can then map entities and create execution contexts.
+
+**Step 4: Register Tool Implementations**
+
+```python
+verity.register_tool_implementation("get_claim_data", get_claim_data)
+verity.register_tool_implementation("get_policy_details", get_policy_details)
+```
+
+Tool implementations are Python functions (sync or async) that the app provides. They run in the app's process. Verity calls them by name when Claude requests a tool.
+
+**Step 5: Execute Agents**
+
+```python
+# Create execution context (links decisions to business operation)
+ctx = await verity.create_execution_context(
+    context_ref="claim:CLM-2026-001",
+    context_type="claim",
+    metadata={"claimant": "John Doe", "policy_number": "POL-123"},
+)
+
+# Run an agent
+result = await verity.execute_agent(
+    agent_name="claims_triage",
+    context={"claim_id": "CLM-2026-001", "loss_type": "auto"},
+    execution_context_id=ctx["id"],
+)
+```
+
+### 13.2 Tool Implementation Requirements
+
+Tool implementations must conform to this contract:
+
+```python
+# Async (preferred) - does not block the event loop
+async def get_claim_data(claim_id: str) -> dict:
+    # Fetch from database, call API, etc.
+    return {"claimant": "John Doe", "loss_amount": 15000, ...}
+
+# Sync (allowed but blocks) - use only for CPU-bound operations
+def calculate_score(factors: dict) -> dict:
+    return {"score": 0.85}
+```
+
+**Input:** The tool receives keyword arguments matching the `input_schema` defined when the tool was registered in Verity. Claude provides these arguments.
+
+**Output:** Must return a JSON-serializable dict. This dict is:
+1. Sent back to Claude as a `tool_result` message
+2. Stored in `agent_decision_log.tool_calls_made` for audit
+
+**Error handling:** If the tool raises an exception, Verity catches it and sends an error response to Claude:
+```json
+{"error": "Tool execution failed: <exception message>"}
+```
+Claude sees this and decides whether to retry or provide a final answer.
+
+**Async strongly recommended:** Sync tool implementations block the entire event loop. A 2-second database query in a sync tool blocks ALL other concurrent requests for 2 seconds.
+
+### 13.3 Minimum Viable Integration
+
+The simplest possible integration:
+
+```python
+from verity import Verity
+
+verity = Verity(database_url="postgresql://...", application="my_app")
+await verity.connect()
+
+# Assume agents are already registered (by a seed script or another app)
+result = await verity.execute_agent("existing_agent", context={"key": "value"})
+print(result.output)  # The agent's structured output
+print(result.decision_log_id)  # UUID of the audit record
+```
+
+No tool registration needed if the agent doesn't use tools. No application registration needed if you don't need execution context grouping. No lifecycle management needed if you use existing champion versions.
+
+---
+
+## 14. Statistics
 
 | Metric | Count |
 |--------|-------|
