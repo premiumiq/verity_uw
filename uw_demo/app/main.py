@@ -27,6 +27,10 @@ from pathlib import Path
 
 from fastapi.staticfiles import StaticFiles
 
+# Configure structured logging before anything else
+from uw_demo.app.utils.logging import CorrelationMiddleware, setup_logging
+setup_logging(service_name="uw_demo")
+
 from uw_demo.app.config import settings
 from uw_demo.app.ui.routes import create_uw_routes
 from verity import Verity
@@ -92,6 +96,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Correlation ID middleware — generates/propagates trace IDs across requests
+app.add_middleware(CorrelationMiddleware)
 
 
 # ── HEALTH CHECK ──────────────────────────────────────────────

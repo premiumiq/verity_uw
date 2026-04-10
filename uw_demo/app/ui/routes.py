@@ -20,12 +20,16 @@ No mock/live toggle in the UI. Use APP_ENV=demo for mock, APP_ENV=live for real.
 """
 
 import base64
+import json
+import logging
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
 import httpx
 import psycopg
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -452,9 +456,7 @@ def create_uw_routes(verity) -> APIRouter:
         }
 
         # Execute pipeline
-        import json
-        import logging
-        logger = logging.getLogger("uw_demo.pipeline")
+        # json and logger already imported at module level
 
         try:
             use_mock = await _use_mock()
@@ -610,10 +612,6 @@ async def _run_risk_assessment_internal(verity, submission_id: str, sub: dict, t
     (e.g., Claude API overloaded), workflow steps are set to 'failed'
     and submission status reverts to 'approved' so the user can retry.
     """
-    import json
-    import logging
-
-    logger = logging.getLogger("uw_demo.pipeline")
 
     await _update_workflow_step(submission_id, "triage", "running")
 
