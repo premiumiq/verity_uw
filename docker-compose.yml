@@ -74,9 +74,12 @@ services:
       MINIO_SECRET_KEY: minioadmin123
       MINIO_SECURE: "false"
       EDMS_DEFAULT_BUCKET: submissions
+      LOG_FILE_ENABLED: "true"
+      LOG_DIR: /app/logs
     volumes:
       - ./edms:/app/edms
       - ./uw_demo/seed_docs:/app/seed_docs
+      - ./logs/edms:/app/logs
     ports:
       - "8002:8002"
     depends_on:
@@ -106,11 +109,13 @@ services:
         max-file: "3"
     environment:
       VERITY_DB_URL: postgresql://verityuser:veritypass123@postgres:5432/verity_db
-      APP_ENV: demo
+      LOG_FILE_ENABLED: "true"
+      LOG_DIR: /app/logs
     volumes:
       - ./verity:/app/verity
       - ./uw_demo:/app/uw_demo
       - ./scripts:/app/scripts
+      - ./logs/verity:/app/logs
     ports:
       - "8000:8000"
     depends_on:
@@ -146,10 +151,13 @@ services:
       UW_DB_URL: postgresql://verityuser:veritypass123@postgres:5432/uw_db
       EDMS_URL: http://edms:8002
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      LOG_FILE_ENABLED: "true"
+      LOG_DIR: /app/logs
     volumes:
       - ./verity:/app/verity
       - ./uw_demo:/app/uw_demo
       - ./scripts:/app/scripts
+      - ./logs/uw_demo:/app/logs
     ports:
       - "8001:8001"
     depends_on:

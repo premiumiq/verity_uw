@@ -8,6 +8,9 @@ build/
 
 # Virtual environments
 .venv/
+
+# Application logs (bind-mounted from Docker containers)
+logs/
 venv/
 env/
 
