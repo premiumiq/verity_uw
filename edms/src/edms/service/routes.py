@@ -28,12 +28,22 @@ def create_routes(
     # ── LIST DOCUMENTS ────────────────────────────────────────
 
     @router.get("")
-    async def list_documents(context_ref: str = Query(..., description="Business context reference")):
+    async def list_documents(
+        context_ref: str = Query(..., description="Business context reference"),
+        document_type: Optional[str] = Query(None, description="Filter by document type"),
+        context_type: Optional[str] = Query(None, description="Filter by context type"),
+    ):
         """List all documents for a business context.
 
         Example: GET /documents?context_ref=submission:SUB-001
+        Optional: &document_type=do_application&context_type=submission
         """
         docs = await db.list_documents(context_ref)
+        # Apply optional filters (db returns all for context_ref, we filter here)
+        if document_type:
+            docs = [d for d in docs if d.get("document_type") == document_type]
+        if context_type:
+            docs = [d for d in docs if d.get("context_type") == context_type]
         return {"context_ref": context_ref, "count": len(docs), "documents": docs}
 
     # ── GET DOCUMENT METADATA ─────────────────────────────────
@@ -86,6 +96,39 @@ def create_routes(
             "text": text,
             "char_count": len(text),
         }
+
+    # ── GET DOCUMENT CONTENT (original file bytes) ─────────────
+
+    @router.get("/{document_id}/content")
+    async def get_document_content(document_id: UUID):
+        """Download original file bytes from MinIO.
+
+        Returns the raw file content (PDF, text, etc.) so consuming apps
+        can send PDFs directly to Claude for classification, or display
+        them in a viewer.
+
+        Returns:
+            StreamingResponse with original file bytes and content type.
+        """
+        from fastapi.responses import Response
+
+        doc = await db.get_document(document_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+
+        coll = await db.get_collection(doc["collection_id"])
+        bucket = coll["storage_container"] if coll else default_bucket
+
+        try:
+            content = storage.download_bytes(bucket, doc["storage_key"])
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to download from storage: {e}")
+
+        return Response(
+            content=content,
+            media_type=doc.get("content_type", "application/octet-stream"),
+            headers={"Content-Disposition": f'inline; filename="{doc["filename"]}"'},
+        )
 
     # ── GET CHILDREN (derived documents) ──────────────────────
 
@@ -157,58 +200,6 @@ def create_routes(
             file_size_bytes=len(content), storage_key=storage_key,
             document_type=document_type or None, uploaded_by=uploaded_by, tags=tags_dict,
         )
-        return doc
-
-    # ── UPLOAD FROM LOCAL PATH (for seed scripts) ─────────────
-
-    @router.post("/upload-local")
-    async def upload_local(
-        file_path: str = Form(...), collection_id: str = Form(...),
-        context_ref: str = Form(...), context_type: str = Form(None),
-        uploaded_by: str = Form("system"), document_type: str = Form(None),
-        folder_id: str = Form(None), tags: str = Form("{}"),
-    ):
-        """Upload from a local server path. Collection determines the MinIO bucket."""
-        import json as _json
-
-        coll = await db.get_collection(UUID(collection_id))
-        if not coll:
-            raise HTTPException(status_code=400, detail="Collection not found")
-
-        try:
-            tags_dict = _json.loads(tags) if isinstance(tags, str) else tags
-        except _json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="tags must be valid JSON")
-        tag_errors = await db.validate_tags(tags_dict)
-        if tag_errors:
-            raise HTTPException(status_code=400, detail={"message": "Tag validation failed", "errors": tag_errors})
-        if document_type:
-            type_error = await db.validate_document_type(document_type)
-            if type_error:
-                raise HTTPException(status_code=400, detail=type_error)
-
-        path = Path(file_path)
-        if not path.exists():
-            raise HTTPException(status_code=400, detail=f"File not found: {file_path}")
-
-        filename = path.name
-        bucket = coll["storage_container"]
-        safe_prefix = context_ref.replace(":", "/").replace(" ", "_")
-        storage_key = f"{safe_prefix}/{filename}"
-        file_size = storage.upload_file(bucket, storage_key, path)
-
-        suffix = path.suffix.lower()
-        content_type = {".pdf": "application/pdf", ".txt": "text/plain", ".json": "application/json"}.get(suffix, "application/octet-stream")
-
-        fid = UUID(folder_id) if folder_id else None
-        doc = await db.insert_document(
-            collection_id=UUID(collection_id), folder_id=fid,
-            context_ref=context_ref, context_type=context_type,
-            filename=filename, content_type=content_type, file_size_bytes=file_size,
-            storage_key=storage_key, document_type=document_type or None,
-            uploaded_by=uploaded_by, tags=tags_dict,
-        )
-
         return doc
 
     # ── EXTRACT TEXT ───────────────────────────────────────────

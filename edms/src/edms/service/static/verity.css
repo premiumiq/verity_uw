@@ -1,0 +1,811 @@
+/* ============================================================
+   VERITY CSS — PremiumIQ Brand Theme
+
+   This file defines the color palette and component styles for
+   the Verity admin web UI. Colors match the PremiumIQ PowerPoint
+   corporate theme.
+
+   HOW TO USE:
+   - Colors are defined as CSS variables (--verity-*) at the top
+   - Component classes (verity-*) use these variables
+   - Tailwind utility classes handle layout (flexbox, spacing, etc.)
+   - This file handles branding and component appearance
+   ============================================================ */
+
+
+/* ── COLOR PALETTE ───────────────────────────────────────────
+   Defined once here, referenced everywhere via var(--verity-*)
+*/
+:root {
+    /* Backgrounds */
+    --verity-bg:            #FFFFFF;
+    --verity-bg-alt:        #EDEDED;
+    --verity-bg-sidebar:    #3A3A3A;
+    --verity-bg-hover:      #E8EEF8;
+    --verity-bg-selected:   #D2DDF1;
+    --verity-bg-input:      #EDEDED;
+
+    /* Text */
+    --verity-text:          #4D4D4D;
+    --verity-text-light:    #7F7F7F;
+    --verity-text-sidebar:  #FFFFFF;
+    --verity-text-sidebar-dim: #D2DDF1;
+
+    /* Blues (primary accent) */
+    --verity-gray-dark:     #4D4D4D;
+    --verity-gray:          #7F7F7F;
+    --verity-gray-light:    #BFBFBF;
+    --verity-gray-pale:     #F2F2F2;
+    --verity-blue:          #8FAADC;
+    --verity-blue-dark:     #405A8A;
+    --verity-blue-deep:     #2B4D8A;
+    --verity-blue-light:    #D2DDF1;
+    --verity-blue-pale:     #E8EEF8;
+
+    /* Borders */
+    --verity-border:        #DBDBDB;
+    --verity-border-light:  #EDEDED;
+
+    /* RAG status colors (use sparingly — status badges only) */
+    --verity-green:         #8AB391;
+    --verity-green-light:   #E8F0E9;
+    --verity-amber:         #E3B447;
+    --verity-amber-light:   #F9F0DA;
+    --verity-red:           #ED7D31;
+    --verity-red-light:     #F4DEDE;
+
+    /* Font */
+    --verity-font:          'Poppins', sans-serif;
+}
+
+
+/* ── BASE STYLES ───────────────────────────────────────────── */
+
+body {
+    font-family: var(--verity-font);
+    color: var(--verity-text);
+    background: var(--verity-bg);
+    margin: 0;
+    padding: 0;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+h1, h2, h3, h4 {
+    color: var(--verity-text);
+    font-weight: 600;
+}
+
+h1 { font-size: 1.5rem; }
+h2 { font-size: 1.25rem; }
+h3 { font-size: 1.1rem; }
+
+a {
+    color: var(--verity-blue-deep);
+    text-decoration: none;
+}
+a:hover {
+    color: var(--verity-blue-dark);
+    text-decoration: underline;
+}
+
+
+/* ── LAYOUT: SIDEBAR + MAIN CONTENT ─────────────────────────
+   The page is split into:
+   - A fixed sidebar on the left (240px wide, dark blue)
+   - Main content area that fills the rest
+   This mimics the Databricks navigation pattern.
+*/
+
+.verity-layout {
+    display: flex;
+    min-height: 100vh;
+}
+
+/* Left sidebar — fixed, dark blue background */
+.verity-sidebar {
+    width: 240px;
+    min-width: 240px;
+    background: var(--verity-bg-sidebar);
+    color: var(--verity-text-sidebar);
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    overflow-y: auto;
+    z-index: 50;
+}
+
+/* Main content — offset by sidebar width */
+.verity-main {
+    margin-left: 240px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+
+/* ── SIDEBAR COMPONENTS ────────────────────────────────────── */
+
+/* Logo / brand area at top of sidebar */
+.verity-sidebar-brand {
+    padding: 20px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.verity-sidebar-brand h1 {
+    color: var(--verity-text-sidebar);
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin: 0;
+    letter-spacing: 0.5px;
+}
+
+.verity-sidebar-brand .verity-subtitle {
+    color: var(--verity-blue);
+    font-size: 1.0rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-top: 2px;
+    margin-left: 16px;
+}
+
+/* Navigation section in sidebar */
+.verity-sidebar-nav {
+    padding: 12px 0;
+    flex: 1;
+}
+
+/* Section label (e.g., "Registry", "Governance") */
+.verity-nav-section {
+    padding: 8px 16px 4px;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--verity-text-sidebar-dim);
+    font-weight: 600;
+}
+
+/* Individual nav link */
+.verity-nav-link {
+    display: flex;
+    align-items: center;
+    padding: 8px 16px;
+    color: var(--verity-text-sidebar);
+    font-size: 0.85rem;
+    text-decoration: none;
+    transition: background 0.15s;
+    border-left: 3px solid transparent;
+}
+
+.verity-nav-link:hover {
+    background: rgba(255, 255, 255, 0.1);
+    text-decoration: none;
+    color: var(--verity-text-sidebar);
+}
+
+/* Active/current page in sidebar */
+.verity-nav-link.active {
+    background: rgba(255, 255, 255, 0.15);
+    border-left-color: var(--verity-blue);
+    font-weight: 600;
+}
+
+/* Icon placeholder in nav links (simple text icon for now) */
+.verity-nav-icon {
+    width: 20px;
+    margin-right: 10px;
+    text-align: center;
+    font-size: 0.9rem;
+    opacity: 0.8;
+}
+
+
+/* ── TOP BAR (breadcrumbs + page header) ───────────────────── */
+
+.verity-topbar {
+    padding: 12px 24px;
+    border-bottom: 1px solid var(--verity-border);
+    background: var(--verity-bg);
+}
+
+/* Breadcrumbs — navigable path shown at top left */
+.verity-breadcrumbs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: var(--verity-text-light);
+    margin-bottom: 4px;
+}
+
+.verity-breadcrumbs a {
+    color: var(--verity-text-light);
+    text-decoration: none;
+}
+.verity-breadcrumbs a:hover {
+    color: var(--verity-blue-deep);
+    text-decoration: underline;
+}
+
+/* Separator between breadcrumb items */
+.verity-breadcrumbs .separator {
+    color: var(--verity-border);
+    font-size: 0.7rem;
+}
+
+/* Page title (shown below breadcrumbs) */
+.verity-page-title {
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: var(--verity-text);
+    margin: 0;
+}
+
+
+/* ── CONTENT AREA ──────────────────────────────────────────── */
+
+.verity-content {
+    padding: 24px;
+    flex: 1;
+}
+
+
+/* ── CARDS ───────────────────────────────────────────────────
+   Used for dashboard stats, detail panels, etc.
+*/
+
+.verity-card {
+    background: var(--verity-bg);
+    border: 1px solid var(--verity-border);
+    border-radius: 6px;
+    padding: 16px;
+}
+
+.verity-card-header {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--verity-text-light);
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+.verity-card-value {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--verity-blue-deep);
+}
+
+.verity-card-footer {
+    font-size: 0.75rem;
+    color: var(--verity-text-light);
+    margin-top: 4px;
+}
+
+
+/* ── TABLES ──────────────────────────────────────────────────
+   Standard data tables for registry lists, decision logs, etc.
+*/
+
+.verity-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.verity-table thead th {
+    text-align: left;
+    padding: 10px 12px;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--verity-text-light);
+    font-weight: 600;
+    border-bottom: 2px solid var(--verity-border);
+    background: var(--verity-bg);
+}
+
+.verity-table tbody td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--verity-border-light);
+    color: var(--verity-text);
+    vertical-align: top;
+}
+
+/* Alternating row backgrounds for readability */
+.verity-table tbody tr:nth-child(even) {
+    background: var(--verity-gray-pale);
+}
+
+/* Row hover effect */
+.verity-table tbody tr:hover {
+    background: var(--verity-bg-hover);
+}
+
+/* Clickable rows */
+.verity-table tbody tr.clickable {
+    cursor: pointer;
+}
+
+
+/* ── BADGES ──────────────────────────────────────────────────
+   Small status indicators. Uses RAG colors for lifecycle states
+   and blues for entity types.
+*/
+
+.verity-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+/* Lifecycle state badges */
+.verity-badge-draft      { background: var(--verity-gray-light);      color: var(--verity-text-light); }
+.verity-badge-candidate  { background: var(--verity-blue-pale);   color: var(--verity-blue-deep); }
+.verity-badge-staging    { background: var(--verity-blue-light);  color: var(--verity-blue-dark); }
+.verity-badge-shadow     { background: var(--verity-amber-light); color: #816014; }
+.verity-badge-challenger { background: var(--verity-amber-light); color: #816014; }
+.verity-badge-champion   { background: var(--verity-green-light); color: #3E6044; }
+.verity-badge-deprecated { background: var(--verity-gray-dark);      color: var(--verity-text-light); border: 1px solid var(--verity-border); }
+
+/* Entity type badges */
+.verity-badge-agent { background: var(--verity-blue-pale); color: var(--verity-blue-deep); }
+.verity-badge-task  { background: #E8EEF8;                color: var(--verity-blue-dark); }
+
+/* Materiality tier badges */
+.verity-badge-high   { background: var(--verity-red-light);   color: #A23838; }
+.verity-badge-medium { background: var(--verity-amber-light); color: #816014; }
+.verity-badge-low    { background: var(--verity-green-light); color: #3E6044; }
+
+/* Status badges */
+.verity-badge-complete { background: var(--verity-green-light); color: #3E6044; }
+.verity-badge-failed   { background: var(--verity-red-light);   color: #A23838; }
+.verity-badge-pending  { background: var(--verity-blue-light);      color: var(--verity-blue-dark); }
+
+
+/* ── BUTTONS ───────────────────────────────────────────────── */
+
+.verity-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 14px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    font-family: var(--verity-font);
+    cursor: pointer;
+    border: none;
+    transition: background 0.15s;
+    text-decoration: none;
+}
+
+/* Primary button — blue */
+.verity-btn-primary {
+    background: var(--verity-blue-dark);
+    color: #FFFFFF;
+}
+.verity-btn-primary:hover {
+    background: var(--verity-blue-deep);
+    color: #FFFFFF;
+    text-decoration: none;
+}
+
+/* Secondary button — outlined */
+.verity-btn-secondary {
+    background: var(--verity-bg);
+    color: var(--verity-blue-dark);
+    border: 1px solid var(--verity-border);
+}
+.verity-btn-secondary:hover {
+    background: var(--verity-bg-hover);
+    text-decoration: none;
+}
+
+/* Small button variant */
+.verity-btn-sm {
+    padding: 3px 10px;
+    font-size: 0.75rem;
+}
+
+
+/* ── DETAIL PANELS ───────────────────────────────────────────
+   Used on detail pages (agent detail, decision detail, etc.)
+   to show labeled key-value pairs.
+*/
+
+.verity-detail-grid {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 8px 16px;
+    font-size: 0.85rem;
+}
+
+.verity-detail-label {
+    color: var(--verity-text-light);
+    font-weight: 500;
+    font-size: 0.8rem;
+}
+
+.verity-detail-value {
+    color: var(--verity-text);
+}
+
+
+/* ── CODE / JSON DISPLAY ───────────────────────────────────── */
+
+.verity-code {
+    background: var(--verity-gray-pale);
+    border: 1px solid var(--verity-border-light);
+    border-radius: 4px;
+    padding: 12px;
+    font-family: 'Fira Code', 'Consolas', monospace;
+    font-size: 0.8rem;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--verity-text);
+}
+
+
+/* ── EMPTY STATE ───────────────────────────────────────────── */
+
+.verity-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--verity-text-light);
+}
+
+.verity-empty-message {
+    font-size: 0.9rem;
+    margin-top: 8px;
+}
+
+/* Page description paragraph shown above tables on registry pages */
+.verity-page-description {
+    font-size: 0.82rem;
+    color: var(--verity-text-light);
+    line-height: 1.5;
+    margin: 0 0 16px 0;
+    max-width: 100%;
+}
+
+
+/* ── FORMS ─────────────────────────────────────────────────── */
+
+.verity-input {
+    padding: 6px 10px;
+    border: 1px solid var(--verity-border);
+    border-radius: 4px;
+    font-family: var(--verity-font);
+    font-size: 0.85rem;
+    color: var(--verity-text);
+    background: var(--verity-bg);
+    width: 100%;
+}
+
+.verity-input:focus {
+    outline: none;
+    border-color: var(--verity-blue);
+    box-shadow: 0 0 0 2px var(--verity-blue-pale);
+}
+
+.verity-label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--verity-text-light);
+    margin-bottom: 4px;
+}
+
+.verity-select {
+    padding: 6px 10px;
+    border: 1px solid var(--verity-border);
+    border-radius: 4px;
+    font-family: var(--verity-font);
+    font-size: 0.85rem;
+    color: var(--verity-text);
+    background: var(--verity-bg);
+}
+
+
+/* ── STAT GRID (dashboard) ─────────────────────────────────── */
+
+.verity-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+
+/* ── SECTION DIVIDER ───────────────────────────────────────── */
+
+.verity-section {
+    margin-bottom: 24px;
+}
+
+.verity-section-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--verity-text);
+    margin-bottom: 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--verity-border-light);
+}
+
+
+/* ── WORKFLOW STEPPER ────────────────────────────────────────
+   Horizontal step indicator with numbered circles and connectors.
+   Used on submission detail pages to show workflow progression.
+
+   States: -complete (green check), -active (blue pulse), -pending (gray)
+*/
+
+.verity-stepper {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 16px 0 20px;
+}
+
+.verity-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 110px;
+}
+
+.verity-step-circle {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border: 2px solid var(--verity-border);
+    background: var(--verity-bg);
+    color: var(--verity-text-light);
+    z-index: 1;
+    transition: all 0.3s ease;
+}
+
+.verity-step-complete .verity-step-circle {
+    background: var(--verity-green);
+    border-color: var(--verity-green);
+    color: white;
+}
+
+.verity-step-active .verity-step-circle {
+    background: var(--verity-blue-dark);
+    border-color: var(--verity-blue-dark);
+    color: white;
+    animation: verity-pulse 2s ease-in-out infinite;
+}
+
+.verity-step-failed .verity-step-circle {
+    background: var(--verity-red);
+    border-color: var(--verity-red);
+    color: white;
+}
+
+.verity-step-skipped .verity-step-circle {
+    background: var(--verity-gray-light);
+    border-color: var(--verity-gray-light);
+    color: white;
+}
+
+.verity-step-label {
+    margin-top: 6px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--verity-text-light);
+    text-align: center;
+    max-width: 100px;
+}
+
+.verity-step-complete .verity-step-label {
+    color: var(--verity-text);
+}
+
+.verity-step-time {
+    font-size: 0.6rem;
+    color: var(--verity-text-light);
+    margin-top: 2px;
+}
+
+.verity-step-connector {
+    flex: 1;
+    height: 2px;
+    background: var(--verity-border);
+    margin-top: 18px;
+    min-width: 30px;
+}
+
+.verity-step-connector.verity-connector-complete {
+    background: var(--verity-green);
+}
+
+@keyframes verity-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(64, 90, 138, 0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(64, 90, 138, 0); }
+}
+
+
+/* ── TABS ────────────────────────────────────────────────────
+   Horizontal tab navigation with underline indicator.
+   Works with HTMX for content swapping without page reload.
+*/
+
+.verity-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid var(--verity-border);
+    margin-bottom: 0;
+}
+
+.verity-tab {
+    padding: 10px 20px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--verity-text-light);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    cursor: pointer;
+    font-family: var(--verity-font);
+    transition: color 0.15s, border-color 0.15s;
+    position: relative;
+}
+
+.verity-tab:hover {
+    color: var(--verity-blue-dark);
+}
+
+.verity-tab.active {
+    color: var(--verity-blue-deep);
+    border-bottom-color: var(--verity-blue-deep);
+    font-weight: 600;
+}
+
+.verity-tab-badge {
+    display: inline-block;
+    background: var(--verity-red);
+    color: white;
+    font-size: 0.6rem;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
+
+/* ── ACTION BAR ──────────────────────────────────────────────
+   Contextual action button strip. Shows the next workflow action.
+*/
+
+.verity-action-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: var(--verity-gray-pale);
+    border: 1px solid var(--verity-border-light);
+    border-radius: 6px;
+    margin-bottom: 20px;
+}
+
+
+/* ── SPINNER ─────────────────────────────────────────────────
+   CSS-only loading spinner for async operations.
+*/
+
+.verity-spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--verity-border);
+    border-top: 2px solid var(--verity-blue-dark);
+    border-radius: 50%;
+    animation: verity-spin 0.8s linear infinite;
+    vertical-align: middle;
+}
+
+@keyframes verity-spin {
+    to { transform: rotate(360deg); }
+}
+
+
+/* ── KPI CARDS ───────────────────────────────────────────────
+   Summary metric cards for dashboards and list pages.
+*/
+
+.verity-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.verity-kpi-card {
+    background: var(--verity-bg);
+    border: 1px solid var(--verity-border);
+    border-radius: 6px;
+    padding: 12px 16px;
+    text-align: center;
+}
+
+.verity-kpi-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--verity-blue-deep);
+    line-height: 1.2;
+}
+
+.verity-kpi-label {
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--verity-text-light);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 4px;
+}
+
+
+/* ── SUMMARY CARDS ROW ───────────────────────────────────────
+   Horizontal row of key metric cards (revenue, employees, etc.)
+*/
+
+.verity-summary-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.verity-summary-card {
+    background: var(--verity-bg);
+    border: 1px solid var(--verity-border);
+    border-radius: 6px;
+    padding: 12px 16px;
+}
+
+.verity-summary-label {
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--verity-text-light);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.verity-summary-value {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--verity-text);
+    margin-top: 2px;
+}
+
+
+/* ── HTMX INDICATOR ──────────────────────────────────────────
+   Hidden by default, shown during HTMX requests.
+*/
+
+.htmx-indicator {
+    display: none;
+}
+
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator {
+    display: inline-block;
+}

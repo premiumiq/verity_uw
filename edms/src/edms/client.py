@@ -18,8 +18,8 @@ Usage:
     # Get extracted text for a document
     text = await client.get_document_text(document_id)
 
-    # Upload a document (from local path — for seed scripts)
-    doc = await client.upload_local("/app/seed_docs/form.pdf", "submission:SUB-001")
+    # Upload a document (standard multipart upload)
+    doc = await client.upload("/path/to/form.pdf", collection_id, "submission:SUB-001")
 
     # Trigger text extraction
     result = await client.extract_text(document_id)
@@ -99,26 +99,46 @@ class EdmsClient:
             data = resp.json()
             return data.get("children", [])
 
-    async def upload_local(
+    async def upload(
         self,
         file_path: str,
+        collection_id: str,
         context_ref: str,
         context_type: Optional[str] = None,
         uploaded_by: str = "system",
         document_type: Optional[str] = None,
     ) -> dict:
-        """Upload a document from a local server path (for seed scripts).
+        """Upload a document via standard multipart POST.
+
+        Reads file bytes from local disk and sends as multipart form
+        data to the EDMS service. This is how any client uploads — no
+        shared filesystem required.
 
         Args:
-            file_path: Path on the EDMS server's filesystem
-            context_ref: Business context reference
-            document_type: Optional pre-classification
+            file_path: Local path to the file to upload.
+            collection_id: UUID of the EDMS collection.
+            context_ref: Business context (e.g., "submission:uuid").
+            context_type: Optional context type (submission, policy, etc.).
+            uploaded_by: Who is uploading (default: "system").
+            document_type: Optional pre-classification.
 
         Returns:
-            Document metadata dict.
+            Document metadata dict from EDMS.
         """
+        from pathlib import Path as _Path
+
+        path = _Path(file_path)
+        # Guess content type from extension
+        suffix = path.suffix.lower()
+        content_type = {
+            ".pdf": "application/pdf",
+            ".txt": "text/plain",
+            ".json": "application/json",
+            ".csv": "text/csv",
+        }.get(suffix, "application/octet-stream")
+
         form_data = {
-            "file_path": file_path,
+            "collection_id": collection_id,
             "context_ref": context_ref,
             "uploaded_by": uploaded_by,
         }
@@ -127,13 +147,16 @@ class EdmsClient:
         if document_type:
             form_data["document_type"] = document_type
 
-        async with httpx.AsyncClient() as http:
-            resp = await http.post(
-                f"{self.base_url}/documents/upload-local",
-                data=form_data,
-            )
-            resp.raise_for_status()
-            return resp.json()
+        with open(file_path, "rb") as f:
+            files = {"file": (path.name, f, content_type)}
+            async with httpx.AsyncClient(timeout=30.0) as http:
+                resp = await http.post(
+                    f"{self.base_url}/documents/upload",
+                    data=form_data,
+                    files=files,
+                )
+                resp.raise_for_status()
+                return resp.json()
 
     async def extract_text(self, document_id: str | UUID) -> dict:
         """Trigger text extraction for a document.
@@ -158,3 +181,14 @@ class EdmsClient:
             )
             resp.raise_for_status()
             return resp.json()
+
+    async def list_collections(self) -> list[dict]:
+        """List all collections in EDMS.
+
+        Used by seed scripts to find the 'general' collection UUID.
+        """
+        async with httpx.AsyncClient() as http:
+            resp = await http.get(f"{self.base_url}/collections")
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("collections", [])
