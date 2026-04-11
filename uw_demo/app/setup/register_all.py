@@ -95,7 +95,11 @@ async def main():
 
         # ── STEP 13-16: Validation, Model Cards, Thresholds ──
         print("Step 13-16: Seeding validation runs, model cards, thresholds...")
-        await seed_governance_artifacts(verity, agents, tasks, agent_versions, task_versions)
+        gt_datasets = await seed_governance_artifacts(verity, agents, tasks, agent_versions, task_versions)
+
+        # ── STEP 13b: Ground Truth Records + Annotations ─────
+        print("Step 13b: Populating ground truth records and annotations...")
+        await seed_ground_truth_records(verity, gt_datasets, tasks, agents)
 
         # ── STEP 17: Test Execution Logs ──────────────────────
         print("Step 17: Seeding test execution logs...")
@@ -105,13 +109,17 @@ async def main():
         print("Step 18-19: Seeding decision logs and overrides...")
         await seed_decisions(verity, agent_versions, task_versions)
 
-        # ── STEP 20: Seed UW database ─────────────────────────
-        print("Step 20: Seeding UW database (submissions + loss history)...")
+        # ── STEP 20: Seed Verity platform settings ──────────────
+        print("Step 20: Seeding Verity platform settings...")
+        await seed_platform_settings(verity)
+
+        # ── STEP 21: Seed UW database ─────────────────────────
+        print("Step 21: Seeding UW database (submissions + loss history)...")
         from uw_demo.app.setup.seed_uw import seed_uw_db
         await seed_uw_db()
 
-        # ── STEP 21: Seed EDMS documents ──────────────────────
-        print("Step 21: Uploading documents to EDMS...")
+        # ── STEP 22: Seed EDMS documents ──────────────────────
+        print("Step 22: Uploading documents to EDMS...")
         from uw_demo.app.setup.seed_edms import seed_edms
         await seed_edms()
 
@@ -210,7 +218,7 @@ async def seed_tools(verity: Verity) -> dict:
             "input_schema": {"type": "object", "properties": {"submission_id": {"type": "string"}}, "required": ["submission_id"]},
             "output_schema": {"type": "object", "properties": {"account": {"type": "object"}, "submission": {"type": "object"}, "loss_history": {"type": "array"}}},
             "implementation_path": "uw_demo.app.tools.submission_tools.get_submission_context",
-            "mock_mode_enabled": True, "mock_response_key": "default",
+            "mock_mode_enabled": False, "mock_response_key": "default",
             "data_classification_max": "tier3_confidential",
             "is_write_operation": False, "requires_confirmation": False, "tags": ["read", "submission"],
         },
@@ -221,7 +229,7 @@ async def seed_tools(verity: Verity) -> dict:
             "input_schema": {"type": "object", "properties": {"lob": {"type": "string", "enum": ["DO", "GL"]}}, "required": ["lob"]},
             "output_schema": {"type": "object", "properties": {"guidelines_text": {"type": "string"}, "sections": {"type": "array"}}},
             "implementation_path": "uw_demo.app.tools.guidelines_tools.get_underwriting_guidelines",
-            "mock_mode_enabled": True, "mock_response_key": "default",
+            "mock_mode_enabled": False, "mock_response_key": "default",
             "data_classification_max": "tier2_internal",
             "is_write_operation": False, "requires_confirmation": False, "tags": ["read", "guidelines"],
         },
@@ -232,7 +240,7 @@ async def seed_tools(verity: Verity) -> dict:
             "input_schema": {"type": "object", "properties": {"submission_id": {"type": "string"}}, "required": ["submission_id"]},
             "output_schema": {"type": "object", "properties": {"documents": {"type": "array"}}},
             "implementation_path": "uw_demo.app.tools.document_tools.get_documents_for_submission",
-            "mock_mode_enabled": True, "mock_response_key": "default",
+            "mock_mode_enabled": False, "mock_response_key": "default",
             "data_classification_max": "tier3_confidential",
             "is_write_operation": False, "requires_confirmation": False, "tags": ["read", "documents"],
         },
@@ -243,7 +251,7 @@ async def seed_tools(verity: Verity) -> dict:
             "input_schema": {"type": "object", "properties": {"account_id": {"type": "string"}}, "required": ["account_id"]},
             "output_schema": {"type": "object", "properties": {"years": {"type": "array"}, "total_incurred": {"type": "number"}}},
             "implementation_path": "uw_demo.app.tools.submission_tools.get_loss_history",
-            "mock_mode_enabled": True, "mock_response_key": "default",
+            "mock_mode_enabled": False, "mock_response_key": "default",
             "data_classification_max": "tier3_confidential",
             "is_write_operation": False, "requires_confirmation": False, "tags": ["read", "losses"],
         },
@@ -254,7 +262,7 @@ async def seed_tools(verity: Verity) -> dict:
             "input_schema": {"type": "object", "properties": {"company_name": {"type": "string"}}, "required": ["company_name"]},
             "output_schema": {"type": "object", "properties": {"lexisnexis": {"type": "object"}, "dnb": {"type": "object"}, "pitchbook": {"type": "object"}}},
             "implementation_path": "uw_demo.app.tools.mock_enrichment.get_enrichment_data",
-            "mock_mode_enabled": True, "mock_response_key": "default",
+            "mock_mode_enabled": False, "mock_response_key": "default",
             "data_classification_max": "tier3_confidential",
             "is_write_operation": False, "requires_confirmation": False, "tags": ["read", "enrichment"],
         },
@@ -265,7 +273,7 @@ async def seed_tools(verity: Verity) -> dict:
             "input_schema": {"type": "object", "properties": {"submission_id": {"type": "string"}, "event_type": {"type": "string"}, "details": {"type": "object"}}, "required": ["submission_id", "event_type"]},
             "output_schema": {"type": "object", "properties": {"event_id": {"type": "string"}, "logged_at": {"type": "string"}}},
             "implementation_path": "uw_demo.app.tools.submission_tools.update_submission_event",
-            "mock_mode_enabled": True, "mock_response_key": "default",
+            "mock_mode_enabled": False, "mock_response_key": "default",
             "data_classification_max": "tier2_internal",
             "is_write_operation": True, "requires_confirmation": False, "tags": ["write", "events"],
         },
@@ -276,7 +284,7 @@ async def seed_tools(verity: Verity) -> dict:
             "input_schema": {"type": "object", "properties": {"submission_id": {"type": "string"}, "risk_score": {"type": "string"}, "routing": {"type": "string"}, "reasoning": {"type": "string"}}, "required": ["submission_id", "risk_score"]},
             "output_schema": {"type": "object", "properties": {"stored": {"type": "boolean"}}},
             "implementation_path": "uw_demo.app.tools.submission_tools.store_triage_result",
-            "mock_mode_enabled": True, "mock_response_key": "default",
+            "mock_mode_enabled": False, "mock_response_key": "default",
             "data_classification_max": "tier3_confidential",
             "is_write_operation": True, "requires_confirmation": False, "tags": ["write", "triage"],
         },
@@ -287,7 +295,7 @@ async def seed_tools(verity: Verity) -> dict:
             "input_schema": {"type": "object", "properties": {"submission_id": {"type": "string"}, "determination": {"type": "string"}, "citations": {"type": "array"}}, "required": ["submission_id", "determination"]},
             "output_schema": {"type": "object", "properties": {"stored": {"type": "boolean"}}},
             "implementation_path": "uw_demo.app.tools.submission_tools.update_appetite_status",
-            "mock_mode_enabled": True, "mock_response_key": "default",
+            "mock_mode_enabled": False, "mock_response_key": "default",
             "data_classification_max": "tier3_confidential",
             "is_write_operation": True, "requires_confirmation": False, "tags": ["write", "appetite"],
         },
@@ -303,7 +311,7 @@ async def seed_tools(verity: Verity) -> dict:
             }, "required": ["context_ref"]},
             "output_schema": {"type": "object", "properties": {"documents": {"type": "array"}}},
             "implementation_path": "uw_demo.app.tools.edms_tools.list_documents",
-            "mock_mode_enabled": True, "mock_response_key": "default",
+            "mock_mode_enabled": False, "mock_response_key": "default",
             "data_classification_max": "tier3_confidential",
             "is_write_operation": False, "requires_confirmation": False, "tags": ["read", "documents", "edms"],
         },
@@ -316,7 +324,7 @@ async def seed_tools(verity: Verity) -> dict:
             }, "required": ["document_id"]},
             "output_schema": {"type": "object", "properties": {"text": {"type": "string"}, "char_count": {"type": "integer"}}},
             "implementation_path": "uw_demo.app.tools.edms_tools.get_document_text",
-            "mock_mode_enabled": True, "mock_response_key": "default",
+            "mock_mode_enabled": False, "mock_response_key": "default",
             "data_classification_max": "tier3_confidential",
             "is_write_operation": False, "requires_confirmation": False, "tags": ["read", "documents", "edms"],
         },
@@ -334,7 +342,7 @@ async def seed_tools(verity: Verity) -> dict:
             }, "required": ["submission_id", "fields"]},
             "output_schema": {"type": "object", "properties": {"stored": {"type": "boolean"}, "fields_stored": {"type": "integer"}, "fields_flagged": {"type": "integer"}}},
             "implementation_path": "uw_demo.app.tools.submission_tools.store_extraction_result",
-            "mock_mode_enabled": True, "mock_response_key": "default",
+            "mock_mode_enabled": False, "mock_response_key": "default",
             "data_classification_max": "tier3_confidential",
             "is_write_operation": True, "requires_confirmation": False, "tags": ["write", "extraction"],
         },
@@ -496,7 +504,7 @@ async def seed_agent_versions(verity: Verity, agents: dict, configs: dict) -> di
         lifecycle_state="draft", channel="development",
         inference_config_id=configs["triage_balanced"],
         output_schema=None, authority_thresholds=json.dumps({"requires_hitl_above_premium": 500000}),
-        mock_mode_enabled=False,
+        mock_mode_enabled=False, decision_log_detail="full",
         developer_name="Dev Team", change_summary="Initial prototype with basic risk scoring",
         change_type="major_redesign",
     )
@@ -518,7 +526,7 @@ async def seed_agent_versions(verity: Verity, agents: dict, configs: dict) -> di
         inference_config_id=configs["triage_balanced"],
         output_schema=json.dumps({"risk_score": "string", "routing": "string", "reasoning": "string", "risk_factors": "array", "confidence": "number"}),
         authority_thresholds=json.dumps({"requires_hitl_above_premium": 500000, "low_confidence_threshold": 0.70, "auto_decline_red": False}),
-        mock_mode_enabled=False,
+        mock_mode_enabled=False, decision_log_detail="full",
         developer_name="Dev Team", change_summary="Added multi-factor risk assessment with guideline citations and structured risk factors",
         change_type="new_capability",
     )
@@ -533,7 +541,7 @@ async def seed_agent_versions(verity: Verity, agents: dict, configs: dict) -> di
         inference_config_id=configs["triage_balanced"],
         output_schema=json.dumps({"determination": "string", "confidence": "number", "guideline_citations": "array", "reasoning": "string"}),
         authority_thresholds=json.dumps({}),
-        mock_mode_enabled=False,
+        mock_mode_enabled=False, decision_log_detail="full",
         developer_name="Dev Team", change_summary="Initial release with guidelines-based appetite assessment",
         change_type="major_redesign",
     )
@@ -553,7 +561,7 @@ async def seed_task_versions(verity: Verity, tasks: dict, configs: dict) -> dict
         major_version=0, minor_version=9, patch_version=0,
         lifecycle_state="draft", channel="development",
         inference_config_id=configs["classification_strict"],
-        output_schema=None, mock_mode_enabled=False,
+        output_schema=None, mock_mode_enabled=False, decision_log_detail="standard",
         developer_name="Dev Team", change_summary="Initial classifier with 6 document types",
         change_type="major_redesign",
     )
@@ -574,7 +582,7 @@ async def seed_task_versions(verity: Verity, tasks: dict, configs: dict) -> dict
         lifecycle_state="draft", channel="development",
         inference_config_id=configs["classification_strict"],
         output_schema=json.dumps({"document_type": "string", "confidence": "number", "classification_notes": "string"}),
-        mock_mode_enabled=False,
+        mock_mode_enabled=False, decision_log_detail="standard",
         developer_name="Dev Team", change_summary="Added board_resolution and other types, improved prompt for accuracy",
         change_type="new_capability",
     )
@@ -588,7 +596,7 @@ async def seed_task_versions(verity: Verity, tasks: dict, configs: dict) -> dict
         lifecycle_state="draft", channel="development",
         inference_config_id=configs["extraction_deterministic"],
         output_schema=json.dumps({"fields": "object", "low_confidence_fields": "array", "unextractable_fields": "array", "extraction_complete": "boolean"}),
-        mock_mode_enabled=False,
+        mock_mode_enabled=False, decision_log_detail="standard",
         developer_name="Dev Team", change_summary="Initial release with 20-field D&O application extraction",
         change_type="major_redesign",
     )
@@ -1106,26 +1114,49 @@ async def seed_governance_artifacts(verity, agents, tasks, agent_versions, task_
     """Seed ground truth datasets, validation runs, model cards, and metric thresholds."""
 
     # Ground truth datasets (three-table design: dataset -> record -> annotation)
+    # 4 datasets: classifier (54 docs), extractor (10 D&O apps), triage (4 subs), appetite (4 subs)
     gt_classifier = await verity.registry.register_ground_truth_dataset(
         entity_type="task", entity_id=tasks["document_classifier"]["id"],
         name="classifier_ground_truth_v1", version="1.0",
-        description="200 SME-labeled insurance documents (50 per major type)",
+        description="54 SME-labeled insurance documents across 6 document types",
         purpose="Validate document classification accuracy before champion promotion",
         quality_tier="silver", status="ready",
         owner_name="Maria Santos, Senior UW", created_by="Maria Santos, Senior UW",
-        record_count=200, designed_for_version_id=None,
-        coverage_notes="Covers D&O applications, GL applications, loss runs, financial statements. 50 per major type.",
+        record_count=54, designed_for_version_id=None,
+        coverage_notes="10 D&O apps, 10 GL apps, 20 loss runs, 7 financials, 2 board resolutions, 5 GL supplementals.",
+    )
+
+    gt_extractor = await verity.registry.register_ground_truth_dataset(
+        entity_type="task", entity_id=tasks["field_extractor"]["id"],
+        name="extractor_ground_truth_v1", version="1.0",
+        description="10 D&O applications with hand-verified field values",
+        purpose="Validate field extraction accuracy before champion promotion",
+        quality_tier="silver", status="ready",
+        owner_name="Maria Santos, Senior UW", created_by="Maria Santos, Senior UW",
+        record_count=10, designed_for_version_id=None,
+        coverage_notes="All 10 D&O application PDFs with 20 fields each verified against source documents.",
     )
 
     gt_triage = await verity.registry.register_ground_truth_dataset(
         entity_type="agent", entity_id=agents["triage_agent"]["id"],
         name="triage_ground_truth_v1", version="1.0",
-        description="20 SME-labeled submissions with risk scores and routing decisions",
+        description="4 SME-labeled submissions with risk scores and routing decisions",
         purpose="Validate triage risk scoring accuracy before champion promotion",
         quality_tier="silver", status="ready",
         owner_name="James Okafor, Model Risk", created_by="James Okafor, Model Risk",
-        record_count=20, designed_for_version_id=None,
-        coverage_notes="Mix of Green/Amber/Red submissions across D&O and GL lines.",
+        record_count=4, designed_for_version_id=None,
+        coverage_notes="1 Green, 1 Amber (D&O), 1 Red (GL), 1 Amber (GL).",
+    )
+
+    gt_appetite = await verity.registry.register_ground_truth_dataset(
+        entity_type="agent", entity_id=agents["appetite_agent"]["id"],
+        name="appetite_ground_truth_v1", version="1.0",
+        description="4 SME-labeled submissions with appetite determinations",
+        purpose="Validate appetite assessment accuracy before champion promotion",
+        quality_tier="silver", status="ready",
+        owner_name="James Okafor, Model Risk", created_by="James Okafor, Model Risk",
+        record_count=4, designed_for_version_id=None,
+        coverage_notes="1 within appetite, 1 borderline, 1 outside appetite, 1 within appetite (GL).",
     )
 
     # Validation runs
@@ -1202,6 +1233,263 @@ async def seed_governance_artifacts(verity, agents, tasks, agent_versions, task_
             metric_name=metric, field_name=None, minimum_acceptable=min_val, target_champion=target,
         )
     print(f"  + 4 metric thresholds")
+
+    return {
+        "gt_classifier": gt_classifier, "gt_extractor": gt_extractor,
+        "gt_triage": gt_triage, "gt_appetite": gt_appetite,
+    }
+
+
+# ══════════════════════════════════════════════════════════════
+# STEP 13b: GROUND TRUTH RECORDS + ANNOTATIONS
+# ══════════════════════════════════════════════════════════════
+
+async def seed_ground_truth_records(verity, gt_datasets, tasks, agents):
+    """Populate ground truth records and authoritative annotations.
+
+    Creates records from the 54 seed documents and 4 demo submissions,
+    each with a single SME annotation (silver tier).
+    """
+    from pathlib import Path
+    import json
+
+    # ── 1. CLASSIFIER GROUND TRUTH (54 documents) ────────────
+    # Each document becomes a record. The filename determines the type.
+    gt_cls_id = gt_datasets["gt_classifier"]["id"]
+    doc_dir = Path("/app/uw_demo/seed_docs/filled")
+    if not doc_dir.exists():
+        doc_dir = Path(__file__).parents[2] / "seed_docs" / "filled"
+
+    # Map filename prefix to document type
+    type_map = {
+        "do_app_": "do_application",
+        "gl_app_": "gl_application",
+        "loss_run_": "loss_run",
+        "financial_stmt_": "financial_statement",
+        "board_resolution_": "board_resolution",
+        "supplemental_gl_": "supplemental_gl",
+    }
+
+    record_idx = 0
+    if doc_dir.exists():
+        for filepath in sorted(doc_dir.iterdir()):
+            # Determine document type from filename
+            doc_type = None
+            for prefix, dtype in type_map.items():
+                if filepath.name.startswith(prefix):
+                    doc_type = dtype
+                    break
+            if not doc_type:
+                continue
+
+            # For text files, read content. For PDFs, reference the file.
+            if filepath.suffix == ".txt":
+                content = filepath.read_text(errors="replace")[:5000]  # truncate for DB
+                input_data = {"document_text": content, "document_filename": filepath.name}
+            else:
+                # PDF — reference only (classifier would receive PDF content blocks at runtime)
+                input_data = {"document_filename": filepath.name, "document_type_hint": "pdf"}
+
+            record = await verity.registry.register_ground_truth_record(
+                dataset_id=str(gt_cls_id), record_index=record_idx,
+                source_type="document",
+                source_provider="local", source_container="seed_docs",
+                source_key=f"filled/{filepath.name}",
+                source_description=f"{doc_type} document: {filepath.name}",
+                input_data=input_data,
+                tool_mock_overrides=None,
+                tags=[doc_type, filepath.suffix.lstrip(".")],
+                difficulty="standard",
+                record_notes=None,
+            )
+
+            # Authoritative annotation: the correct document type
+            await verity.registry.register_ground_truth_annotation(
+                record_id=str(record["id"]), dataset_id=str(gt_cls_id),
+                annotator_type="human_sme",
+                labeled_by="Maria Santos, Senior UW",
+                label_confidence=0.99,
+                label_notes=f"Document type determined from filename and content review",
+                judge_model=None, judge_prompt_version_id=None, judge_reasoning=None,
+                expected_output={"document_type": doc_type, "confidence": 0.95},
+                is_authoritative=True,
+            )
+            record_idx += 1
+
+    print(f"  + classifier ground truth: {record_idx} records with annotations")
+
+    # ── 2. EXTRACTOR GROUND TRUTH (10 D&O applications) ──────
+    # Expected field values from the seed submission data
+    gt_ext_id = gt_datasets["gt_extractor"]["id"]
+
+    # D&O company data for the 10 applications
+    do_companies = [
+        {"name": "Acme Dynamics LLC", "fein": "12-3456789", "entity_type": "LLC",
+         "state": "Delaware", "revenue": 50000000, "employees": 250,
+         "board_size": 7, "independent": 4, "filename": "do_app_acme_dynamics.pdf"},
+        {"name": "TechFlow Industries Inc", "fein": "98-7654321", "entity_type": "Corporation",
+         "state": "California", "revenue": 120000000, "employees": 800,
+         "board_size": 9, "independent": 5, "filename": "do_app_techflow_industries.pdf"},
+        {"name": "Brightline Analytics Corp", "fein": "45-6789012", "entity_type": "Corporation",
+         "state": "Massachusetts", "revenue": 35000000, "employees": 180,
+         "board_size": 7, "independent": 4, "filename": "do_app_brightline_analytics.pdf"},
+        {"name": "Continental Services Group", "fein": "67-8901234", "entity_type": "Corporation",
+         "state": "Illinois", "revenue": 85000000, "employees": 500,
+         "board_size": 8, "independent": 5, "filename": "do_app_continental_services.pdf"},
+        {"name": "Horizon Capital Partners", "fein": "23-4567890", "entity_type": "LLC",
+         "state": "New York", "revenue": 200000000, "employees": 120,
+         "board_size": 6, "independent": 3, "filename": "do_app_horizon_capital.pdf"},
+        {"name": "NovaTech Holdings Inc", "fein": "34-5678901", "entity_type": "Corporation",
+         "state": "Texas", "revenue": 75000000, "employees": 350,
+         "board_size": 7, "independent": 4, "filename": "do_app_novatech_holdings.pdf"},
+        {"name": "Pacific Ventures LLC", "fein": "56-7890123", "entity_type": "LLC",
+         "state": "Oregon", "revenue": 45000000, "employees": 200,
+         "board_size": 5, "independent": 3, "filename": "do_app_pacific_ventures.pdf"},
+        {"name": "Pinnacle Software Inc", "fein": "78-9012345", "entity_type": "Corporation",
+         "state": "Washington", "revenue": 60000000, "employees": 280,
+         "board_size": 7, "independent": 4, "filename": "do_app_pinnacle_software.pdf"},
+        {"name": "Sterling Advisory Group", "fein": "89-0123456", "entity_type": "Corporation",
+         "state": "Connecticut", "revenue": 95000000, "employees": 150,
+         "board_size": 8, "independent": 5, "filename": "do_app_sterling_advisory.pdf"},
+        {"name": "Westfield Manufacturing Corp", "fein": "01-2345678", "entity_type": "Corporation",
+         "state": "Ohio", "revenue": 110000000, "employees": 700,
+         "board_size": 9, "independent": 5, "filename": "do_app_westfield_manufacturing.pdf"},
+    ]
+
+    for idx, company in enumerate(do_companies):
+        record = await verity.registry.register_ground_truth_record(
+            dataset_id=str(gt_ext_id), record_index=idx,
+            source_type="document",
+            source_provider="local", source_container="seed_docs",
+            source_key=f"filled/{company['filename']}",
+            source_description=f"D&O application for {company['name']}",
+            input_data={"document_filename": company["filename"], "document_type": "do_application"},
+            tool_mock_overrides=None,
+            tags=["do_application", "extraction"],
+            difficulty="standard",
+            record_notes=None,
+        )
+
+        await verity.registry.register_ground_truth_annotation(
+            record_id=str(record["id"]), dataset_id=str(gt_ext_id),
+            annotator_type="human_sme",
+            labeled_by="Maria Santos, Senior UW",
+            label_confidence=0.98,
+            label_notes="Field values verified against source PDF",
+            judge_model=None, judge_prompt_version_id=None, judge_reasoning=None,
+            expected_output={
+                "fields": {
+                    "named_insured": {"value": company["name"], "confidence": 0.98},
+                    "fein": {"value": company["fein"], "confidence": 0.97},
+                    "entity_type": {"value": company["entity_type"], "confidence": 0.95},
+                    "state_of_incorporation": {"value": company["state"], "confidence": 0.96},
+                    "annual_revenue": {"value": company["revenue"], "confidence": 0.95},
+                    "employee_count": {"value": company["employees"], "confidence": 0.94},
+                    "board_size": {"value": company["board_size"], "confidence": 0.92},
+                    "independent_directors": {"value": company["independent"], "confidence": 0.90},
+                },
+                "extraction_complete": True,
+            },
+            is_authoritative=True,
+        )
+
+    print(f"  + extractor ground truth: {len(do_companies)} records with annotations")
+
+    # ── 3. TRIAGE GROUND TRUTH (4 submissions) ───────────────
+    gt_tri_id = gt_datasets["gt_triage"]["id"]
+
+    triage_cases = [
+        {"sub_id": "00000001-0001-0001-0001-000000000001", "name": "Acme D&O",
+         "lob": "DO", "named_insured": "Acme Dynamics LLC",
+         "expected": {"risk_score": "Green", "routing": "assign_to_uw", "confidence": 0.89},
+         "difficulty": "easy"},
+        {"sub_id": "00000002-0002-0002-0002-000000000002", "name": "TechFlow D&O",
+         "lob": "DO", "named_insured": "TechFlow Industries Inc",
+         "expected": {"risk_score": "Amber", "routing": "assign_to_senior_uw", "confidence": 0.72},
+         "difficulty": "medium"},
+        {"sub_id": "00000003-0003-0003-0003-000000000003", "name": "Meridian GL",
+         "lob": "GL", "named_insured": "Meridian Holdings Corp",
+         "expected": {"risk_score": "Red", "routing": "refer_to_management", "confidence": 0.85},
+         "difficulty": "easy"},
+        {"sub_id": "00000004-0004-0004-0004-000000000004", "name": "Acme GL",
+         "lob": "GL", "named_insured": "Acme Dynamics LLC",
+         "expected": {"risk_score": "Amber", "routing": "assign_to_senior_uw", "confidence": 0.74},
+         "difficulty": "medium"},
+    ]
+
+    for idx, tc in enumerate(triage_cases):
+        record = await verity.registry.register_ground_truth_record(
+            dataset_id=str(gt_tri_id), record_index=idx,
+            source_type="submission",
+            source_provider=None, source_container=None, source_key=None,
+            source_description=f"Submission: {tc['name']}",
+            input_data={"submission_id": tc["sub_id"], "lob": tc["lob"], "named_insured": tc["named_insured"]},
+            tool_mock_overrides=None,  # uses real tool implementations
+            tags=[tc["lob"], tc["expected"]["risk_score"].lower()],
+            difficulty=tc["difficulty"],
+            record_notes=None,
+        )
+
+        await verity.registry.register_ground_truth_annotation(
+            record_id=str(record["id"]), dataset_id=str(gt_tri_id),
+            annotator_type="human_sme",
+            labeled_by="James Okafor, Model Risk",
+            label_confidence=0.95,
+            label_notes=f"Risk score determined by senior underwriter review of full submission",
+            judge_model=None, judge_prompt_version_id=None, judge_reasoning=None,
+            expected_output=tc["expected"],
+            is_authoritative=True,
+        )
+
+    print(f"  + triage ground truth: {len(triage_cases)} records with annotations")
+
+    # ── 4. APPETITE GROUND TRUTH (4 submissions) ─────────────
+    gt_app_id = gt_datasets["gt_appetite"]["id"]
+
+    appetite_cases = [
+        {"sub_id": "00000001-0001-0001-0001-000000000001", "name": "Acme D&O",
+         "lob": "DO", "named_insured": "Acme Dynamics LLC",
+         "expected": {"determination": "within_appetite", "confidence": 0.92},
+         "difficulty": "easy"},
+        {"sub_id": "00000002-0002-0002-0002-000000000002", "name": "TechFlow D&O",
+         "lob": "DO", "named_insured": "TechFlow Industries Inc",
+         "expected": {"determination": "borderline", "confidence": 0.65},
+         "difficulty": "hard"},
+        {"sub_id": "00000003-0003-0003-0003-000000000003", "name": "Meridian GL",
+         "lob": "GL", "named_insured": "Meridian Holdings Corp",
+         "expected": {"determination": "outside_appetite", "confidence": 0.94},
+         "difficulty": "easy"},
+        {"sub_id": "00000004-0004-0004-0004-000000000004", "name": "Acme GL",
+         "lob": "GL", "named_insured": "Acme Dynamics LLC",
+         "expected": {"determination": "within_appetite", "confidence": 0.81},
+         "difficulty": "medium"},
+    ]
+
+    for idx, tc in enumerate(appetite_cases):
+        record = await verity.registry.register_ground_truth_record(
+            dataset_id=str(gt_app_id), record_index=idx,
+            source_type="submission",
+            source_provider=None, source_container=None, source_key=None,
+            source_description=f"Submission: {tc['name']}",
+            input_data={"submission_id": tc["sub_id"], "lob": tc["lob"], "named_insured": tc["named_insured"]},
+            tool_mock_overrides=None,
+            tags=[tc["lob"], tc["expected"]["determination"]],
+            difficulty=tc["difficulty"],
+            record_notes=None,
+        )
+
+        await verity.registry.register_ground_truth_annotation(
+            record_id=str(record["id"]), dataset_id=str(gt_app_id),
+            annotator_type="human_sme",
+            labeled_by="James Okafor, Model Risk",
+            label_confidence=0.95,
+            label_notes=f"Appetite determination based on guideline review by senior underwriter",
+            judge_model=None, judge_prompt_version_id=None, judge_reasoning=None,
+            expected_output=tc["expected"],
+            is_authoritative=True,
+        )
+
+    print(f"  + appetite ground truth: {len(appetite_cases)} records with annotations")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1373,6 +1661,55 @@ async def seed_decisions(verity, agent_versions, task_versions):
             ))
 
     print(f"  + {len(override_decisions)} override logs")
+
+
+# ══════════════════════════════════════════════════════════════
+# STEP 20: PLATFORM SETTINGS
+# ══════════════════════════════════════════════════════════════
+
+async def seed_platform_settings(verity: Verity):
+    """Seed Verity platform settings (decision logging levels, thresholds).
+
+    These live in verity_db.platform_settings and control governance
+    behavior across all consuming applications.
+    """
+    settings_data = [
+        # Decision Logging
+        ("decision_log_detail", "standard", "decision_logging", "Default Detail Level",
+         "Controls how much data is stored in the decision log for each AI invocation. "
+         "FULL=complete payloads (for audit/replay). STANDARD=redact binary/large content. "
+         "SUMMARY=first 500 chars only. METADATA=status/tokens/duration only. NONE=no log entry.",
+         "select", "full,standard,summary,metadata,none", 1),
+
+        ("redact_input_threshold", "10000", "decision_logging", "Input Redaction Threshold (chars)",
+         "Text fields in input_json longer than this are truncated at STANDARD level. "
+         "Base64 content and fields starting with _ are always redacted at STANDARD.",
+         "number", None, 2),
+
+        ("redact_output_threshold", "10000", "decision_logging", "Output Redaction Threshold (chars)",
+         "Text fields in output_json longer than this are truncated at STANDARD level.",
+         "number", None, 3),
+
+        ("redact_message_threshold", "5000", "decision_logging", "Message Block Threshold (chars)",
+         "Individual message content blocks in message_history longer than this are truncated. "
+         "Document/image content blocks are always removed at STANDARD level.",
+         "number", None, 4),
+
+        ("redact_tool_payload_threshold", "1000", "decision_logging", "Tool Payload Threshold (chars)",
+         "Tool call input_data and output_data payloads longer than this are truncated at STANDARD level.",
+         "number", None, 5),
+    ]
+
+    # Write to verity_db using the SDK's execute_raw (named params)
+    for key, value, category, display_name, desc, input_type, options, sort_order in settings_data:
+        await verity.db.execute_raw(
+            """INSERT INTO platform_settings (key, value, category, display_name, description, input_type, options, sort_order)
+            VALUES (%(key)s, %(value)s, %(category)s, %(display_name)s, %(description)s, %(input_type)s, %(options)s, %(sort_order)s)
+            ON CONFLICT (key) DO NOTHING""",
+            {"key": key, "value": value, "category": category, "display_name": display_name,
+             "description": desc, "input_type": input_type, "options": options, "sort_order": sort_order},
+        )
+    print(f"  + {len(settings_data)} platform settings seeded")
 
 
 # ══════════════════════════════════════════════════════════════

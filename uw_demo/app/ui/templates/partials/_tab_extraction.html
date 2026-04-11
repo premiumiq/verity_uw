@@ -34,7 +34,8 @@
     <div class="verity-card-header">Action Required — Review flagged fields and approve</div>
 </div>
 
-<form method="POST" action="/submissions/{{ sub.id }}/approve-extraction">
+<form method="POST" action="/submissions/{{ sub.id }}/approve-extraction"
+      onsubmit="var b=this.querySelector('#approve-btn'); b.disabled=true; b.textContent='Approving...'; document.getElementById('approve-status').hidden=false; return true;">
     <input type="hidden" name="reviewer_name" value="Underwriter">
 
     <table class="verity-table">
@@ -97,7 +98,11 @@
     </table>
 
     <div class="verity-action-bar">
-        <button type="submit" class="verity-btn verity-btn-primary">Approve & Continue</button>
+        <button type="submit" id="approve-btn" class="verity-btn verity-btn-primary">Approve & Continue</button>
+        <div id="approve-status" hidden>
+            <span class="verity-spinner"></span>
+            <span class="verity-detail-label">Approving and triggering risk assessment...</span>
+        </div>
     </div>
 </form>
 
