@@ -30,11 +30,21 @@ import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Callable, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import anthropic
 
 logger = logging.getLogger(__name__)
+
+
+# ── CONSTANTS ────────────────────────────────────────────────────
+# Maximum nesting depth of sub-agent delegation. Parent calls are at
+# depth 0, direct sub-agents at 1, their sub-agents at 2, etc. Once
+# decision_depth reaches this value, run_agent refuses to proceed and
+# _dispatch_builtin_tool refuses to spawn a further delegation. Keeps
+# recursive A->B->A->... loops from running away even if two agents
+# have mutual delegation authorizations.
+MAX_DECISION_DEPTH = 5
 
 # Result types (ExecutionResult, ExecutionEvent, ExecutionEventType) live in
 # verity.contracts.decision. Re-exported here so code that did
@@ -164,8 +174,21 @@ class ExecutionEngine:
         authorized_tools: list,
         mock: Optional[MockContext],
         call_order: int,
+        parent_agent_version_id: Optional[UUID] = None,
+        parent_decision_id: Optional[UUID] = None,
+        decision_depth: int = 0,
+        pipeline_run_id: Optional[UUID] = None,
+        execution_context_id: Optional[UUID] = None,
+        channel: str = "production",
     ) -> dict[str, Any]:
         """Gateway for all tool calls.
+
+        The extra kwargs (parent_agent_version_id, parent_decision_id,
+        decision_depth, pipeline_run_id, execution_context_id, channel)
+        exist for FC-1's delegate_to_agent meta-tool — they flow down
+        into _dispatch_builtin_tool so a spawned sub-agent inherits the
+        parent's correlation ids and the correct depth. All other tool
+        transports ignore them.
 
         When MockContext IS provided (explicit mock control):
           1. Check MockContext.tool_responses for this specific tool
@@ -228,10 +251,24 @@ class ExecutionEngine:
                 }
 
         # Real tool implementation — dispatch based on tool_def.transport
-        return await self._execute_real_tool(tool_name, tool_input, call_order, tool_def)
+        return await self._execute_real_tool(
+            tool_name, tool_input, call_order, tool_def,
+            parent_agent_version_id=parent_agent_version_id,
+            parent_decision_id=parent_decision_id,
+            decision_depth=decision_depth,
+            pipeline_run_id=pipeline_run_id,
+            execution_context_id=execution_context_id,
+            channel=channel,
+        )
 
     async def _execute_real_tool(
-        self, tool_name: str, tool_input: dict, call_order: int, tool_def
+        self, tool_name: str, tool_input: dict, call_order: int, tool_def,
+        parent_agent_version_id: Optional[UUID] = None,
+        parent_decision_id: Optional[UUID] = None,
+        decision_depth: int = 0,
+        pipeline_run_id: Optional[UUID] = None,
+        execution_context_id: Optional[UUID] = None,
+        channel: str = "production",
     ) -> dict[str, Any]:
         """Dispatch a real (non-mocked) tool call.
 
@@ -242,6 +279,9 @@ class ExecutionEngine:
             to the server identified by tool_def.mcp_server_name, addressing
             the remote tool as tool_def.mcp_tool_name (falling back to
             tool_name if the remote name matches Verity's name).
+          - 'verity_builtin' — engine-internal meta-tools (FC-1: delegate_to_agent).
+            Dispatched via _dispatch_builtin_tool; receives the parent
+            context kwargs so delegation works correctly.
 
         All error paths return a dict with `error=True` and an error message
         in output_data — they never raise, because the caller (the agentic
@@ -258,13 +298,25 @@ class ExecutionEngine:
                 tool_name, tool_input, call_order, tool_def,
             )
 
+        if transport == "verity_builtin":
+            return await self._dispatch_builtin_tool(
+                tool_name, tool_input, call_order, tool_def,
+                parent_agent_version_id=parent_agent_version_id,
+                parent_decision_id=parent_decision_id,
+                decision_depth=decision_depth,
+                pipeline_run_id=pipeline_run_id,
+                execution_context_id=execution_context_id,
+                channel=channel,
+            )
+
         return {
             "tool_name": tool_name,
             "call_order": call_order,
             "input_data": tool_input,
             "output_data": {
                 "error": f"Unknown tool transport {transport!r} on '{tool_name}'. "
-                         f"Expected python_inprocess, mcp_stdio, mcp_sse, or mcp_http."
+                         f"Expected python_inprocess, mcp_stdio, mcp_sse, mcp_http, "
+                         f"or verity_builtin."
             },
             "error": True,
             "transport": transport,
@@ -389,6 +441,210 @@ class ExecutionEngine:
             )
 
     # ══════════════════════════════════════════════════════════
+    # BUILTIN META-TOOLS (FC-1: sub-agent delegation)
+    # ══════════════════════════════════════════════════════════
+
+    async def _dispatch_builtin_tool(
+        self,
+        tool_name: str,
+        tool_input: dict,
+        call_order: int,
+        tool_def,
+        parent_agent_version_id: Optional[UUID] = None,
+        parent_decision_id: Optional[UUID] = None,
+        decision_depth: int = 0,
+        pipeline_run_id: Optional[UUID] = None,
+        execution_context_id: Optional[UUID] = None,
+        channel: str = "production",
+    ) -> dict[str, Any]:
+        """Dispatch a Verity-internal meta-tool (transport='verity_builtin').
+
+        Router: the only meta-tool today is delegate_to_agent. Future
+        additions (e.g., fork_session, replay_decision) branch off the
+        same method. Unknown builtin names come back as a tool_result
+        error listing the known meta-tools — same pattern as unknown
+        transport and unknown MCP tool.
+        """
+        if tool_name == "delegate_to_agent":
+            return await self._delegate_to_agent(
+                tool_input, call_order,
+                parent_agent_version_id=parent_agent_version_id,
+                parent_decision_id=parent_decision_id,
+                decision_depth=decision_depth,
+                pipeline_run_id=pipeline_run_id,
+                execution_context_id=execution_context_id,
+                channel=channel,
+            )
+        return {
+            "tool_name": tool_name,
+            "call_order": call_order,
+            "input_data": tool_input,
+            "output_data": {
+                "error": f"Unknown builtin meta-tool {tool_name!r}. "
+                         f"Known: ['delegate_to_agent']."
+            },
+            "error": True,
+            "transport": "verity_builtin",
+        }
+
+    async def _delegate_to_agent(
+        self,
+        tool_input: dict,
+        call_order: int,
+        parent_agent_version_id: Optional[UUID] = None,
+        parent_decision_id: Optional[UUID] = None,
+        decision_depth: int = 0,
+        pipeline_run_id: Optional[UUID] = None,
+        execution_context_id: Optional[UUID] = None,
+        channel: str = "production",
+    ) -> dict[str, Any]:
+        """Spawn a sub-agent as a fully governed nested run.
+
+        Flow:
+          1. Validate input has agent_name + context.
+          2. Refuse if decision_depth + 1 > MAX_DECISION_DEPTH.
+          3. Require parent_agent_version_id (internal programming error
+             otherwise — _gateway_tool_call must thread this in for
+             verity_builtin tools).
+          4. Check registry.check_delegation_authorized(parent, child_name).
+             Unauthorized -> error tool_result listing the authorized targets.
+          5. Call self.run_agent with parent_decision_id + incremented depth,
+             pinning to resolved_child_version_id if the delegation row
+             specifies it (version-pinned) or using the champion otherwise.
+          6. Build a tool_record from the sub-agent's ExecutionResult.
+
+        The sub-run writes its own row to agent_decision_log with
+        parent_decision_id set to the caller's pre-generated self_decision_id.
+        The caller's tool_calls_made gets this tool_record summary with the
+        sub-decision's id for easy drill-through in the audit UI.
+        """
+        transport = "verity_builtin"
+
+        # Validate shape
+        child_name = tool_input.get("agent_name")
+        child_context = tool_input.get("context")
+        reason = tool_input.get("reason")
+
+        if not isinstance(child_name, str) or not child_name.strip():
+            return _builtin_error(
+                "delegate_to_agent", tool_input, call_order,
+                "Missing or invalid 'agent_name': must be a non-empty string.",
+            )
+        if child_context is None:
+            return _builtin_error(
+                "delegate_to_agent", tool_input, call_order,
+                "Missing 'context': pass a dict with the sub-agent's input context.",
+            )
+        if not isinstance(child_context, dict):
+            return _builtin_error(
+                "delegate_to_agent", tool_input, call_order,
+                f"'context' must be a dict; got {type(child_context).__name__}.",
+            )
+
+        # Depth guard
+        next_depth = decision_depth + 1
+        if next_depth >= MAX_DECISION_DEPTH:
+            return _builtin_error(
+                "delegate_to_agent", tool_input, call_order,
+                f"Delegation refused: sub-agent would run at depth {next_depth}, "
+                f"at or past the limit MAX_DECISION_DEPTH={MAX_DECISION_DEPTH}. "
+                "Redesign the agent graph to reduce nesting.",
+            )
+
+        if parent_agent_version_id is None:
+            # Programming error — the gateway threading is broken.
+            # Surface it as a tool error so the loop can continue.
+            return _builtin_error(
+                "delegate_to_agent", tool_input, call_order,
+                "Internal error: parent_agent_version_id not propagated to "
+                "_delegate_to_agent. The engine's gateway threading is broken.",
+            )
+
+        # Governance gate
+        authorization = await self.registry.check_delegation_authorized(
+            parent_agent_version_id=parent_agent_version_id,
+            child_agent_name=child_name,
+        )
+        if not authorization:
+            # Pull the authorized targets list for a helpful error.
+            authorized = await self.registry.list_delegations_for_parent(
+                parent_agent_version_id=parent_agent_version_id,
+            )
+            allowed = sorted({
+                row.get("effective_child_name") for row in authorized
+                if row.get("authorized") and row.get("effective_child_name")
+            })
+            return _builtin_error(
+                "delegate_to_agent", tool_input, call_order,
+                f"Not authorized to delegate to {child_name!r}. "
+                f"Authorized delegation targets for this agent version: {allowed or 'none'}. "
+                "Register an agent_version_delegation row if this is intentional.",
+            )
+
+        resolved_version_id = authorization.get("resolved_child_version_id")
+        if resolved_version_id is None:
+            # Could happen if the child agent has no current champion yet
+            # (champion-tracking row, no champion promoted). Refuse cleanly.
+            return _builtin_error(
+                "delegate_to_agent", tool_input, call_order,
+                f"Delegation row found for {child_name!r} but it resolves to no "
+                "runnable version (the child agent has no current champion). "
+                "Promote a champion or pin the delegation to a specific version.",
+            )
+
+        # Spawn the sub-agent run.
+        logger.info(
+            "Delegating: parent_av=%s -> child=%s (depth %d -> %d, reason=%r)",
+            parent_agent_version_id, child_name, decision_depth, next_depth, reason,
+        )
+        try:
+            sub_result = await self.run_agent(
+                agent_name=child_name,
+                context=child_context,
+                channel=channel,
+                pipeline_run_id=pipeline_run_id,
+                parent_decision_id=parent_decision_id,
+                decision_depth=next_depth,
+                step_name=f"delegated_from_depth_{decision_depth}",
+                mock=None,  # sub-agent runs live; mocks don't flow through delegation boundary
+                execution_context_id=execution_context_id,
+            )
+        except Exception as e:
+            logger.exception(
+                "Sub-agent run raised during delegation: %s -> %s",
+                parent_agent_version_id, child_name,
+            )
+            return _builtin_error(
+                "delegate_to_agent", tool_input, call_order,
+                f"Sub-agent {child_name!r} raised during delegation: "
+                f"{type(e).__name__}: {e}",
+            )
+
+        # Success-or-failure tool_record. status=='failed' still flows back
+        # so the caller's Claude sees the sub-agent's error and can decide.
+        return {
+            "tool_name": "delegate_to_agent",
+            "call_order": call_order,
+            "input_data": tool_input,
+            "output_data": {
+                "sub_decision_log_id": str(sub_result.decision_log_id),
+                "sub_entity_name": sub_result.entity_name,
+                "sub_version_label": sub_result.version_label,
+                "sub_status": sub_result.status,
+                "output": sub_result.output,
+                "reasoning_text": sub_result.reasoning_text,
+                "sub_input_tokens": sub_result.input_tokens,
+                "sub_output_tokens": sub_result.output_tokens,
+                "sub_duration_ms": sub_result.duration_ms,
+                "sub_error_message": sub_result.error_message,
+            },
+            "error": sub_result.status != "complete",
+            "transport": transport,
+            "delegation_id": str(authorization["delegation_id"]),
+            "resolved_child_version_id": str(resolved_version_id),
+        }
+
+    # ══════════════════════════════════════════════════════════
     # AGENT EXECUTION (multi-turn tool loop)
     # ══════════════════════════════════════════════════════════
 
@@ -411,10 +667,49 @@ class ExecutionEngine:
         `mock` controls tool-level mocking only (see MockContext).
         LLM-level mocking was retired in Phase 3d — use FixtureEngine
         for deterministic no-LLM execution.
+
+        FC-1 additions:
+          - Pre-generates this run's decision log id (self_decision_id)
+            at entry so that sub-agent calls made during the loop can set
+            their parent_decision_id to this value BEFORE the parent's
+            decision row is written.
+          - Refuses to run if decision_depth >= MAX_DECISION_DEPTH. Each
+            sub-agent call increments depth; this caps runaway recursion.
         """
         start_ms = _now_ms()
-        logger.info("Agent execution starting: %s (step=%s, tool_mocks=%s)",
-                     agent_name, step_name or "standalone", mock is not None)
+        logger.info(
+            "Agent execution starting: %s (step=%s, tool_mocks=%s, depth=%d)",
+            agent_name, step_name or "standalone", mock is not None, decision_depth,
+        )
+
+        # Pre-generated decision id — threaded into tool dispatch so a
+        # delegate_to_agent call can set its spawned sub-agent's
+        # parent_decision_id to this value before we've written our row.
+        self_decision_id = uuid4()
+
+        # Runaway-recursion guard. MAX_DECISION_DEPTH gates the call BEFORE
+        # any config resolution happens; the error log does include the
+        # agent name so it's clear which call was refused.
+        if decision_depth >= MAX_DECISION_DEPTH:
+            logger.error(
+                "Agent execution refused — decision_depth %d >= MAX_DECISION_DEPTH %d (agent=%s)",
+                decision_depth, MAX_DECISION_DEPTH, agent_name,
+            )
+            return ExecutionResult(
+                decision_log_id=self_decision_id,
+                entity_type="agent",
+                entity_name=agent_name,
+                version_label="",
+                output={},
+                duration_ms=_now_ms() - start_ms,
+                status="failed",
+                error_message=(
+                    f"Refused to run {agent_name!r}: decision_depth={decision_depth} "
+                    f"exceeds MAX_DECISION_DEPTH={MAX_DECISION_DEPTH}. Delegation chain "
+                    "too deep."
+                ),
+            )
+
         config = await self.registry.get_agent_config(agent_name)
         system_prompt, user_messages = _assemble_prompts(config.prompts, context)
         tools = _build_tool_definitions(config.tools)
@@ -464,9 +759,22 @@ class ExecutionEngine:
                                 continue
 
                             # ── TOOL GATEWAY ──
+                            # parent_agent_version_id + parent_decision_id +
+                            # decision_depth are threaded here so a
+                            # delegate_to_agent meta-tool can (a) check the
+                            # agent_version_delegation table with the right
+                            # parent version, (b) set the spawned sub-agent's
+                            # parent_decision_id to this run's pre-generated
+                            # self_decision_id, and (c) increment depth.
                             tool_record = await self._gateway_tool_call(
                                 block.name, block.input, config.tools,
                                 mock, len(tool_calls_made) + 1,
+                                parent_agent_version_id=config.agent_version_id,
+                                parent_decision_id=self_decision_id,
+                                decision_depth=decision_depth,
+                                pipeline_run_id=pipeline_run_id,
+                                execution_context_id=execution_context_id,
+                                channel=channel,
                             )
                             tool_calls_made.append(tool_record)
 
@@ -492,12 +800,13 @@ class ExecutionEngine:
             is_mocked = mock is not None
 
             log_result = await self._log_decision(
+                id=self_decision_id,  # FC-1: pre-generated so sub-agents link correctly
                 entity_type=EntityType.AGENT, config=config, context=context,
                 output=output, output_text=output_text,
                 tool_calls_made=tool_calls_made, message_history=message_history,
                 total_input_tokens=total_input_tokens,
                 total_output_tokens=total_output_tokens,
-                duration_ms=duration_ms, 
+                duration_ms=duration_ms,
                 channel=channel, pipeline_run_id=pipeline_run_id,
                 parent_decision_id=parent_decision_id,
                 decision_depth=decision_depth, step_name=step_name,
@@ -505,9 +814,9 @@ class ExecutionEngine:
                 execution_context_id=execution_context_id,
             )
 
-            logger.info("Agent execution complete: %s (%dms, %d tool calls, %d+%d tokens)",
+            logger.info("Agent execution complete: %s (%dms, %d tool calls, %d+%d tokens, depth=%d)",
                          agent_name, duration_ms, len(tool_calls_made),
-                         total_input_tokens, total_output_tokens)
+                         total_input_tokens, total_output_tokens, decision_depth)
             return ExecutionResult(
                 decision_log_id=log_result["decision_log_id"],
                 entity_type="agent", entity_name=agent_name,
@@ -524,11 +833,16 @@ class ExecutionEngine:
         except Exception as e:
             duration_ms = _now_ms() - start_ms
             logger.error("Agent execution failed: %s (%dms)", agent_name, duration_ms, exc_info=True)
+            # Even on error we log with self_decision_id — sub-agents spawned
+            # during the (failed) loop already wrote rows referencing this id
+            # as their parent_decision_id. Writing the parent's row with the
+            # pre-generated id keeps the audit graph intact.
             log_result = await self._log_decision(
+                id=self_decision_id,
                 entity_type=EntityType.AGENT, config=config, context=context,
                 output={}, output_text="", tool_calls_made=[], message_history=[],
                 total_input_tokens=0, total_output_tokens=0,
-                duration_ms=duration_ms, 
+                duration_ms=duration_ms,
                 channel=channel, pipeline_run_id=pipeline_run_id,
                 parent_decision_id=parent_decision_id,
                 decision_depth=decision_depth, step_name=step_name,
@@ -793,8 +1107,17 @@ class ExecutionEngine:
         execution_context_id: Optional[UUID] = None,
         run_purpose: str = "production",
         reproduced_from_decision_id: Optional[UUID] = None,
+        id: Optional[UUID] = None,
     ) -> dict:
-        """Create a decision log entry with full snapshot."""
+        """Create a decision log entry with full snapshot.
+
+        FC-1: `id` is an optional caller-supplied UUID. When provided,
+        it's used as the decision log row's primary key (via COALESCE
+        in the SQL); otherwise the SQL column default uuid_generate_v4()
+        generates one. The runtime pre-generates the id at the start of
+        run_agent so sub-agent calls made during the loop can set their
+        parent_decision_id correctly before this row is written.
+        """
         snapshot = config.get_inference_snapshot() if hasattr(config, 'get_inference_snapshot') else {}
 
         # Determine version_id based on entity type
@@ -806,6 +1129,7 @@ class ExecutionEngine:
             version_id = getattr(config, 'id', None) or UUID(int=0)
 
         return await self.decisions.log_decision(DecisionLogCreate(
+            id=id,
             entity_type=entity_type,
             entity_version_id=version_id,
             prompt_version_ids=[p.prompt_version_id for p in config.prompts] if hasattr(config, 'prompts') else [],
@@ -1070,4 +1394,27 @@ def _mcp_error(
         "error": True,
         "transport": transport,
         "mcp_server_name": server_name,
+    }
+
+
+def _builtin_error(
+    tool_name: str,
+    tool_input: dict,
+    call_order: int,
+    message: str,
+) -> dict[str, Any]:
+    """Build an error-shaped tool_calls_made entry for a verity_builtin failure.
+
+    Used for delegate_to_agent validation / authorization / depth / child-run
+    errors. The error propagates back to Claude as an is_error=True
+    tool_result; the agent decides whether to retry with different args,
+    fall back to its own reasoning, or surface the issue.
+    """
+    return {
+        "tool_name": tool_name,
+        "call_order": call_order,
+        "input_data": tool_input,
+        "output_data": {"error": message},
+        "error": True,
+        "transport": "verity_builtin",
     }
