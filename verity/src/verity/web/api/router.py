@@ -18,6 +18,7 @@ from fastapi import APIRouter
 
 from verity.web.api.registry import build_registry_router
 from verity.web.api.reporting import build_reporting_router
+from verity.web.api.runtime import build_runtime_router
 
 
 def build_api_router(verity) -> APIRouter:
@@ -38,10 +39,13 @@ def build_api_router(verity) -> APIRouter:
     # Registry — catalog lists, resolved configs, version listings.
     router.include_router(build_registry_router(verity))
 
+    # Runtime — synchronous run_agent / run_task / run_pipeline.
+    router.include_router(build_runtime_router(verity))
+
     # Reporting — dashboard + inventory aggregates.
     router.include_router(build_reporting_router(verity))
 
-    # Additional sub-routers (runtime, lifecycle, decisions, applications,
+    # Additional sub-routers (lifecycle, decisions, applications,
     # authoring, draft edit, audit) will slot in here as they are built out.
 
     return router
