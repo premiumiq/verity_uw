@@ -1,0 +1,132 @@
+<!--
+  GROUND TRUTH DETAIL — Dataset records + annotations
+
+  DATA: dataset, records
+-->
+{% extends "base.html" %}
+
+{% block title %}{{ dataset.name }} — Ground Truth{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/ground-truth">Ground Truth</a>
+    <span class="separator">›</span>
+    <span>{{ dataset.name }}</span>
+{% endblock %}
+
+{% block page_title %}{{ dataset.name }}{% endblock %}
+
+{% block content %}
+
+<div class="verity-card" style="margin-bottom: 20px;">
+    <div class="verity-card-header">About This Dataset</div>
+    <div class="verity-card-footer">
+        This dataset contains {{ dataset.record_count }} records for validating
+        <strong>{{ dataset.entity_display_name or dataset.entity_name }}</strong> ({{ dataset.entity_type }}).
+        Each record has an input and one or more annotations. The authoritative annotation is what
+        the validation runner compares against.
+        Quality tier: <span class="verity-badge verity-badge-{{ dataset.quality_tier }}">{{ dataset.quality_tier }}</span>
+    </div>
+</div>
+
+<!-- Dataset metadata -->
+<div class="verity-card" style="margin-bottom: 20px;">
+    <div class="verity-detail-grid">
+        <div class="verity-detail-label">Entity</div>
+        <div class="verity-detail-value">
+            <span class="verity-badge verity-badge-{{ dataset.entity_type }}">{{ dataset.entity_type }}</span>
+            <a href="/admin/{{ dataset.entity_type }}s/{{ dataset.entity_name }}">{{ dataset.entity_display_name or dataset.entity_name }}</a>
+        </div>
+        <div class="verity-detail-label">Version</div>
+        <div class="verity-detail-value">{{ dataset.version }}</div>
+        <div class="verity-detail-label">Status</div>
+        <div class="verity-detail-value"><span class="verity-badge verity-badge-{{ dataset.status }}">{{ dataset.status }}</span></div>
+        <div class="verity-detail-label">Quality Tier</div>
+        <div class="verity-detail-value"><span class="verity-badge verity-badge-{{ dataset.quality_tier }}">{{ dataset.quality_tier }}</span></div>
+        <div class="verity-detail-label">Records</div>
+        <div class="verity-detail-value">{{ dataset.record_count }} ({{ dataset.annotated_count }} annotated)</div>
+        <div class="verity-detail-label">Owner</div>
+        <div class="verity-detail-value">{{ dataset.owner_name }}</div>
+        <div class="verity-detail-label">Purpose</div>
+        <div class="verity-detail-value">{{ dataset.purpose or '—' }}</div>
+        <div class="verity-detail-label">Coverage</div>
+        <div class="verity-detail-value">{{ dataset.coverage_notes or '—' }}</div>
+    </div>
+    <div style="margin-top: 12px;">
+        {% if has_running_validation %}
+        <div style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px;">
+            <span style="font-size: 0.85rem; font-weight: 500; color: #92400e;">Validation is running...</span>
+            <span style="font-size: 0.75rem; color: #92400e;">Refresh the page to check for results.</span>
+        </div>
+        {% else %}
+        <form method="POST" action="/admin/ground-truth/{{ dataset.id }}/validate" style="display: inline-flex; align-items: center; gap: 12px;"
+              onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Running validation...';">
+            <button type="submit" class="verity-btn verity-btn-primary">Run Validation (Champion Version)</button>
+            <label style="font-size: 0.78rem; display: flex; align-items: center; gap: 4px; cursor: pointer; color: var(--verity-text-light);">
+                <input type="checkbox" name="mock_llm" value="true">
+                Mock LLM (skip real Claude calls - for testing the runner only)
+            </label>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Records -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Records ({{ records|length }})</h2>
+    <table class="verity-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Source Type</th>
+                <th>Source Document / Data</th>
+                <th>Tags</th>
+                <th>Difficulty</th>
+                <th>Expected Output</th>
+                <th>Annotator</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in records %}
+            <tr class="clickable" onclick="window.location='/admin/ground-truth/{{ dataset.id }}/records/{{ r.record_id }}'">
+                <td>{{ r.record_index }}</td>
+                <td><span class="verity-badge verity-badge-draft">{{ r.source_type or '—' }}</span></td>
+                <td style="font-size: 0.8rem;">
+                    {{ r.source_description or '—' }}
+                    {% if r.source_provider == 'edms' and r.source_key %}
+                    <br><a href="http://localhost:8002/ui/documents/{{ r.source_key }}" target="_blank"
+                           class="verity-btn verity-btn-secondary verity-btn-sm" style="margin-top: 4px;"
+                           onclick="event.stopPropagation();">
+                        View in EDMS ↗
+                    </a>
+                    {% elif r.source_key %}
+                    <br><span style="font-family: monospace; font-size: 0.7rem; color: var(--verity-text-light);">{{ r.source_key }}</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if r.tags %}
+                        {% for tag in r.tags %}
+                        <span class="verity-badge verity-badge-draft">{{ tag }}</span>
+                        {% endfor %}
+                    {% endif %}
+                </td>
+                <td>{{ r.difficulty or '—' }}</td>
+                <td>
+                    <div class="verity-code" style="max-height: 50px; overflow-y: auto; font-size: 0.7rem;">
+                        {{ r.expected_output }}
+                    </div>
+                </td>
+                <td style="font-size: 0.8rem;">
+                    <span class="verity-badge verity-badge-draft">{{ r.annotator_type }}</span>
+                    {{ r.labeled_by or r.judge_model or '—' }}
+                    {% if r.label_confidence %}
+                    <br><span style="font-size: 0.7rem; color: var(--verity-text-light);">{{ "%.0f"|format(r.label_confidence * 100) }}% confidence</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}

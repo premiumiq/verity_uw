@@ -60,6 +60,24 @@
                 <span class="verity-badge verity-badge-{{ decision.status }}">{{ decision.status }}</span>
             </div>
 
+            <div class="verity-detail-label">Decision Log Level</div>
+            <div class="verity-detail-value">
+                {% set dl = decision.decision_log_detail or 'standard' %}
+                <span class="verity-badge verity-badge-draft">{{ dl }}</span>
+                <span style="font-size: 0.75rem; color: var(--verity-text-light); margin-left: 6px;">
+                    {% if dl == 'full' %}Complete payload — input, output, message history, tool calls all captured
+                    {% elif dl == 'standard' %}Binary content redacted, large text truncated, tool payloads summarized
+                    {% elif dl == 'summary' %}First 500 chars of input/output only, no message history
+                    {% elif dl == 'metadata' %}Status, tokens, and duration only — no payload data
+                    {% elif dl == 'none' %}No decision log entry (this should not appear)
+                    {% endif %}
+                </span>
+            </div>
+            {% if decision.redaction_applied %}
+            <div class="verity-detail-label">Redaction Applied</div>
+            <div class="verity-detail-value verity-code" style="font-size: 0.8rem;">{{ decision.redaction_applied }}</div>
+            {% endif %}
+
             <div class="verity-detail-label">Channel</div>
             <div class="verity-detail-value">{{ decision.channel }}</div>
 

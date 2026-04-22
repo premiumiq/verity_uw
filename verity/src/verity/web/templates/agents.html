@@ -29,6 +29,7 @@
         <tr>
             <th>Agent</th>
             <th>Materiality</th>
+            <th>Log Level</th>
             <th>Champion</th>
             <th>Config</th>
             <th>Prompts</th>
@@ -50,6 +51,9 @@
 
             <!-- Materiality -->
             <td><span class="verity-badge verity-badge-{{ agent.materiality_tier }}">{{ agent.materiality_tier }}</span></td>
+
+            <!-- Decision log level -->
+            <td><span class="verity-badge verity-badge-draft">{{ agent.decision_log_detail or 'standard' }}</span></td>
 
             <!-- Champion version -->
             <td>

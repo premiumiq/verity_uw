@@ -124,16 +124,25 @@
             <a href="/admin/lifecycle" class="verity-nav-link {% if active_page == 'lifecycle' %}active{% endif %}">
                 <span class="verity-nav-icon">⍈</span> Lifecycle
             </a>
+            <a href="/admin/testing" class="verity-nav-link {% if active_page == 'testing' %}active{% endif %}">
+                <span class="verity-nav-icon">✓</span> Testing
+            </a>
             <a href="/admin/ground-truth" class="verity-nav-link {% if active_page == 'ground_truth' %}active{% endif %}">
                 <span class="verity-nav-icon">👁</span> Ground Truth
             </a>
-            <a href="/admin/test-results" class="verity-nav-link {% if active_page == 'test_results' %}active{% endif %}">
-                <span class="verity-nav-icon">✓</span> Test Status
+            <a href="/admin/validation-runs" class="verity-nav-link {% if active_page == 'validation_runs' %}active{% endif %}">
+                <span class="verity-nav-icon">◎</span> Validation Runs
             </a>
             <span class="verity-nav-link" style="opacity: 0.35; cursor: default;">
                 <span class="verity-nav-icon">⟁</span> Incidents
                 <span style="font-size: 0.55rem; opacity: 0.6; margin-left: 4px;">soon</span>
             </span>
+
+            <!-- Platform -->
+            <div class="verity-nav-section" style="margin-top: 16px;">Platform</div>
+            <a href="/admin/settings" class="verity-nav-link {% if active_page == 'settings' %}active{% endif %}">
+                <span class="verity-nav-icon">⚙</span> Settings
+            </a>
 
         </div><!-- end sidebar-nav -->
 

@@ -1,0 +1,125 @@
+<!--
+  TEST SUITE DETAIL — Cases + results for one suite
+
+  DATA: suite, cases, results
+-->
+{% extends "base.html" %}
+
+{% block title %}{{ suite.name }} — Testing{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/testing">Testing</a>
+    <span class="separator">›</span>
+    <span>{{ suite.name }}</span>
+{% endblock %}
+
+{% block page_title %}{{ suite.name }}{% endblock %}
+
+{% block content %}
+
+<div class="verity-card" style="margin-bottom: 20px;">
+    <div class="verity-card-header">About This Test Suite</div>
+    <div class="verity-card-footer">
+        This suite contains {{ cases|length }} test cases for
+        <strong>{{ suite.entity_display_name or suite.entity_name }}</strong>
+        ({{ suite.entity_type }}).
+        Each case defines an input and expected output. When the suite runs, each case is
+        executed against an entity version and the output is compared using the specified metric.
+    </div>
+</div>
+
+<!-- Suite metadata -->
+<div class="verity-card" style="margin-bottom: 20px;">
+    <div class="verity-detail-grid">
+        <div class="verity-detail-label">Entity</div>
+        <div class="verity-detail-value">
+            <span class="verity-badge verity-badge-{{ suite.entity_type }}">{{ suite.entity_type }}</span>
+            {{ suite.entity_display_name or suite.entity_name }}
+        </div>
+        <div class="verity-detail-label">Suite Type</div>
+        <div class="verity-detail-value">{{ suite.suite_type }}</div>
+        <div class="verity-detail-label">Created By</div>
+        <div class="verity-detail-value">{{ suite.created_by or '—' }}</div>
+        <div class="verity-detail-label">Description</div>
+        <div class="verity-detail-value">{{ suite.description or '—' }}</div>
+    </div>
+    <div style="margin-top: 12px;">
+        <form method="POST" action="/admin/testing/{{ suite.id }}/run" style="display: inline-flex; align-items: center; gap: 12px;"
+              onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Running...';">
+            <button type="submit" class="verity-btn verity-btn-primary">Run Suite</button>
+            <label style="font-size: 0.78rem; display: flex; align-items: center; gap: 4px; cursor: pointer; color: var(--verity-text-light);">
+                <input type="checkbox" name="mock_llm" value="true">
+                Mock LLM (skip real Claude calls)
+            </label>
+        </form>
+    </div>
+</div>
+
+<!-- Test cases -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Test Cases ({{ cases|length }})</h2>
+    <table class="verity-table">
+        <thead>
+            <tr>
+                <th>Case</th>
+                <th>Description</th>
+                <th>Metric</th>
+                <th>Expected Output</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in cases %}
+            <tr>
+                <td style="font-weight: 500;">{{ c.name }}</td>
+                <td style="font-size: 0.8rem;">{{ c.description or '—' }}</td>
+                <td><span class="verity-badge verity-badge-draft">{{ c.metric_type }}</span></td>
+                <td>
+                    <div class="verity-code" style="max-height: 60px; overflow-y: auto; font-size: 0.75rem;">
+                        {{ c.expected_output }}
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Test run history -->
+{% if results %}
+<div class="verity-section">
+    <h2 class="verity-section-title">Run History</h2>
+    <table class="verity-table">
+        <thead>
+            <tr>
+                <th>Test Case</th>
+                <th>Result</th>
+                <th>Metric</th>
+                <th>Duration</th>
+                <th>When</th>
+                <th>Failure Reason</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in results %}
+            <tr>
+                <td>{{ r.test_case_name }}</td>
+                <td>
+                    {% if r.passed %}
+                        <span class="verity-badge verity-badge-champion">passed</span>
+                    {% else %}
+                        <span class="verity-badge verity-badge-high">failed</span>
+                    {% endif %}
+                </td>
+                <td><span class="verity-badge verity-badge-draft">{{ r.metric_type }}</span></td>
+                <td style="font-size: 0.8rem;">{{ r.duration_ms or 0 }}ms</td>
+                <td style="font-size: 0.8rem;">{{ r.run_at.strftime('%Y-%m-%d %H:%M') if r.run_at else '—' }}</td>
+                <td style="font-size: 0.8rem; color: var(--verity-red);">{{ r.failure_reason[:80] if r.failure_reason else '' }}{% if r.failure_reason and r.failure_reason|length > 80 %}...{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% endblock %}

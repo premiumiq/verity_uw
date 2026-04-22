@@ -33,12 +33,14 @@ INSERT INTO agent_version (
     agent_id, major_version, minor_version, patch_version,
     lifecycle_state, channel, inference_config_id,
     output_schema, authority_thresholds, mock_mode_enabled,
+    decision_log_detail,
     developer_name, change_summary, change_type
 )
 VALUES (
     %(agent_id)s, %(major_version)s, %(minor_version)s, %(patch_version)s,
     %(lifecycle_state)s, %(channel)s, %(inference_config_id)s,
     %(output_schema)s, %(authority_thresholds)s, %(mock_mode_enabled)s,
+    %(decision_log_detail)s,
     %(developer_name)s, %(change_summary)s, %(change_type)s
 )
 RETURNING id, version_label, created_at;
@@ -63,12 +65,14 @@ INSERT INTO task_version (
     task_id, major_version, minor_version, patch_version,
     lifecycle_state, channel, inference_config_id,
     output_schema, mock_mode_enabled,
+    decision_log_detail,
     developer_name, change_summary, change_type
 )
 VALUES (
     %(task_id)s, %(major_version)s, %(minor_version)s, %(patch_version)s,
     %(lifecycle_state)s, %(channel)s, %(inference_config_id)s,
     %(output_schema)s, %(mock_mode_enabled)s,
+    %(decision_log_detail)s,
     %(developer_name)s, %(change_summary)s, %(change_type)s
 )
 RETURNING id, version_label, created_at;
@@ -186,12 +190,12 @@ RETURNING id, created_at;
 INSERT INTO ground_truth_record (
     dataset_id, record_index, source_type,
     source_provider, source_container, source_key, source_description,
-    input_data, tool_mock_overrides, tags, difficulty, record_notes
+    input_data, tags, difficulty, record_notes
 )
 VALUES (
     %(dataset_id)s, %(record_index)s, %(source_type)s,
     %(source_provider)s, %(source_container)s, %(source_key)s, %(source_description)s,
-    %(input_data)s, %(tool_mock_overrides)s, %(tags)s, %(difficulty)s, %(record_notes)s
+    %(input_data)s, %(tags)s, %(difficulty)s, %(record_notes)s
 )
 RETURNING id, created_at;
 
@@ -219,7 +223,7 @@ INSERT INTO validation_run (
     field_accuracy, overall_extraction_rate, low_confidence_rate,
     fairness_metrics, fairness_passed, fairness_notes,
     thresholds_met, threshold_details, inference_config_snapshot,
-    passed, notes
+    status, passed, notes
 )
 VALUES (
     %(entity_type)s, %(entity_version_id)s, %(dataset_id)s, %(dataset_version)s, %(run_by)s,
@@ -227,7 +231,7 @@ VALUES (
     %(field_accuracy)s, %(overall_extraction_rate)s, %(low_confidence_rate)s,
     %(fairness_metrics)s, %(fairness_passed)s, %(fairness_notes)s,
     %(thresholds_met)s, %(threshold_details)s, %(inference_config_snapshot)s,
-    %(passed)s, %(notes)s
+    %(status)s, %(passed)s, %(notes)s
 )
 RETURNING id, run_at;
 

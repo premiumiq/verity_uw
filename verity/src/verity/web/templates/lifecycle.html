@@ -1,0 +1,92 @@
+<!--
+  LIFECYCLE MANAGEMENT — All entity versions with lifecycle state
+
+  DATA: versions (list, grouped by entity_name in template)
+-->
+{% extends "base.html" %}
+
+{% block title %}Lifecycle — Verity{% endblock %}
+{% block page_title %}Lifecycle Management{% endblock %}
+
+{% block content %}
+
+<div class="verity-card" style="margin-bottom: 20px;">
+    <div class="verity-card-header">About Lifecycle Management</div>
+    <div class="verity-card-footer">
+        Every version of every agent and task moves through Verity's 7-state promotion sequence:
+        <strong>draft → candidate → staging → shadow → challenger → champion → deprecated</strong>.
+        Each transition requires evidence (tests passed, validation passed, model card reviewed) and an approver.
+        This page shows all versions across all entities with their current state and promotion readiness.
+    </div>
+</div>
+
+{% set grouped = {} %}
+{% for v in versions %}
+    {% set key = v.entity_type ~ ':' ~ v.entity_name %}
+    {% if key not in grouped %}
+        {% set _ = grouped.update({key: []}) %}
+    {% endif %}
+    {% set _ = grouped[key].append(v) %}
+{% endfor %}
+
+{% for key, entity_versions in grouped.items() %}
+{% set first = entity_versions[0] %}
+<div class="verity-section">
+    <h2 class="verity-section-title">
+        <span class="verity-badge verity-badge-{{ first.entity_type }}">{{ first.entity_type }}</span>
+        <a href="/admin/{{ first.entity_type }}s/{{ first.entity_name }}">{{ first.entity_display_name }}</a>
+        <span class="verity-badge verity-badge-{{ first.materiality_tier }}" style="margin-left: 6px;">{{ first.materiality_tier }}</span>
+    </h2>
+
+    <table class="verity-table">
+        <thead>
+            <tr>
+                <th>Version</th>
+                <th>State</th>
+                <th>Log Level</th>
+                <th>Channel</th>
+                <th>Tests</th>
+                <th>Validation</th>
+                <th>Valid From</th>
+                <th>Valid To</th>
+                <th>Developer</th>
+                <th>Change Summary</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for v in entity_versions %}
+            <tr>
+                <td style="font-weight: 500;">{{ v.version_label }}</td>
+                <td><span class="verity-badge verity-badge-{{ v.lifecycle_state }}">{{ v.lifecycle_state }}</span></td>
+                <td><span class="verity-badge verity-badge-draft">{{ v.decision_log_detail or 'standard' }}</span></td>
+                <td>{{ v.channel }}</td>
+                <td>
+                    {% if v.staging_tests_passed %}
+                        <span class="verity-badge verity-badge-champion">passed</span>
+                    {% elif v.staging_tests_passed == false %}
+                        <span class="verity-badge verity-badge-high">failed</span>
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+                <td>
+                    {% if v.ground_truth_passed %}
+                        <span class="verity-badge verity-badge-champion">passed</span>
+                    {% elif v.ground_truth_passed == false %}
+                        <span class="verity-badge verity-badge-high">failed</span>
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+                <td style="font-size: 0.8rem;">{{ v.valid_from.strftime('%Y-%m-%d %H:%M') if v.valid_from else '—' }}</td>
+                <td style="font-size: 0.8rem;">{{ v.valid_to.strftime('%Y-%m-%d %H:%M') if v.valid_to and v.valid_to.year < 2999 else '—' }}</td>
+                <td style="font-size: 0.8rem;">{{ v.developer_name or '—' }}</td>
+                <td style="font-size: 0.8rem; max-width: 250px;">{{ v.change_summary[:80] if v.change_summary else '—' }}{% if v.change_summary and v.change_summary|length > 80 %}...{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endfor %}
+
+{% endblock %}

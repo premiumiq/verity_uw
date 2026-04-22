@@ -149,6 +149,7 @@ SELECT
     av.version_label AS champion_version,
     av.lifecycle_state AS champion_state,
     ic.display_name AS inference_config_name,
+    av.decision_log_detail,
     a.created_at
 FROM agent a
 LEFT JOIN agent_version av ON av.id = a.current_champion_version_id
@@ -303,6 +304,7 @@ SELECT
     tv.version_label AS champion_version,
     tv.lifecycle_state AS champion_state,
     ic.display_name AS inference_config_name,
+    tv.decision_log_detail,
     t.created_at
 FROM task t
 LEFT JOIN task_version tv ON tv.id = t.current_champion_version_id

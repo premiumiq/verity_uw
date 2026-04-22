@@ -93,35 +93,34 @@ async def main():
         print("Step 11-12: Promoting versions to champion...")
         await promote_to_champion(verity, agent_versions, task_versions, agents, tasks)
 
-        # ── STEP 13-16: Validation, Model Cards, Thresholds ──
-        print("Step 13-16: Seeding validation runs, model cards, thresholds...")
+        # ── STEP 13: Governance artifacts (datasets, validation runs, model cards, thresholds)
+        print("Step 13: Seeding governance artifacts...")
         gt_datasets = await seed_governance_artifacts(verity, agents, tasks, agent_versions, task_versions)
 
-        # ── STEP 13b: Ground Truth Records + Annotations ─────
-        print("Step 13b: Populating ground truth records and annotations...")
-        await seed_ground_truth_records(verity, gt_datasets, tasks, agents)
+        # ── STEP 14: Upload documents to EDMS (before GT records — need doc IDs)
+        print("Step 14: Uploading documents to EDMS...")
+        from uw_demo.app.setup.seed_edms import seed_edms
+        edms_doc_ids = await seed_edms()
 
-        # ── STEP 17: Test Execution Logs ──────────────────────
-        print("Step 17: Seeding test execution logs...")
-        await seed_test_results(verity, test_suites, agent_versions, task_versions)
+        # ── STEP 15: Ground Truth Records + Annotations (uses EDMS doc IDs)
+        print("Step 15: Populating ground truth records with EDMS document references...")
+        await seed_ground_truth_records(verity, gt_datasets, tasks, agents, edms_doc_ids)
 
-        # ── STEP 18-19: Decision Logs + Overrides ─────────────
-        print("Step 18-19: Seeding decision logs and overrides...")
+        # Step 16 removed: test execution logs are no longer pre-seeded.
+        # Test results should come from actual test runs via the UI, not fake data.
+
+        # ── STEP 17: Decision Logs + Overrides ────────────────
+        print("Step 17: Seeding decision logs and overrides...")
         await seed_decisions(verity, agent_versions, task_versions)
 
-        # ── STEP 20: Seed Verity platform settings ──────────────
-        print("Step 20: Seeding Verity platform settings...")
+        # ── STEP 18: Seed Verity platform settings ────────────
+        print("Step 18: Seeding Verity platform settings...")
         await seed_platform_settings(verity)
 
-        # ── STEP 21: Seed UW database ─────────────────────────
-        print("Step 21: Seeding UW database (submissions + loss history)...")
+        # ── STEP 19: Seed UW database ─────────────────────────
+        print("Step 19: Seeding UW database (submissions + loss history)...")
         from uw_demo.app.setup.seed_uw import seed_uw_db
         await seed_uw_db()
-
-        # ── STEP 22: Seed EDMS documents ──────────────────────
-        print("Step 22: Uploading documents to EDMS...")
-        from uw_demo.app.setup.seed_edms import seed_edms
-        await seed_edms()
 
         print("\n✓ Seed complete. All demo data loaded.")
         print("  Verity:  http://localhost:8000/admin/")
@@ -547,6 +546,22 @@ async def seed_agent_versions(verity: Verity, agents: dict, configs: dict) -> di
     )
     versions[("appetite_agent", "1.0.0")] = r["id"]
     print(f"  + appetite_agent v1.0.0 (draft)")
+
+    # ── Triage agent v2.0.0 — draft, NOT promoted (demonstrates lifecycle gate)
+    r = await verity.registry.register_agent_version(
+        agent_id=agents["triage_agent"]["id"],
+        major_version=2, minor_version=0, patch_version=0,
+        lifecycle_state="draft", channel="development",
+        inference_config_id=configs["triage_balanced"],
+        output_schema=json.dumps({"risk_score": "string", "routing": "string", "reasoning": "string", "risk_factors": "array", "confidence": "number"}),
+        authority_thresholds=json.dumps({"requires_hitl_above_premium": 500000}),
+        mock_mode_enabled=False, decision_log_detail="full",
+        developer_name="Dev Team",
+        change_summary="Experimental: enhanced risk factor weighting with industry-specific adjustments",
+        change_type="new_capability",
+    )
+    versions[("triage_agent", "2.0.0")] = r["id"]
+    print(f"  + triage_agent v2.0.0 (draft — pre-champion, demonstrates lifecycle gate)")
 
     return versions
 
@@ -1016,15 +1031,30 @@ async def seed_test_suites(verity, agents, tasks) -> dict:
                 {"name": "triage_green_risk", "description": "Clean submission should score Green",
                  "input_data": {"submission_id": "test-green", "lob": "DO", "named_insured": "SafeCorp LLC"},
                  "expected_output": {"risk_score": "Green", "routing": "assign_to_uw"},
-                 "metric_type": "classification_f1", "metric_config": {"classes": ["Green", "Amber", "Red"]}},
+                 "metric_type": "classification_f1", "metric_config": {"classes": ["Green", "Amber", "Red"]},
+                 "tool_mocks": [
+                     {"tool_name": "get_submission_context", "mock_response": {"account": {"name": "SafeCorp LLC", "sic_code": "7372", "years_in_business": 15}, "submission": {"lob": "DO", "annual_revenue": 50000000, "employee_count": 250, "board_size": 7, "independent_directors": 4}, "loss_history": [{"year": 2023, "claims": 0}, {"year": 2024, "claims": 0}, {"year": 2025, "claims": 0}]}, "description": "Clean D&O submission - no risk factors"},
+                     {"tool_name": "get_loss_history", "mock_response": {"total_claims": 0, "total_incurred": 0, "years": [{"year": 2023, "claims": 0}, {"year": 2024, "claims": 0}, {"year": 2025, "claims": 0}]}, "description": "Clean loss history"},
+                     {"tool_name": "get_enrichment_data", "mock_response": {"lexisnexis": {"litigation_history": [], "risk_score": "low"}, "dnb": {"financial_stress_score": 85}}, "description": "No red flags from enrichment"},
+                 ]},
                 {"name": "triage_amber_risk", "description": "Borderline submission should score Amber",
                  "input_data": {"submission_id": "test-amber", "lob": "DO", "named_insured": "RiskyCorp Inc"},
                  "expected_output": {"risk_score": "Amber", "routing": "assign_to_senior_uw"},
-                 "metric_type": "classification_f1", "metric_config": None},
+                 "metric_type": "classification_f1", "metric_config": None,
+                 "tool_mocks": [
+                     {"tool_name": "get_submission_context", "mock_response": {"account": {"name": "RiskyCorp Inc", "sic_code": "7372", "years_in_business": 8}, "submission": {"lob": "DO", "annual_revenue": 120000000, "board_size": 9, "independent_directors": 5, "regulatory_investigation": "SEC routine inquiry"}, "loss_history": [{"year": 2023, "claims": 1}, {"year": 2024, "claims": 0}, {"year": 2025, "claims": 1}]}, "description": "D&O with SEC inquiry and 2 claims at threshold"},
+                     {"tool_name": "get_loss_history", "mock_response": {"total_claims": 2, "total_incurred": 225000, "years": [{"year": 2023, "claims": 1, "incurred": 75000}, {"year": 2024, "claims": 0}, {"year": 2025, "claims": 1, "incurred": 150000}]}, "description": "2 claims in 5 years at maximum threshold"},
+                     {"tool_name": "get_enrichment_data", "mock_response": {"lexisnexis": {"litigation_history": [], "regulatory_actions": [{"type": "SEC routine inquiry"}], "risk_score": "medium"}, "dnb": {"financial_stress_score": 72}}, "description": "SEC routine inquiry flagged"},
+                 ]},
                 {"name": "triage_red_risk", "description": "High-risk submission should score Red",
                  "input_data": {"submission_id": "test-red", "lob": "GL", "named_insured": "DangerCo LLC"},
                  "expected_output": {"risk_score": "Red", "routing": "refer_to_management"},
-                 "metric_type": "classification_f1", "metric_config": None},
+                 "metric_type": "classification_f1", "metric_config": None,
+                 "tool_mocks": [
+                     {"tool_name": "get_submission_context", "mock_response": {"account": {"name": "DangerCo LLC", "sic_code": "6159", "years_in_business": 22}, "submission": {"lob": "GL", "annual_revenue": 25000000, "going_concern_opinion": True}, "loss_history": [{"year": 2023, "claims": 5}, {"year": 2024, "claims": 4}, {"year": 2025, "claims": 3}]}, "description": "GL with going concern, excluded SIC, excessive claims"},
+                     {"tool_name": "get_loss_history", "mock_response": {"total_claims": 12, "total_incurred": 600000, "years": [{"year": 2023, "claims": 5, "incurred": 220000}, {"year": 2024, "claims": 4, "incurred": 190000}, {"year": 2025, "claims": 3, "incurred": 190000}]}, "description": "12 claims in 3 years, way above threshold"},
+                     {"tool_name": "get_enrichment_data", "mock_response": {"lexisnexis": {"litigation_history": [{"type": "negligence", "status": "settled"}], "risk_score": "high"}, "dnb": {"financial_stress_score": 45}}, "description": "High risk enrichment data"},
+                 ]},
             ],
         },
         {
@@ -1036,33 +1066,63 @@ async def seed_test_suites(verity, agents, tasks) -> dict:
                 {"name": "appetite_within", "description": "Standard submission within appetite",
                  "input_data": {"submission_id": "test-in", "lob": "DO", "named_insured": "StandardCorp"},
                  "expected_output": {"determination": "within_appetite"},
-                 "metric_type": "classification_f1", "metric_config": {"classes": ["within_appetite", "borderline", "outside_appetite"]}},
+                 "metric_type": "classification_f1", "metric_config": {"classes": ["within_appetite", "borderline", "outside_appetite"]},
+                 "tool_mocks": [
+                     {"tool_name": "get_underwriting_guidelines", "mock_response": {"lob": "DO", "guidelines_text": "§1 GENERAL ELIGIBILITY\n1.1 Entity must be US incorporated.\n1.2 Min 3 years.\n1.3 Revenue $10M-$500M.\n§2 FINANCIAL\n2.1 Revenue > $10M.\n§3 GOVERNANCE\n3.1 Board >= 5.\n3.3 Majority independent."}, "description": "D&O guidelines"},
+                     {"tool_name": "get_submission_context", "mock_response": {"account": {"name": "StandardCorp", "years_in_business": 12}, "submission": {"lob": "DO", "annual_revenue": 85000000, "board_size": 8, "independent_directors": 5}}, "description": "Clean D&O submission meeting all criteria"},
+                 ]},
                 {"name": "appetite_borderline", "description": "Submission on appetite boundary",
                  "input_data": {"submission_id": "test-border", "lob": "GL", "named_insured": "EdgeCase LLC"},
                  "expected_output": {"determination": "borderline"},
-                 "metric_type": "classification_f1", "metric_config": None},
+                 "metric_type": "classification_f1", "metric_config": None,
+                 "tool_mocks": [
+                     {"tool_name": "get_underwriting_guidelines", "mock_response": {"lob": "GL", "guidelines_text": "§1 ELIGIBILITY\n1.2 Min 2 years.\n1.3 Revenue $5M-$250M.\n§5 MANUFACTURING\n5.2 Heavy mfg (SIC 3300-3399) requires senior UW.\n§6 CLAIMS\n6.1 Max 5 GL claims in 3 years."}, "description": "GL guidelines"},
+                     {"tool_name": "get_submission_context", "mock_response": {"account": {"name": "EdgeCase LLC", "sic_code": "3312", "years_in_business": 10}, "submission": {"lob": "GL", "annual_revenue": 90000000, "manufacturing_operations": True}}, "description": "Heavy manufacturing - requires senior UW approval"},
+                 ]},
                 {"name": "appetite_outside", "description": "Submission clearly outside appetite",
                  "input_data": {"submission_id": "test-out", "lob": "DO", "named_insured": "CryptoCoin Inc"},
                  "expected_output": {"determination": "outside_appetite"},
-                 "metric_type": "classification_f1", "metric_config": None},
+                 "metric_type": "classification_f1", "metric_config": None,
+                 "tool_mocks": [
+                     {"tool_name": "get_underwriting_guidelines", "mock_response": {"lob": "DO", "guidelines_text": "§2 FINANCIAL\n2.1 Revenue > $10M.\n2.2 No going concern.\n§4 EXCLUSIONS\n4.2 Cannabis excluded.\n4.4 Bankruptcy in last 5 years excluded."}, "description": "D&O guidelines with exclusions"},
+                     {"tool_name": "get_submission_context", "mock_response": {"account": {"name": "CryptoCoin Inc", "years_in_business": 2}, "submission": {"lob": "DO", "annual_revenue": 8000000, "board_size": 3}}, "description": "Below revenue minimum, below board minimum, too young"},
+                 ]},
             ],
         },
     ]
 
+    mock_count = 0
     for sd in suite_defs:
         cases_data = sd.pop("cases")
         sr = await verity.registry.register_test_suite(**sd)
         suite_id = sr["id"]
         case_ids = []
         for c in cases_data:
+            # Extract tool_mocks before passing to register_test_case
+            # (tool_mocks is not a column on test_case - it goes to test_case_mock)
+            tool_mocks = c.pop("tool_mocks", [])
             c["suite_id"] = suite_id
             c["is_adversarial"] = False
             c["tags"] = []
             cr = await verity.registry.register_test_case(**c)
-            case_ids.append({"id": cr["id"], **c})
+            case_id = cr["id"]
+            case_ids.append({"id": case_id, **c})
+
+            # Insert tool mocks into test_case_mock table
+            for tm in tool_mocks:
+                await verity.db.execute_returning("insert_test_case_mock", {
+                    "test_case_id": str(case_id),
+                    "tool_name": tm["tool_name"],
+                    "call_order": tm.get("call_order", 1),
+                    "mock_response": json.dumps(tm["mock_response"]),
+                    "description": tm.get("description"),
+                })
+                mock_count += 1
+
         suites[sd["name"]] = {"suite_id": suite_id, "entity_type": sd["entity_type"],
                                "entity_id": sd["entity_id"], "cases": case_ids}
         print(f"  + test_suite: {sd['name']} ({len(case_ids)} cases)")
+    print(f"  + {mock_count} test case mocks (tool scenario data)")
 
     return suites
 
@@ -1113,6 +1173,17 @@ async def promote_to_champion(verity, agent_versions, task_versions, agents, tas
 async def seed_governance_artifacts(verity, agents, tasks, agent_versions, task_versions):
     """Seed ground truth datasets, validation runs, model cards, and metric thresholds."""
 
+    # Clean up existing GT data so re-running the seed is safe.
+    # CASCADE handles child records (annotations, mocks, validation results).
+    await verity.db.execute_raw("DELETE FROM validation_record_result WHERE validation_run_id IN (SELECT id FROM validation_run)", {})
+    await verity.db.execute_raw("DELETE FROM validation_run", {})
+    await verity.db.execute_raw("DELETE FROM ground_truth_record_mock WHERE record_id IN (SELECT id FROM ground_truth_record)", {})
+    await verity.db.execute_raw("DELETE FROM ground_truth_annotation", {})
+    await verity.db.execute_raw("DELETE FROM ground_truth_record", {})
+    await verity.db.execute_raw("DELETE FROM ground_truth_dataset", {})
+    await verity.db.execute_raw("DELETE FROM metric_threshold", {})
+    print("  (cleaned existing GT data for re-seed)")
+
     # Ground truth datasets (three-table design: dataset -> record -> annotation)
     # 4 datasets: classifier (54 docs), extractor (10 D&O apps), triage (4 subs), appetite (4 subs)
     gt_classifier = await verity.registry.register_ground_truth_dataset(
@@ -1159,6 +1230,10 @@ async def seed_governance_artifacts(verity, agents, tasks, agent_versions, task_
         coverage_notes="1 within appetite, 1 borderline, 1 outside appetite, 1 within appetite (GL).",
     )
 
+    # Ground truth records, annotations, and tool mocks are created
+    # by seed_ground_truth_records() called separately in main().
+    # This function only creates datasets, validation runs, model cards, and thresholds.
+
     # Validation runs
     await verity.registry.register_validation_run(
         entity_type="task", entity_version_id=task_versions[("document_classifier", "1.0.0")],
@@ -1169,7 +1244,7 @@ async def seed_governance_artifacts(verity, agents, tasks, agent_versions, task_
         fairness_metrics=None, fairness_passed=None, fairness_notes=None,
         thresholds_met=True, threshold_details={"f1": {"required": 0.92, "achieved": 0.95, "passed": True}},
         inference_config_snapshot={"config_name": "classification_strict", "model_name": "claude-sonnet-4-20250514", "temperature": 0.0},
-        passed=True, notes="All metric thresholds met. 200 documents validated.",
+        status="complete", passed=True, notes="[SEED DATA] Synthetic validation result for demo. Not from a real validation run.",
     )
 
     await verity.registry.register_validation_run(
@@ -1181,9 +1256,9 @@ async def seed_governance_artifacts(verity, agents, tasks, agent_versions, task_
         fairness_metrics={"sic_parity": 0.02, "geo_parity": 0.01}, fairness_passed=True, fairness_notes="No significant disparate impact detected",
         thresholds_met=True, threshold_details={"f1": {"required": 0.83, "achieved": 0.86, "passed": True}, "kappa": {"required": 0.75, "achieved": 0.78, "passed": True}},
         inference_config_snapshot={"config_name": "triage_balanced", "model_name": "claude-sonnet-4-20250514", "temperature": 0.2},
-        passed=True, notes="All thresholds met. Fairness analysis passed. 20 submissions validated.",
+        status="complete", passed=True, notes="[SEED DATA] Synthetic validation result for demo. Not from a real validation run.",
     )
-    print(f"  + 2 ground truth datasets, 2 validation runs")
+    print(f"  + 4 ground truth datasets, 8 GT records with mocks, 2 synthetic validation runs")
 
     # Model cards (high materiality agents only)
     await verity.registry.register_model_card(
@@ -1221,11 +1296,14 @@ async def seed_governance_artifacts(verity, agents, tasks, agent_versions, task_
     print(f"  + 2 model cards")
 
     # Metric thresholds
+    # Metric names MUST match what classification_metrics() and field_accuracy() return:
+    #   "f1", "precision", "recall", "cohens_kappa", "overall_accuracy"
+    # NOT "f1_score" or "precision_score" - those are column names in validation_run, not metric keys.
     thresholds = [
-        ("agent", agents["triage_agent"]["id"], "high", "f1_score", 0.8300, 0.8800),
-        ("agent", agents["appetite_agent"]["id"], "high", "f1_score", 0.8600, 0.9000),
-        ("task", tasks["document_classifier"]["id"], "medium", "f1_score", 0.9200, 0.9600),
-        ("task", tasks["field_extractor"]["id"], "medium", "field_accuracy", 0.9000, 0.9500),
+        ("agent", agents["triage_agent"]["id"], "high", "f1", 0.8300, 0.8800),
+        ("agent", agents["appetite_agent"]["id"], "high", "f1", 0.8600, 0.9000),
+        ("task", tasks["document_classifier"]["id"], "medium", "f1", 0.9200, 0.9600),
+        ("task", tasks["field_extractor"]["id"], "medium", "overall_accuracy", 0.9000, 0.9500),
     ]
     for et, eid, tier, metric, min_val, target in thresholds:
         await verity.registry.register_metric_threshold(
@@ -1244,23 +1322,30 @@ async def seed_governance_artifacts(verity, agents, tasks, agent_versions, task_
 # STEP 13b: GROUND TRUTH RECORDS + ANNOTATIONS
 # ══════════════════════════════════════════════════════════════
 
-async def seed_ground_truth_records(verity, gt_datasets, tasks, agents):
-    """Populate ground truth records and authoritative annotations.
+async def seed_ground_truth_records(verity, gt_datasets, tasks, agents, edms_doc_ids=None):
+    """Populate ground truth records with EDMS document references.
 
-    Creates records from the 54 seed documents and 4 demo submissions,
-    each with a single SME annotation (silver tier).
+    Ground truth records reference EDMS documents by their document UUID.
+    The edms_doc_ids mapping (filename → EDMS document ID) comes from
+    seed_edms() which runs before this function.
+
+    Args:
+        edms_doc_ids: Dict of filename → EDMS document UUID string.
+                      If None or empty, falls back to local file references.
     """
     from pathlib import Path
     import json
 
+    edms_doc_ids = edms_doc_ids or {}
+
     # ── 1. CLASSIFIER GROUND TRUTH (54 documents) ────────────
-    # Each document becomes a record. The filename determines the type.
+    # Each seed document becomes a ground truth record.
+    # Source references point to EDMS documents (not local files).
     gt_cls_id = gt_datasets["gt_classifier"]["id"]
     doc_dir = Path("/app/uw_demo/seed_docs/filled")
     if not doc_dir.exists():
         doc_dir = Path(__file__).parents[2] / "seed_docs" / "filled"
 
-    # Map filename prefix to document type
     type_map = {
         "do_app_": "do_application",
         "gl_app_": "gl_application",
@@ -1273,7 +1358,6 @@ async def seed_ground_truth_records(verity, gt_datasets, tasks, agents):
     record_idx = 0
     if doc_dir.exists():
         for filepath in sorted(doc_dir.iterdir()):
-            # Determine document type from filename
             doc_type = None
             for prefix, dtype in type_map.items():
                 if filepath.name.startswith(prefix):
@@ -1282,22 +1366,34 @@ async def seed_ground_truth_records(verity, gt_datasets, tasks, agents):
             if not doc_type:
                 continue
 
-            # For text files, read content. For PDFs, reference the file.
+            # Source reference must point to EDMS - never local files
+            edms_id = edms_doc_ids.get(filepath.name)
+            if not edms_id:
+                print(f"    ! Skipping {filepath.name}: not found in EDMS (upload may have failed)")
+                continue
+            source_provider = "edms"
+            source_container = "submissions"
+            source_key = edms_id  # EDMS document UUID
+
+            # Input data references the EDMS document ID when available
             if filepath.suffix == ".txt":
-                content = filepath.read_text(errors="replace")[:5000]  # truncate for DB
+                content = filepath.read_text(errors="replace")[:5000]
                 input_data = {"document_text": content, "document_filename": filepath.name}
+                if edms_id:
+                    input_data["edms_document_id"] = edms_id
             else:
-                # PDF — reference only (classifier would receive PDF content blocks at runtime)
                 input_data = {"document_filename": filepath.name, "document_type_hint": "pdf"}
+                if edms_id:
+                    input_data["edms_document_id"] = edms_id
 
             record = await verity.registry.register_ground_truth_record(
                 dataset_id=str(gt_cls_id), record_index=record_idx,
                 source_type="document",
-                source_provider="local", source_container="seed_docs",
-                source_key=f"filled/{filepath.name}",
+                source_provider=source_provider,
+                source_container=source_container,
+                source_key=source_key,
                 source_description=f"{doc_type} document: {filepath.name}",
                 input_data=input_data,
-                tool_mock_overrides=None,
                 tags=[doc_type, filepath.suffix.lstrip(".")],
                 difficulty="standard",
                 record_notes=None,
@@ -1356,15 +1452,22 @@ async def seed_ground_truth_records(verity, gt_datasets, tasks, agents):
          "board_size": 9, "independent": 5, "filename": "do_app_westfield_manufacturing.pdf"},
     ]
 
-    for idx, company in enumerate(do_companies):
+    ext_idx = 0
+    for company in do_companies:
+        edms_id = edms_doc_ids.get(company["filename"])
+        if not edms_id:
+            print(f"    ! Skipping extractor GT for {company['filename']}: not in EDMS")
+            continue
+        input_data = {"document_filename": company["filename"], "document_type": "do_application", "edms_document_id": edms_id}
+
         record = await verity.registry.register_ground_truth_record(
-            dataset_id=str(gt_ext_id), record_index=idx,
+            dataset_id=str(gt_ext_id), record_index=ext_idx,
             source_type="document",
-            source_provider="local", source_container="seed_docs",
-            source_key=f"filled/{company['filename']}",
+            source_provider="edms",
+            source_container="submissions",
+            source_key=edms_id,
             source_description=f"D&O application for {company['name']}",
-            input_data={"document_filename": company["filename"], "document_type": "do_application"},
-            tool_mock_overrides=None,
+            input_data=input_data,
             tags=["do_application", "extraction"],
             difficulty="standard",
             record_notes=None,
@@ -1392,8 +1495,9 @@ async def seed_ground_truth_records(verity, gt_datasets, tasks, agents):
             },
             is_authoritative=True,
         )
+        ext_idx += 1
 
-    print(f"  + extractor ground truth: {len(do_companies)} records with annotations")
+    print(f"  + extractor ground truth: {ext_idx} records with annotations")
 
     # ── 3. TRIAGE GROUND TRUTH (4 submissions) ───────────────
     gt_tri_id = gt_datasets["gt_triage"]["id"]
@@ -1402,19 +1506,39 @@ async def seed_ground_truth_records(verity, gt_datasets, tasks, agents):
         {"sub_id": "00000001-0001-0001-0001-000000000001", "name": "Acme D&O",
          "lob": "DO", "named_insured": "Acme Dynamics LLC",
          "expected": {"risk_score": "Green", "routing": "assign_to_uw", "confidence": 0.89},
-         "difficulty": "easy"},
+         "difficulty": "easy",
+         "tool_mocks": [
+             ("get_submission_context", {"account": {"name": "Acme Dynamics LLC", "sic_code": "3599", "years_in_business": 15}, "submission": {"lob": "DO", "annual_revenue": 50000000, "employee_count": 250, "board_size": 7, "independent_directors": 4}, "loss_history": [{"year": 2023, "claims": 0}, {"year": 2024, "claims": 0}, {"year": 2025, "claims": 0}]}),
+             ("get_loss_history", {"total_claims": 0, "total_incurred": 0, "years": [{"year": 2023, "claims": 0}, {"year": 2024, "claims": 0}, {"year": 2025, "claims": 0}]}),
+             ("get_enrichment_data", {"lexisnexis": {"litigation_history": [], "risk_score": "low"}, "dnb": {"financial_stress_score": 85}}),
+         ]},
         {"sub_id": "00000002-0002-0002-0002-000000000002", "name": "TechFlow D&O",
          "lob": "DO", "named_insured": "TechFlow Industries Inc",
          "expected": {"risk_score": "Amber", "routing": "assign_to_senior_uw", "confidence": 0.72},
-         "difficulty": "medium"},
+         "difficulty": "medium",
+         "tool_mocks": [
+             ("get_submission_context", {"account": {"name": "TechFlow Industries Inc", "sic_code": "7372", "years_in_business": 8}, "submission": {"lob": "DO", "annual_revenue": 120000000, "board_size": 9, "independent_directors": 5, "regulatory_investigation": "SEC routine inquiry"}, "loss_history": [{"year": 2023, "claims": 1, "incurred": 75000}, {"year": 2024, "claims": 0}, {"year": 2025, "claims": 1, "incurred": 150000}]}),
+             ("get_loss_history", {"total_claims": 2, "total_incurred": 225000, "years": [{"year": 2023, "claims": 1}, {"year": 2024, "claims": 0}, {"year": 2025, "claims": 1}]}),
+             ("get_enrichment_data", {"lexisnexis": {"regulatory_actions": [{"type": "SEC routine inquiry"}], "risk_score": "medium"}, "dnb": {"financial_stress_score": 72}}),
+         ]},
         {"sub_id": "00000003-0003-0003-0003-000000000003", "name": "Meridian GL",
          "lob": "GL", "named_insured": "Meridian Holdings Corp",
          "expected": {"risk_score": "Red", "routing": "refer_to_management", "confidence": 0.85},
-         "difficulty": "easy"},
+         "difficulty": "easy",
+         "tool_mocks": [
+             ("get_submission_context", {"account": {"name": "Meridian Holdings Corp", "sic_code": "6159", "years_in_business": 22}, "submission": {"lob": "GL", "annual_revenue": 25000000, "going_concern_opinion": True}, "loss_history": [{"year": 2023, "claims": 5, "incurred": 220000}, {"year": 2024, "claims": 4, "incurred": 190000}, {"year": 2025, "claims": 3, "incurred": 190000}]}),
+             ("get_loss_history", {"total_claims": 12, "total_incurred": 600000, "years": [{"year": 2023, "claims": 5}, {"year": 2024, "claims": 4}, {"year": 2025, "claims": 3}]}),
+             ("get_enrichment_data", {"lexisnexis": {"litigation_history": [{"type": "negligence"}], "risk_score": "high"}, "dnb": {"financial_stress_score": 45}}),
+         ]},
         {"sub_id": "00000004-0004-0004-0004-000000000004", "name": "Acme GL",
          "lob": "GL", "named_insured": "Acme Dynamics LLC",
          "expected": {"risk_score": "Amber", "routing": "assign_to_senior_uw", "confidence": 0.74},
-         "difficulty": "medium"},
+         "difficulty": "medium",
+         "tool_mocks": [
+             ("get_submission_context", {"account": {"name": "Acme Dynamics LLC", "sic_code": "3599", "years_in_business": 15}, "submission": {"lob": "GL", "annual_revenue": 50000000, "manufacturing_operations": True}, "loss_history": [{"year": 2023, "claims": 2, "incurred": 65000}, {"year": 2024, "claims": 1, "incurred": 45000}, {"year": 2025, "claims": 2, "incurred": 80000}]}),
+             ("get_loss_history", {"total_claims": 5, "total_incurred": 190000, "years": [{"year": 2023, "claims": 2}, {"year": 2024, "claims": 1}, {"year": 2025, "claims": 2}]}),
+             ("get_enrichment_data", {"lexisnexis": {"litigation_history": [], "risk_score": "low"}, "dnb": {"financial_stress_score": 78}}),
+         ]},
     ]
 
     for idx, tc in enumerate(triage_cases):
@@ -1424,7 +1548,6 @@ async def seed_ground_truth_records(verity, gt_datasets, tasks, agents):
             source_provider=None, source_container=None, source_key=None,
             source_description=f"Submission: {tc['name']}",
             input_data={"submission_id": tc["sub_id"], "lob": tc["lob"], "named_insured": tc["named_insured"]},
-            tool_mock_overrides=None,  # uses real tool implementations
             tags=[tc["lob"], tc["expected"]["risk_score"].lower()],
             difficulty=tc["difficulty"],
             record_notes=None,
@@ -1441,7 +1564,15 @@ async def seed_ground_truth_records(verity, gt_datasets, tasks, agents):
             is_authoritative=True,
         )
 
-    print(f"  + triage ground truth: {len(triage_cases)} records with annotations")
+        # Insert tool mocks for this agent record
+        for tool_name, mock_response in tc.get("tool_mocks", []):
+            await verity.db.execute_returning("insert_ground_truth_record_mock", {
+                "record_id": str(record["id"]), "tool_name": tool_name,
+                "call_order": 1, "mock_response": json.dumps(mock_response),
+                "description": f"Scenario data for {tc['named_insured']}",
+            })
+
+    print(f"  + triage ground truth: {len(triage_cases)} records with annotations and tool mocks")
 
     # ── 4. APPETITE GROUND TRUTH (4 submissions) ─────────────
     gt_app_id = gt_datasets["gt_appetite"]["id"]
@@ -1450,19 +1581,35 @@ async def seed_ground_truth_records(verity, gt_datasets, tasks, agents):
         {"sub_id": "00000001-0001-0001-0001-000000000001", "name": "Acme D&O",
          "lob": "DO", "named_insured": "Acme Dynamics LLC",
          "expected": {"determination": "within_appetite", "confidence": 0.92},
-         "difficulty": "easy"},
+         "difficulty": "easy",
+         "tool_mocks": [
+             ("get_underwriting_guidelines", {"lob": "DO", "guidelines_text": "§1 GENERAL ELIGIBILITY\n1.2 Min 3 years in business.\n1.3 Revenue $10M-$500M.\n§2 FINANCIAL\n2.1 Revenue > $10M.\n2.2 No going concern.\n2.4 D/E < 3:1.\n§3 GOVERNANCE\n3.1 Board >= 5.\n3.3 Majority independent.\n§4 EXCLUSIONS\n4.1 SIC 6000-6199 requires special approval.\n§5 CLAIMS\n5.1 Max 2 D&O claims in 5 years."}),
+             ("get_submission_context", {"account": {"name": "Acme Dynamics LLC", "sic_code": "3599", "years_in_business": 15}, "submission": {"lob": "DO", "annual_revenue": 50000000, "board_size": 7, "independent_directors": 4}}),
+         ]},
         {"sub_id": "00000002-0002-0002-0002-000000000002", "name": "TechFlow D&O",
          "lob": "DO", "named_insured": "TechFlow Industries Inc",
          "expected": {"determination": "borderline", "confidence": 0.65},
-         "difficulty": "hard"},
+         "difficulty": "hard",
+         "tool_mocks": [
+             ("get_underwriting_guidelines", {"lob": "DO", "guidelines_text": "§1 GENERAL ELIGIBILITY\n1.2 Min 3 years.\n1.3 Revenue $10M-$500M.\n§2 FINANCIAL\n2.1 Revenue > $10M.\n§3 GOVERNANCE\n3.1 Board >= 5.\n3.2 No pending SEC enforcement. Routine inquiries acceptable.\n3.3 Majority independent.\n§5 CLAIMS\n5.1 Max 2 D&O claims in 5 years."}),
+             ("get_submission_context", {"account": {"name": "TechFlow Industries Inc", "sic_code": "7372", "years_in_business": 8}, "submission": {"lob": "DO", "annual_revenue": 120000000, "board_size": 9, "independent_directors": 5, "regulatory_investigation": "SEC routine inquiry"}}),
+         ]},
         {"sub_id": "00000003-0003-0003-0003-000000000003", "name": "Meridian GL",
          "lob": "GL", "named_insured": "Meridian Holdings Corp",
          "expected": {"determination": "outside_appetite", "confidence": 0.94},
-         "difficulty": "easy"},
+         "difficulty": "easy",
+         "tool_mocks": [
+             ("get_underwriting_guidelines", {"lob": "GL", "guidelines_text": "§1 ELIGIBILITY\n1.2 Min 2 years.\n1.3 Revenue $5M-$250M.\n§4 EXCLUSIONS\n4.1 SIC 6000-6199 excluded.\n4.3 Going concern excluded.\n§6 CLAIMS\n6.1 Max 5 GL claims in 3 years."}),
+             ("get_submission_context", {"account": {"name": "Meridian Holdings Corp", "sic_code": "6159", "years_in_business": 22}, "submission": {"lob": "GL", "annual_revenue": 25000000, "going_concern_opinion": True}}),
+         ]},
         {"sub_id": "00000004-0004-0004-0004-000000000004", "name": "Acme GL",
          "lob": "GL", "named_insured": "Acme Dynamics LLC",
          "expected": {"determination": "within_appetite", "confidence": 0.81},
-         "difficulty": "medium"},
+         "difficulty": "medium",
+         "tool_mocks": [
+             ("get_underwriting_guidelines", {"lob": "GL", "guidelines_text": "§1 ELIGIBILITY\n1.2 Min 2 years.\n1.3 Revenue $5M-$250M.\n§5 MANUFACTURING\n5.1 Light mfg (3400-3599) standard.\n§6 CLAIMS\n6.1 Max 5 GL claims in 3 years."}),
+             ("get_submission_context", {"account": {"name": "Acme Dynamics LLC", "sic_code": "3599", "years_in_business": 15}, "submission": {"lob": "GL", "annual_revenue": 50000000, "manufacturing_operations": True}}),
+         ]},
     ]
 
     for idx, tc in enumerate(appetite_cases):
@@ -1472,7 +1619,6 @@ async def seed_ground_truth_records(verity, gt_datasets, tasks, agents):
             source_provider=None, source_container=None, source_key=None,
             source_description=f"Submission: {tc['name']}",
             input_data={"submission_id": tc["sub_id"], "lob": tc["lob"], "named_insured": tc["named_insured"]},
-            tool_mock_overrides=None,
             tags=[tc["lob"], tc["expected"]["determination"]],
             difficulty=tc["difficulty"],
             record_notes=None,
@@ -1489,7 +1635,14 @@ async def seed_ground_truth_records(verity, gt_datasets, tasks, agents):
             is_authoritative=True,
         )
 
-    print(f"  + appetite ground truth: {len(appetite_cases)} records with annotations")
+        for tool_name, mock_response in tc.get("tool_mocks", []):
+            await verity.db.execute_returning("insert_ground_truth_record_mock", {
+                "record_id": str(record["id"]), "tool_name": tool_name,
+                "call_order": 1, "mock_response": json.dumps(mock_response),
+                "description": f"Scenario data for {tc['named_insured']}",
+            })
+
+    print(f"  + appetite ground truth: {len(appetite_cases)} records with annotations and tool mocks")
 
 
 # ══════════════════════════════════════════════════════════════

@@ -70,6 +70,7 @@ SELECT
     adl.output_tokens,
     adl.duration_ms,
     adl.status,
+    adl.decision_log_detail,
     adl.hitl_required,
     adl.created_at,
     COALESCE(a.display_name, t.display_name) AS entity_name,

@@ -36,6 +36,7 @@
             <th>Context</th>
             <th>Application</th>
             <th>Status</th>
+            <th>Log Level</th>
             <th>Tokens</th>
             <th>Duration</th>
             <th>When</th>
@@ -74,6 +75,9 @@
 
             <!-- Status badge -->
             <td><span class="verity-badge verity-badge-{{ d.status }}">{{ d.status }}</span></td>
+
+            <!-- Decision log level -->
+            <td><span class="verity-badge verity-badge-draft">{{ d.decision_log_detail or 'standard' }}</span></td>
 
             <!-- Tokens -->
             <td style="font-size: 0.8rem;">{{ (d.input_tokens or 0) + (d.output_tokens or 0) }}</td>

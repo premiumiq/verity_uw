@@ -1,0 +1,73 @@
+<!--
+  TESTING — Test suites overview
+
+  DATA: suites (list with entity info, case counts, pass rates)
+-->
+{% extends "base.html" %}
+
+{% block title %}Testing — Verity{% endblock %}
+{% block page_title %}Testing{% endblock %}
+
+{% block content %}
+
+<div class="verity-card" style="margin-bottom: 20px;">
+    <div class="verity-card-header">About Testing</div>
+    <div class="verity-card-footer">
+        Test suites validate that AI entities meet accuracy requirements before promotion.
+        Each suite contains test cases — small, focused inputs with expected outputs.
+        Running a suite executes each case against an entity version and compares outputs
+        using the specified metric (classification F1, field accuracy, exact match, or schema validation).
+        Tests are fast, cheap, and run frequently — they gate <strong>candidate → staging</strong> promotion.
+    </div>
+</div>
+
+<table class="verity-table">
+    <thead>
+        <tr>
+            <th>Suite</th>
+            <th>Entity</th>
+            <th>Type</th>
+            <th>Cases</th>
+            <th>Runs</th>
+            <th>Pass Rate</th>
+            <th>Last Run</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for s in suites %}
+        <tr class="clickable" onclick="window.location='/admin/testing/{{ s.id }}'">
+            <td><a href="/admin/testing/{{ s.id }}" style="font-weight: 500;">{{ s.name }}</a></td>
+            <td>
+                <span class="verity-badge verity-badge-{{ s.entity_type }}">{{ s.entity_type }}</span>
+                {{ s.entity_display_name or s.entity_name }}
+            </td>
+            <td><span class="verity-badge verity-badge-draft">{{ s.suite_type }}</span></td>
+            <td>{{ s.case_count }}</td>
+            <td>{{ s.total_runs or 0 }}</td>
+            <td>
+                {% if s.total_runs and s.total_runs > 0 %}
+                    {% set rate = (s.pass_count or 0) / s.total_runs * 100 %}
+                    {% if rate >= 90 %}
+                        <span class="verity-badge verity-badge-champion">{{ "%.0f"|format(rate) }}%</span>
+                    {% elif rate >= 70 %}
+                        <span class="verity-badge verity-badge-shadow">{{ "%.0f"|format(rate) }}%</span>
+                    {% else %}
+                        <span class="verity-badge verity-badge-high">{{ "%.0f"|format(rate) }}%</span>
+                    {% endif %}
+                {% else %}
+                    —
+                {% endif %}
+            </td>
+            <td style="font-size: 0.8rem;">{{ s.last_run_at.strftime('%Y-%m-%d %H:%M') if s.last_run_at else '—' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if not suites %}
+<div class="verity-empty">
+    <div class="verity-empty-message">No test suites registered yet.</div>
+</div>
+{% endif %}
+
+{% endblock %}

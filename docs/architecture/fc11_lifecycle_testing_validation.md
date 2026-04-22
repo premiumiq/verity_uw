@@ -763,20 +763,24 @@ Suite metadata, test cases with expected outputs, latest results per case, aggre
 
 ## IMPLEMENTATION ORDER
 
-| Phase | What | Files |
-|-------|------|-------|
-| **1. Schema** | New tables + ALTER statements | `db/schema.sql`, new migration SQL |
-| **2. Source data** | Document generation script, prompt rewrites | `scripts/generate_documents.py`, `register_all.py` |
-| **3. Ground truth** | Ground truth record population | `scripts/generate_ground_truth.py`, `register_all.py` |
-| **4. Metrics** | Metrics engine | `core/metrics.py` |
-| **5. Test runner** | Test execution orchestrator | `core/test_runner.py`, SQL queries |
-| **6. Validation runner** | Ground truth validation | `core/validation_runner.py`, SQL queries |
-| **7. Lifecycle UI** | Overview + detail + promote | Templates, routes |
-| **8. Test status UI** | Suites + results + run | Templates, routes |
-| **9. Ground truth UI** | Datasets + validation + drill-down | Templates, routes |
-| **10. Mock output upgrade** | Richer pipeline mock outputs | `pipeline.py` |
+| Phase | What | Status | Files |
+|-------|------|--------|-------|
+| **1. Schema** | New tables + ALTER statements | DONE (previous session) | `db/schema.sql` |
+| **2. Source data** | Document generation, prompt rewrites | DONE (prompts + 54 docs generated) | `prompts.py`, `seed_docs/filled/` |
+| **3. Ground truth** | Ground truth record population | PENDING | `register_all.py` (seed) |
+| **4. Metrics** | Metrics engine | DONE | `core/metrics.py` — classification_metrics, field_accuracy, exact_match, schema_valid, check_thresholds |
+| **5. Test runner** | Test execution orchestrator | DONE | `core/test_runner.py`, `db/queries/testing.sql` (15+ new queries) |
+| **6. Validation runner** | Ground truth validation | DONE | `core/validation_runner.py` |
+| **7. Lifecycle UI** | Overview table with all versions | DONE | `templates/lifecycle.html`, `routes.py` |
+| **8. Test status UI** | Suites + case counts + pass rates | DONE | `templates/test_results.html`, `routes.py` |
+| **9. Ground truth UI** | Datasets + validation runs | DONE | `templates/ground_truth.html`, `routes.py` |
+| **10. Mock output upgrade** | Richer pipeline mock outputs | DONE (previous session) | `pipeline.py` |
 
-Phase 1-3 are foundational. Phases 4-6 are backend. Phases 7-9 are UI. Phase 10 is polish.
+### Implementation notes
+- Test runner and validation runner wired into Verity SDK client (`core/client.py`)
+- 15+ new SQL queries added to `testing.sql` for lifecycle overview, test suites, ground truth, validation results
+- All 3 governance sidebar links (Lifecycle, Test Status, Ground Truth) now render real data
+- Phase 3 (ground truth population) deferred — tables exist, runners ready, need to populate records+annotations
 
 ---
 

@@ -109,6 +109,7 @@ services:
         max-file: "3"
     environment:
       VERITY_DB_URL: postgresql://verityuser:veritypass123@postgres:5432/verity_db
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       LOG_FILE_ENABLED: "true"
       LOG_DIR: /app/logs
     volumes:

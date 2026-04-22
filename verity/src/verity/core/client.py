@@ -31,7 +31,9 @@ from verity.core.mock_context import MockContext
 from verity.core.pipeline_executor import PipelineExecutor, PipelineResult
 from verity.core.registry import Registry
 from verity.core.reporting import Reporting
+from verity.core.test_runner import TestRunner
 from verity.core.testing import Testing
+from verity.core.validation_runner import ValidationRunner
 from verity.db.connection import Database
 from verity.models.decision import (
     AuditTrailEntry,
@@ -73,6 +75,17 @@ class Verity:
         self.pipeline_executor = PipelineExecutor(
             registry=self.registry,
             execution_engine=self.execution,
+        )
+        self.test_runner = TestRunner(
+            registry=self.registry,
+            execution_engine=self.execution,
+            testing=self.testing,
+        )
+        self.validation_runner = ValidationRunner(
+            registry=self.registry,
+            execution_engine=self.execution,
+            testing=self.testing,
+            db=self.db,
         )
 
     async def connect(self) -> None:

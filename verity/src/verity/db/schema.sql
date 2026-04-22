@@ -200,6 +200,7 @@ CREATE TABLE agent_version (
     output_schema               JSONB,
     authority_thresholds        JSONB DEFAULT '{}',
     mock_mode_enabled           BOOLEAN DEFAULT FALSE,
+    decision_log_detail         VARCHAR(20) DEFAULT 'standard',  -- full, standard, summary, metadata, none
     shadow_traffic_pct          NUMERIC(5,4) DEFAULT 0,
     challenger_traffic_pct      NUMERIC(5,4) DEFAULT 0,
 
@@ -290,6 +291,7 @@ CREATE TABLE task_version (
     inference_config_id         UUID NOT NULL REFERENCES inference_config(id),
     output_schema               JSONB,
     mock_mode_enabled           BOOLEAN DEFAULT FALSE,
+    decision_log_detail         VARCHAR(20) DEFAULT 'standard',  -- full, standard, summary, metadata, none
     shadow_traffic_pct          NUMERIC(5,4) DEFAULT 0,
     challenger_traffic_pct      NUMERIC(5,4) DEFAULT 0,
 
@@ -584,6 +586,24 @@ CREATE TABLE test_case (
 
 CREATE INDEX idx_tc_suite ON test_case(suite_id);
 
+
+-- Per-tool mock data for test cases. Each row mocks one tool call.
+-- At execution time, the test runner loads all mocks for a case and builds
+-- a MockContext with tool_responses. Claude is called for real — only tools
+-- are mocked. This tests whether the agent REASONS correctly given known inputs.
+CREATE TABLE test_case_mock (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    test_case_id    UUID NOT NULL REFERENCES test_case(id) ON DELETE CASCADE,
+    tool_name       VARCHAR(200) NOT NULL,
+    call_order      INTEGER DEFAULT 1,
+    mock_response   JSONB NOT NULL,
+    description     TEXT,
+    created_at      TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_tcm_case ON test_case_mock(test_case_id);
+
+
 CREATE TABLE test_execution_log (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     suite_id            UUID NOT NULL REFERENCES test_suite(id),
@@ -692,9 +712,6 @@ CREATE TABLE ground_truth_record (
     -- What gets fed to the entity during the validation run
     input_data              JSONB NOT NULL,
 
-    -- Per-record tool mock overrides for agent testing
-    tool_mock_overrides     JSONB,
-
     -- Slice tags for analysis (edge_case, high_risk, amber_boundary, etc.)
     tags                    TEXT[] DEFAULT '{}',
     difficulty              VARCHAR(20),
@@ -707,6 +724,23 @@ CREATE TABLE ground_truth_record (
 
 CREATE INDEX idx_gtr_dataset ON ground_truth_record(dataset_id);
 CREATE INDEX idx_gtr_tags    ON ground_truth_record USING GIN(tags);
+
+
+-- Per-tool mock data for ground truth records. Same pattern as test_case_mock.
+-- Provides the scenario data that the annotation was labeled against.
+-- For agent validation: mocks get_submission_context, get_loss_history, etc.
+-- so Claude reasons against the exact data the SME saw when labeling.
+CREATE TABLE ground_truth_record_mock (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    record_id       UUID NOT NULL REFERENCES ground_truth_record(id) ON DELETE CASCADE,
+    tool_name       VARCHAR(200) NOT NULL,
+    call_order      INTEGER DEFAULT 1,
+    mock_response   JSONB NOT NULL,
+    description     TEXT,
+    created_at      TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_gtrm_record ON ground_truth_record_mock(record_id);
 
 
 -- One annotator's answer for one record. Multiple annotations per record
@@ -811,6 +845,8 @@ CREATE TABLE validation_run (
 
     inference_config_snapshot JSONB,
 
+    status                  VARCHAR(50) NOT NULL DEFAULT 'running',
+    -- 'running' = in progress, 'complete' = finished successfully, 'failed' = errored
     passed                  BOOLEAN,
     notes                   TEXT
 );
@@ -991,6 +1027,10 @@ CREATE TABLE agent_decision_log (
     status                  VARCHAR(30) DEFAULT 'complete',
     error_message           TEXT,
 
+    -- Decision logging level used for this entry + what was redacted
+    decision_log_detail     VARCHAR(20) DEFAULT 'standard',
+    redaction_applied       JSONB,          -- null if nothing redacted
+
     created_at              TIMESTAMP DEFAULT NOW()
 );
 
@@ -1143,3 +1183,24 @@ CREATE TABLE description_similarity_log (
 );
 
 CREATE INDEX idx_dsl_entity ON description_similarity_log(checked_entity_type, checked_entity_id);
+
+
+-- ============================================================
+-- PLATFORM SETTINGS — Verity governance platform configuration
+-- ============================================================
+-- Key-value settings that control Verity's behavior at the platform level.
+-- Read at runtime — no restart needed to change.
+-- These are GOVERNANCE settings (decision logging, redaction thresholds),
+-- not business app settings.
+
+CREATE TABLE IF NOT EXISTS platform_settings (
+    key                 TEXT PRIMARY KEY,
+    value               TEXT NOT NULL,
+    category            TEXT NOT NULL DEFAULT 'general',
+    display_name        TEXT,
+    description         TEXT,
+    input_type          TEXT DEFAULT 'text',     -- text, select, number
+    options             TEXT,                    -- comma-separated for select type
+    sort_order          INTEGER DEFAULT 0,
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

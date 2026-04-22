@@ -502,43 +502,257 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             tasks=tasks,
         )
 
-    # ── LIFECYCLE (placeholder) ───────────────────────────────
+    # ── LIFECYCLE MANAGEMENT ─────────────────────────────────
 
     @router.get("/lifecycle", response_class=HTMLResponse)
     async def lifecycle_page(request: Request):
+        """All entity versions grouped by entity with lifecycle state."""
         await verity.ensure_connected()
-        agents = await verity.list_agents()
-        tasks = await verity.list_tasks()
-        return _render(templates, request, "agents.html",
+        versions = await verity.db.fetch_all("list_all_entity_versions_with_state", {})
+        return _render(templates, request, "lifecycle.html",
             active_page="lifecycle",
-            agents=agents + tasks,
+            versions=versions,
         )
 
-    # ── TEST RESULTS (placeholder) ────────────────────────────
+    # ── TESTING ──────────────────────────────────────────────
 
-    @router.get("/test-results", response_class=HTMLResponse)
-    async def test_results_page(request: Request):
+    @router.get("/testing", response_class=HTMLResponse)
+    async def testing_page(request: Request):
+        """Test suites overview."""
         await verity.ensure_connected()
-        counts = await verity.dashboard_counts()
-        return _render(templates, request, "dashboard.html",
-            active_page="test_results",
-            counts=counts,
-            recent_decisions=[],
-            agents=[], tasks=[],
+        suites = await verity.db.fetch_all("list_all_test_suites", {})
+        return _render(templates, request, "testing.html",
+            active_page="testing",
+            suites=suites,
         )
 
-    # ── GROUND TRUTH ──────────────────────────────────────────
+    @router.get("/testing/{suite_id}", response_class=HTMLResponse)
+    async def test_suite_detail_page(request: Request, suite_id: str):
+        """Test suite detail with cases and results."""
+        await verity.ensure_connected()
+        suites = await verity.db.fetch_all("get_test_suite", {"suite_id": suite_id})
+        if not suites:
+            return HTMLResponse("<h1>Test suite not found</h1>", status_code=404)
+        suite = suites[0]
+        cases = await verity.db.fetch_all("list_test_cases_for_suite", {"suite_id": suite_id})
+        results = await verity.db.fetch_all("list_test_results_for_suite", {"suite_id": suite_id})
+        return _render(templates, request, "test_suite_detail.html",
+            active_page="testing",
+            suite=suite,
+            cases=cases,
+            results=results,
+        )
+
+    @router.post("/testing/{suite_id}/run", response_class=HTMLResponse)
+    async def run_test_suite(request: Request, suite_id: str):
+        """Run a test suite and redirect back to detail page with results."""
+        await verity.ensure_connected()
+        from fastapi.responses import RedirectResponse
+        try:
+            # Get suite to find entity info
+            suites = await verity.db.fetch_all("get_test_suite", {"suite_id": suite_id})
+            if not suites:
+                return HTMLResponse("<h1>Suite not found</h1>", status_code=404)
+            suite = suites[0]
+
+            # Find the champion version for this entity
+            entity_type = suite["entity_type"]
+            entity_name = suite.get("entity_name")
+            if entity_type == "agent":
+                agent = await verity.db.fetch_one("get_agent_by_name", {"agent_name": entity_name})
+                version_id = agent["current_champion_version_id"] if agent else None
+            else:
+                task = await verity.db.fetch_one("get_task_by_name", {"task_name": entity_name})
+                version_id = task["current_champion_version_id"] if task else None
+
+            if not version_id:
+                logger.warning("No champion version found for %s %s", entity_type, entity_name)
+                return RedirectResponse(url=f"/admin/testing/{suite_id}", status_code=303)
+
+            # Read mock_llm from form - defaults to False (real Claude calls).
+            form = await request.form()
+            use_mock = form.get("mock_llm", "false").lower() == "true"
+
+            from uuid import UUID
+            result = await verity.test_runner.run_suite(
+                entity_type=entity_type,
+                entity_version_id=UUID(str(version_id)),
+                suite_id=UUID(suite_id),
+                mock_llm=use_mock,
+                channel="staging",
+            )
+            logger.info("Test suite completed: %s (%d/%d passed)",
+                         suite.get("name"), result.passed_cases, result.total_cases)
+        except Exception:
+            logger.error("Test suite run failed", exc_info=True)
+
+        return RedirectResponse(url=f"/admin/testing/{suite_id}", status_code=303)
+
+    # Keep old URL as redirect for bookmarks
+    @router.get("/test-results", response_class=HTMLResponse)
+    async def test_results_redirect(request: Request):
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/admin/testing", status_code=301)
+
+    # ── GROUND TRUTH ─────────────────────────────────────────
 
     @router.get("/ground-truth", response_class=HTMLResponse)
     async def ground_truth_page(request: Request):
-        """Ground truth datasets — placeholder."""
+        """Ground truth datasets."""
         await verity.ensure_connected()
-        counts = await verity.dashboard_counts()
-        return _render(templates, request, "dashboard.html",
+        datasets = await verity.db.fetch_all("list_all_ground_truth_datasets", {})
+        return _render(templates, request, "ground_truth.html",
             active_page="ground_truth",
-            counts=counts,
-            recent_decisions=[],
-            agents=[], tasks=[],
+            datasets=datasets,
+        )
+
+    @router.get("/ground-truth/{dataset_id}", response_class=HTMLResponse)
+    async def ground_truth_detail_page(request: Request, dataset_id: str):
+        """Ground truth dataset detail with records."""
+        await verity.ensure_connected()
+        dataset = await verity.db.fetch_one("get_ground_truth_dataset", {"dataset_id": dataset_id})
+        if not dataset:
+            return HTMLResponse("<h1>Dataset not found</h1>", status_code=404)
+        records = await verity.db.fetch_all("list_authoritative_annotations", {"dataset_id": dataset_id})
+        # Check if a validation is currently running for this dataset
+        running_run = await verity.db.fetch_one_raw(
+            "SELECT id FROM validation_run WHERE dataset_id = %(did)s AND status = 'running' LIMIT 1",
+            {"did": dataset_id},
+        )
+        return _render(templates, request, "ground_truth_detail.html",
+            active_page="ground_truth",
+            dataset=dataset,
+            records=records,
+            has_running_validation=running_run is not None,
+        )
+
+    @router.get("/ground-truth/{dataset_id}/records/{record_id}", response_class=HTMLResponse)
+    async def ground_truth_record_page(request: Request, dataset_id: str, record_id: str):
+        """Ground truth record detail with annotations and tool mocks."""
+        await verity.ensure_connected()
+        dataset = await verity.db.fetch_one("get_ground_truth_dataset", {"dataset_id": dataset_id})
+        if not dataset:
+            return HTMLResponse("<h1>Dataset not found</h1>", status_code=404)
+        record = await verity.db.fetch_one("get_ground_truth_record", {"record_id": record_id})
+        if not record:
+            return HTMLResponse("<h1>Record not found</h1>", status_code=404)
+        annotations = await verity.db.fetch_all("list_annotations_for_record", {"record_id": record_id})
+        record_mocks = await verity.db.fetch_all("list_ground_truth_record_mocks", {"record_id": record_id})
+        return _render(templates, request, "ground_truth_record.html",
+            active_page="ground_truth",
+            dataset=dataset,
+            record=record,
+            annotations=annotations,
+            record_mocks=record_mocks,
+        )
+
+    @router.post("/ground-truth/{dataset_id}/records/{record_id}/mocks", response_class=HTMLResponse)
+    async def add_record_mock(request: Request, dataset_id: str, record_id: str):
+        """Add a tool mock to a ground truth record."""
+        await verity.ensure_connected()
+        from fastapi.responses import RedirectResponse
+        import json as _json
+        form = await request.form()
+        tool_name = form.get("tool_name", "")
+        mock_response_str = form.get("mock_response", "{}")
+        description = form.get("description")
+        try:
+            mock_response = _json.loads(mock_response_str)
+        except _json.JSONDecodeError:
+            mock_response = {"raw": mock_response_str}
+        await verity.db.execute_returning("insert_ground_truth_record_mock", {
+            "record_id": record_id,
+            "tool_name": tool_name,
+            "call_order": 1,
+            "mock_response": _json.dumps(mock_response),
+            "description": description,
+        })
+        return RedirectResponse(url=f"/admin/ground-truth/{dataset_id}/records/{record_id}", status_code=303)
+
+    @router.post("/ground-truth/{dataset_id}/records/{record_id}/mocks/{mock_id}/delete", response_class=HTMLResponse)
+    async def delete_record_mock(request: Request, dataset_id: str, record_id: str, mock_id: str):
+        """Delete a tool mock from a ground truth record."""
+        await verity.ensure_connected()
+        from fastapi.responses import RedirectResponse
+        await verity.db.execute_returning("delete_ground_truth_record_mock", {"mock_id": mock_id})
+        return RedirectResponse(url=f"/admin/ground-truth/{dataset_id}/records/{record_id}", status_code=303)
+
+    @router.post("/ground-truth/{dataset_id}/validate", response_class=HTMLResponse)
+    async def run_validation(request: Request, dataset_id: str):
+        """Run validation for a dataset against the champion version."""
+        await verity.ensure_connected()
+        from fastapi.responses import RedirectResponse
+        from uuid import UUID
+
+        try:
+            dataset = await verity.db.fetch_one("get_ground_truth_dataset", {"dataset_id": dataset_id})
+            if not dataset:
+                return HTMLResponse("<h1>Dataset not found</h1>", status_code=404)
+
+            entity_type = dataset["entity_type"]
+            entity_name = dataset.get("entity_name")
+
+            # Find champion version
+            if entity_type == "agent":
+                entity = await verity.db.fetch_one("get_agent_by_name", {"agent_name": entity_name})
+            else:
+                entity = await verity.db.fetch_one("get_task_by_name", {"task_name": entity_name})
+
+            version_id = entity.get("current_champion_version_id") if entity else None
+            if not version_id:
+                logger.warning("No champion version for %s %s", entity_type, entity_name)
+                return RedirectResponse(url=f"/admin/ground-truth/{dataset_id}", status_code=303)
+
+            # Read mock_llm from form - defaults to False (real Claude calls).
+            # User must explicitly check "Mock LLM" on the UI to skip real execution.
+            form = await request.form()
+            use_mock = form.get("mock_llm", "false").lower() == "true"
+
+            result = await verity.validation_runner.run_validation(
+                entity_type=entity_type,
+                entity_version_id=UUID(str(version_id)),
+                dataset_id=UUID(dataset_id),
+                run_by="Verity Admin UI",
+                mock_llm=use_mock,
+                channel="staging",
+            )
+            logger.info("Validation complete: %s (passed=%s, f1=%.2f)",
+                         dataset.get("name"), result.passed, result.f1)
+
+            # Redirect to the validation run detail
+            if result.validation_run_id:
+                return RedirectResponse(url=f"/admin/validation-runs/{result.validation_run_id}", status_code=303)
+        except Exception:
+            logger.error("Validation run failed", exc_info=True)
+
+        return RedirectResponse(url=f"/admin/ground-truth/{dataset_id}", status_code=303)
+
+    # ── VALIDATION RUNS ──────────────────────────────────────
+
+    @router.get("/validation-runs", response_class=HTMLResponse)
+    async def validation_runs_page(request: Request):
+        """All validation runs."""
+        await verity.ensure_connected()
+        runs = await verity.db.fetch_all("list_validation_runs", {})
+        return _render(templates, request, "validation_runs.html",
+            active_page="validation_runs",
+            runs=runs,
+        )
+
+    @router.get("/validation-runs/{run_id}", response_class=HTMLResponse)
+    async def validation_run_detail_page(request: Request, run_id: str):
+        """Validation run detail with metrics and per-record results."""
+        await verity.ensure_connected()
+        run = await verity.db.fetch_one("get_validation_run_by_id", {"run_id": run_id})
+        if not run:
+            return HTMLResponse("<h1>Validation run not found</h1>", status_code=404)
+        records = await verity.db.fetch_all("list_validation_record_results", {"validation_run_id": run_id})
+        record_failures = [r for r in records if not r.get("correct")]
+        return _render(templates, request, "validation_run_detail.html",
+            active_page="validation_runs",
+            run=run,
+            records=records,
+            record_failures=record_failures,
         )
 
     # ── PIPELINE RUNS ───────────────────────────────────────────
@@ -563,6 +777,59 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
         return _render(templates, request, "overrides.html",
             active_page="overrides",
             overrides=overrides,
+        )
+
+    # ── PLATFORM SETTINGS ──────────────────────────────────────
+
+    async def _load_platform_settings():
+        """Read platform_settings grouped by category."""
+        rows = await verity.db.fetch_all_raw(
+            "SELECT * FROM platform_settings ORDER BY category, sort_order"
+        )
+        by_category = {}
+        for s in rows:
+            by_category.setdefault(s.get("category", "general"), []).append(s)
+        return by_category
+
+    @router.get("/settings", response_class=HTMLResponse)
+    async def settings_page(request: Request):
+        """Show Verity platform settings grouped by category."""
+        await verity.ensure_connected()
+        try:
+            settings_by_category = await _load_platform_settings()
+        except Exception:
+            logger.warning("Could not load platform settings", exc_info=True)
+            settings_by_category = {}
+
+        return _render(templates, request, "settings.html",
+            active_page="settings",
+            settings_by_category=settings_by_category,
+        )
+
+    @router.post("/settings/save", response_class=HTMLResponse)
+    async def save_settings(request: Request):
+        """Update platform settings from the settings form."""
+        await verity.ensure_connected()
+        form = await request.form()
+        try:
+            for key, value in form.items():
+                await verity.db.execute_raw(
+                    "UPDATE platform_settings SET value = %(value)s, updated_at = NOW() WHERE key = %(key)s",
+                    {"value": value, "key": key},
+                )
+            logger.info("Platform settings updated: %s", dict(form))
+        except Exception:
+            logger.error("Failed to save platform settings", exc_info=True)
+
+        try:
+            settings_by_category = await _load_platform_settings()
+        except Exception:
+            settings_by_category = {}
+
+        return _render(templates, request, "settings.html",
+            active_page="settings",
+            settings_by_category=settings_by_category,
+            saved=True,
         )
 
     return router

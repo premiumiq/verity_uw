@@ -43,14 +43,22 @@ VERITY_DB_URL = os.getenv(
     "postgresql://verityuser:veritypass123@localhost:5432/verity_db",
 )
 
+# Anthropic API key — needed for running validations and tests from the admin UI
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+
 # Global Verity instance
-verity = Verity(database_url=VERITY_DB_URL)
+verity = Verity(database_url=VERITY_DB_URL, anthropic_api_key=ANTHROPIC_API_KEY)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: connect to database. Shutdown: close connections."""
+    """Startup: connect to database, apply schema. Shutdown: close connections."""
     await verity.connect()
+    # Apply schema on startup (idempotent — uses IF NOT EXISTS).
+    # This ensures all tables exist even before register_all runs,
+    # so the admin UI can load with empty pages instead of 500 errors.
+    from verity.db.migrate import apply_schema
+    await apply_schema(VERITY_DB_URL, drop_existing=False)
     yield
     await verity.close()
 

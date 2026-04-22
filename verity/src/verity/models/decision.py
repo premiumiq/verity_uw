@@ -76,6 +76,7 @@ class DecisionLog(BaseModel):
     output_tokens: Optional[int] = None
     duration_ms: Optional[int] = None
     status: str = "complete"
+    decision_log_detail: Optional[str] = "standard"
     hitl_required: bool = False
     # Joined from execution_context table
     execution_context_ref: Optional[str] = None
@@ -101,6 +102,7 @@ class DecisionLogDetail(DecisionLog):
     application: str = "default"
     hitl_completed: bool = False
     error_message: Optional[str] = None
+    redaction_applied: Optional[dict[str, Any]] = None
 
     # Joined names
     agent_name: Optional[str] = None

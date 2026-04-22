@@ -1,0 +1,157 @@
+<!--
+  VALIDATION RUN DETAIL — Metrics, thresholds, per-record results
+
+  DATA: run, records, record_failures
+-->
+{% extends "base.html" %}
+
+{% block title %}Validation Run — Verity{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/validation-runs">Validation Runs</a>
+    <span class="separator">›</span>
+    <span>{{ run.entity_display_name or run.entity_name }} — {{ run.dataset_name }}</span>
+{% endblock %}
+
+{% block page_title %}Validation Run: {{ run.entity_display_name or run.entity_name }}{% endblock %}
+
+{% block content %}
+
+<div class="verity-card" style="margin-bottom: 20px;">
+    <div class="verity-card-header">About This Run</div>
+    <div class="verity-card-footer">
+        This validation run tested <strong>{{ run.entity_display_name }}</strong>
+        {% if run.version_label %}v{{ run.version_label }}{% endif %}
+        against ground truth dataset <strong>{{ run.dataset_name }}</strong>
+        ({{ run.dataset_record_count }} records, {{ run.dataset_quality_tier }} tier)
+        on {{ run.run_at.strftime('%Y-%m-%d at %H:%M') if run.run_at else 'unknown date' }}.
+    </div>
+</div>
+
+<!-- Metrics summary -->
+<div class="verity-stats-grid" style="margin-bottom: 20px;">
+    {% if run.f1_score is not none %}
+    <div class="verity-card">
+        <div class="verity-card-value">{{ "%.2f"|format(run.f1_score) }}</div>
+        <div class="verity-card-header">F1 Score</div>
+    </div>
+    {% endif %}
+    {% if run.precision_score is not none %}
+    <div class="verity-card">
+        <div class="verity-card-value">{{ "%.2f"|format(run.precision_score) }}</div>
+        <div class="verity-card-header">Precision</div>
+    </div>
+    {% endif %}
+    {% if run.recall_score is not none %}
+    <div class="verity-card">
+        <div class="verity-card-value">{{ "%.2f"|format(run.recall_score) }}</div>
+        <div class="verity-card-header">Recall</div>
+    </div>
+    {% endif %}
+    {% if run.cohens_kappa is not none %}
+    <div class="verity-card">
+        <div class="verity-card-value">{{ "%.2f"|format(run.cohens_kappa) }}</div>
+        <div class="verity-card-header">Cohen's Kappa</div>
+    </div>
+    {% endif %}
+    <div class="verity-card">
+        <div class="verity-card-value">
+            {% if run.passed %}
+                <span class="verity-badge verity-badge-champion">PASSED</span>
+            {% else %}
+                <span class="verity-badge verity-badge-high">FAILED</span>
+            {% endif %}
+        </div>
+        <div class="verity-card-header">Result</div>
+    </div>
+</div>
+
+<!-- Run metadata -->
+<div class="verity-card" style="margin-bottom: 20px;">
+    <div class="verity-detail-grid">
+        <div class="verity-detail-label">Entity</div>
+        <div class="verity-detail-value">
+            <span class="verity-badge verity-badge-{{ run.entity_type }}">{{ run.entity_type }}</span>
+            {{ run.entity_display_name }} {% if run.version_label %}v{{ run.version_label }}{% endif %}
+        </div>
+        <div class="verity-detail-label">Dataset</div>
+        <div class="verity-detail-value">
+            <a href="/admin/ground-truth/{{ run.dataset_id }}">{{ run.dataset_name }}</a>
+        </div>
+        <div class="verity-detail-label">Run By</div>
+        <div class="verity-detail-value">{{ run.run_by or '—' }}</div>
+        <div class="verity-detail-label">Thresholds</div>
+        <div class="verity-detail-value">
+            {% if run.thresholds_met %}
+                <span class="verity-badge verity-badge-champion">all met</span>
+            {% elif run.thresholds_met == false %}
+                <span class="verity-badge verity-badge-high">unmet</span>
+            {% else %}
+                —
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Metric definitions (collapsible) -->
+<details class="verity-section" style="margin-bottom: 20px;">
+    <summary class="verity-section-title" style="cursor: pointer;">Metric Definitions</summary>
+    <table class="verity-table" style="margin-top: 8px;">
+        <thead><tr><th>Metric</th><th>Definition</th></tr></thead>
+        <tbody>
+            <tr><td style="font-weight: 500;">Precision</td><td>Of all items labeled as class X, what fraction actually were X? High precision = few false positives.</td></tr>
+            <tr><td style="font-weight: 500;">Recall</td><td>Of all items that actually were X, what fraction did the model identify? High recall = few false negatives.</td></tr>
+            <tr><td style="font-weight: 500;">F1 Score</td><td>Harmonic mean of precision and recall. Balances both. Range 0-1, higher is better.</td></tr>
+            <tr><td style="font-weight: 500;">Cohen's Kappa</td><td>Agreement between model and SME adjusted for chance. 0 = random, 1 = perfect. >0.8 is strong agreement.</td></tr>
+            <tr><td style="font-weight: 500;">Field Accuracy</td><td>For extraction: fraction of fields where extracted value matches expected (within tolerance).</td></tr>
+        </tbody>
+    </table>
+</details>
+
+<!-- Per-record results -->
+{% if records %}
+<div class="verity-section">
+    <h2 class="verity-section-title">Per-Record Results ({{ records|length }} records, {{ record_failures|length }} failures)</h2>
+    <table class="verity-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Result</th>
+                <th>Confidence</th>
+                <th>Score</th>
+                <th>Expected</th>
+                <th>Actual</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in records %}
+            <tr>
+                <td>{{ r.record_index }}</td>
+                <td>
+                    {% if r.correct %}
+                        <span class="verity-badge verity-badge-champion">correct</span>
+                    {% else %}
+                        <span class="verity-badge verity-badge-high">incorrect</span>
+                    {% endif %}
+                </td>
+                <td>{{ "%.0f"|format(r.confidence * 100) if r.confidence else '—' }}%</td>
+                <td>{{ "%.2f"|format(r.match_score) if r.match_score else '—' }}</td>
+                <td>
+                    <div class="verity-code" style="max-height: 50px; overflow-y: auto; font-size: 0.7rem;">
+                        {{ r.expected_output }}
+                    </div>
+                </td>
+                <td>
+                    <div class="verity-code" style="max-height: 50px; overflow-y: auto; font-size: 0.7rem;">
+                        {{ r.actual_output }}
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% endblock %}

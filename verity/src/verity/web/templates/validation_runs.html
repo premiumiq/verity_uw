@@ -1,0 +1,80 @@
+<!--
+  VALIDATION RUNS — All validation runs across entities
+
+  DATA: runs (list)
+-->
+{% extends "base.html" %}
+
+{% block title %}Validation Runs — Verity{% endblock %}
+{% block page_title %}Validation Runs{% endblock %}
+
+{% block content %}
+
+<div class="verity-card" style="margin-bottom: 20px;">
+    <div class="verity-card-header">About Validation</div>
+    <div class="verity-card-footer">
+        Validation runs test an entity version against a ground truth dataset. The runner executes the entity
+        for every record, compares outputs to authoritative SME annotations, and computes aggregate metrics
+        (precision, recall, F1, Cohen's kappa for classification; per-field accuracy for extraction).
+        Results are checked against metric thresholds — all thresholds must be met for the version to pass.
+        Validation gates <strong>staging → champion</strong> promotion.
+    </div>
+</div>
+
+<table class="verity-table">
+    <thead>
+        <tr>
+            <th>Entity</th>
+            <th>Dataset</th>
+            <th>F1</th>
+            <th>Precision</th>
+            <th>Recall</th>
+            <th>Kappa</th>
+            <th>Thresholds</th>
+            <th>Result</th>
+            <th>Run By</th>
+            <th>When</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for vr in runs %}
+        <tr class="clickable" onclick="window.location='/admin/validation-runs/{{ vr.id }}'">
+            <td>
+                <span class="verity-badge verity-badge-{{ vr.entity_type }}">{{ vr.entity_type }}</span>
+                {{ vr.entity_display_name or '—' }}
+            </td>
+            <td><a href="/admin/validation-runs/{{ vr.id }}">{{ vr.dataset_name }}</a></td>
+            <td>{{ "%.2f"|format(vr.f1_score) if vr.f1_score else '—' }}</td>
+            <td>{{ "%.2f"|format(vr.precision_score) if vr.precision_score else '—' }}</td>
+            <td>{{ "%.2f"|format(vr.recall_score) if vr.recall_score else '—' }}</td>
+            <td>{{ "%.2f"|format(vr.cohens_kappa) if vr.cohens_kappa else '—' }}</td>
+            <td>
+                {% if vr.thresholds_met %}
+                    <span class="verity-badge verity-badge-champion">met</span>
+                {% elif vr.thresholds_met == false %}
+                    <span class="verity-badge verity-badge-high">unmet</span>
+                {% else %}
+                    —
+                {% endif %}
+            </td>
+            <td>
+                {% if vr.passed %}
+                    <span class="verity-badge verity-badge-champion">passed</span>
+                {% else %}
+                    <span class="verity-badge verity-badge-high">failed</span>
+                {% endif %}
+            </td>
+            <td style="font-size: 0.8rem;">{{ vr.run_by or '—' }}</td>
+            <td style="font-size: 0.8rem;">{{ vr.run_at.strftime('%Y-%m-%d %H:%M') if vr.run_at else '—' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if not runs %}
+<div class="verity-empty">
+    <div class="verity-empty-message">No validation runs yet.</div>
+</div>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,126 @@
+<!--
+  VERITY PLATFORM SETTINGS — Governance configuration
+
+  Controls decision logging behavior across all consuming applications.
+
+  DATA PASSED BY ROUTE:
+  - settings_by_category: dict of {category: [setting_rows]}
+  - saved: bool (true if just saved)
+-->
+{% extends "base.html" %}
+
+{% block title %}Settings — Verity{% endblock %}
+
+{% block page_title %}Platform Settings{% endblock %}
+
+{% block content %}
+
+{% if saved %}
+<div class="verity-card" style="margin-bottom: 16px; border-left: 3px solid var(--verity-green);">
+    <div class="verity-card-header">Settings saved successfully.</div>
+</div>
+{% endif %}
+
+<form method="POST" action="/admin/settings/save">
+
+<!-- ── DECISION LOGGING ────────────────────────────────── -->
+{% if 'decision_logging' in settings_by_category %}
+<div class="verity-section">
+    <h2 class="verity-section-title">Decision Logging</h2>
+
+    <!-- Level reference table -->
+    <div class="verity-card" style="margin-bottom: 12px;">
+        <div class="verity-card-header">Detail Level Reference</div>
+        <table class="verity-table">
+            <thead>
+                <tr>
+                    <th>Level</th>
+                    <th>Input</th>
+                    <th>Output</th>
+                    <th>Message History</th>
+                    <th>Tool Calls</th>
+                    <th>Replay</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><span class="verity-badge verity-badge-champion">FULL</span></td>
+                    <td>Complete payload</td>
+                    <td>Complete payload</td>
+                    <td>Full conversation</td>
+                    <td>Full details</td>
+                    <td>Yes</td>
+                </tr>
+                <tr>
+                    <td><span class="verity-badge verity-badge-staging">STANDARD</span></td>
+                    <td>Redacted (binary removed, large text truncated)</td>
+                    <td>Complete</td>
+                    <td>Redacted (document blocks removed)</td>
+                    <td>Summaries (payloads truncated)</td>
+                    <td>Partial</td>
+                </tr>
+                <tr>
+                    <td><span class="verity-badge verity-badge-candidate">SUMMARY</span></td>
+                    <td>First 500 chars</td>
+                    <td>First 500 chars</td>
+                    <td>Omitted</td>
+                    <td>Tool names only</td>
+                    <td>No</td>
+                </tr>
+                <tr>
+                    <td><span class="verity-badge verity-badge-shadow">METADATA</span></td>
+                    <td>Omitted</td>
+                    <td>Omitted</td>
+                    <td>Omitted</td>
+                    <td>Omitted</td>
+                    <td>No</td>
+                </tr>
+                <tr>
+                    <td><span class="verity-badge verity-badge-high">NONE</span></td>
+                    <td colspan="5">No decision log entry created. Use only for testing.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Individual settings -->
+    <div class="verity-card">
+        {% for s in settings_by_category['decision_logging'] %}
+        <div style="margin-bottom: 16px; {% if not loop.last %}border-bottom: 1px solid var(--verity-border-light); padding-bottom: 16px;{% endif %}">
+            <div class="verity-detail-label" style="margin-bottom: 4px;">{{ s.display_name or s.key }}</div>
+
+            {% if s.input_type == 'select' and s.options %}
+            <select name="{{ s.key }}" class="verity-select" style="width: 200px;">
+                {% for opt in s.options.split(',') %}
+                <option value="{{ opt }}" {% if s.value == opt %}selected{% endif %}>{{ opt | upper }}</option>
+                {% endfor %}
+            </select>
+
+            {% elif s.input_type == 'number' %}
+            <input type="number" name="{{ s.key }}" value="{{ s.value }}"
+                   class="verity-input" style="width: 150px;">
+
+            {% else %}
+            <input type="text" name="{{ s.key }}" value="{{ s.value }}"
+                   class="verity-input" style="width: 300px;">
+            {% endif %}
+
+            <div style="font-size: 0.75rem; color: var(--verity-text-light); margin-top: 4px; line-height: 1.4;">
+                {{ s.description }}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+
+<!-- ── SAVE ───────────────────────────────────────────── -->
+<div class="verity-action-bar">
+    <button type="submit" class="verity-btn verity-btn-primary">Save Settings</button>
+    <a href="/admin/" class="verity-btn verity-btn-secondary">Cancel</a>
+</div>
+
+</form>
+
+{% endblock %}

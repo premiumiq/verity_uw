@@ -318,7 +318,7 @@ class Registry:
     async def register_ground_truth_record(self, **kwargs) -> dict:
         """Register one input record in a ground truth dataset."""
         params = _prepare_json_params(kwargs, json_fields=[
-            "input_data", "tool_mock_overrides",
+            "input_data",
         ])
         return await self.db.execute_returning("insert_ground_truth_record", params)
 

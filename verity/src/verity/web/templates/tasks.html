@@ -30,6 +30,7 @@
             <th>Task</th>
             <th>Capability</th>
             <th>Materiality</th>
+            <th>Log Level</th>
             <th>Champion</th>
             <th>Config</th>
             <th>Prompts</th>
@@ -49,6 +50,7 @@
 
             <td><span class="verity-badge verity-badge-task">{{ task.capability_type }}</span></td>
             <td><span class="verity-badge verity-badge-{{ task.materiality_tier }}">{{ task.materiality_tier }}</span></td>
+            <td><span class="verity-badge verity-badge-draft">{{ task.decision_log_detail or 'standard' }}</span></td>
 
             <td>
                 {% if task.champion_version %}

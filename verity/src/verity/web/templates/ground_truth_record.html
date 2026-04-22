@@ -1,0 +1,216 @@
+<!--
+  GROUND TRUTH RECORD DETAIL — One record with all annotations
+
+  DATA: dataset, record, annotations
+-->
+{% extends "base.html" %}
+
+{% block title %}Record #{{ record.record_index }} — Ground Truth{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/ground-truth">Ground Truth</a>
+    <span class="separator">›</span>
+    <a href="/admin/ground-truth/{{ dataset.id }}">{{ dataset.name }}</a>
+    <span class="separator">›</span>
+    <span>Record #{{ record.record_index }}</span>
+{% endblock %}
+
+{% block page_title %}Record #{{ record.record_index }}{% endblock %}
+
+{% block content %}
+
+<div class="verity-card" style="margin-bottom: 20px;">
+    <div class="verity-card-header">About This Record</div>
+    <div class="verity-card-footer">
+        This is a single input record in the
+        <a href="/admin/ground-truth/{{ dataset.id }}">{{ dataset.name }}</a> dataset.
+        It represents one test input that the entity will be validated against.
+        The authoritative annotation below is the expected correct answer.
+    </div>
+</div>
+
+<!-- Record metadata -->
+<div class="verity-card" style="margin-bottom: 20px;">
+    <div class="verity-detail-grid">
+        <div class="verity-detail-label">Dataset</div>
+        <div class="verity-detail-value">
+            <a href="/admin/ground-truth/{{ dataset.id }}">{{ dataset.name }}</a>
+        </div>
+        <div class="verity-detail-label">Record Index</div>
+        <div class="verity-detail-value">{{ record.record_index }}</div>
+        <div class="verity-detail-label">Source Type</div>
+        <div class="verity-detail-value"><span class="verity-badge verity-badge-draft">{{ record.source_type }}</span></div>
+
+        {% if record.source_description %}
+        <div class="verity-detail-label">Source Description</div>
+        <div class="verity-detail-value">{{ record.source_description }}</div>
+        {% endif %}
+
+        {% if record.source_key %}
+        <div class="verity-detail-label">Source Location</div>
+        <div class="verity-detail-value">
+            {% if record.source_provider == 'edms' %}
+                <span style="font-family: monospace; font-size: 0.8rem;">edms://{{ record.source_container }}/{{ record.source_key }}</span>
+                <br><a href="http://localhost:8002/ui/documents/{{ record.source_key }}" target="_blank"
+                       class="verity-btn verity-btn-secondary verity-btn-sm" style="margin-top: 4px;">
+                    View in EDMS ↗
+                </a>
+            {% else %}
+                <span style="font-family: monospace; font-size: 0.8rem;">
+                    {% if record.source_provider %}{{ record.source_provider }}://{% endif %}{{ record.source_container }}/{{ record.source_key }}
+                </span>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if record.tags %}
+        <div class="verity-detail-label">Tags</div>
+        <div class="verity-detail-value">
+            {% for tag in record.tags %}
+            <span class="verity-badge verity-badge-draft">{{ tag }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if record.difficulty %}
+        <div class="verity-detail-label">Difficulty</div>
+        <div class="verity-detail-value">{{ record.difficulty }}</div>
+        {% endif %}
+
+        {% if record.record_notes %}
+        <div class="verity-detail-label">Notes</div>
+        <div class="verity-detail-value">{{ record.record_notes }}</div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Input data -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Input Data</h2>
+    <div class="verity-card">
+        <div class="verity-code" style="max-height: 300px; overflow-y: auto; font-size: 0.8rem; white-space: pre-wrap;">{{ record.input_data }}</div>
+    </div>
+</div>
+
+<!-- Tool Mocks (scenario data for agent validation) -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Tool Mocks</h2>
+    {% if record_mocks %}
+    <p style="font-size: 0.78rem; color: var(--verity-text-light); margin-bottom: 8px;">
+        These are the controlled tool responses the agent receives during validation. They represent the scenario the SME saw when labeling the expected output.
+    </p>
+    <table class="verity-table">
+        <thead>
+            <tr>
+                <th>Tool</th>
+                <th>Call Order</th>
+                <th>Mock Response</th>
+                <th>Description</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in record_mocks %}
+            <tr>
+                <td style="font-family: monospace; font-size: 0.78rem;">{{ m.tool_name }}</td>
+                <td>{{ m.call_order }}</td>
+                <td><div class="verity-code" style="max-height: 100px; overflow-y: auto; font-size: 0.72rem; max-width: 400px;">{{ m.mock_response }}</div></td>
+                <td style="font-size: 0.78rem; color: var(--verity-text-light);">{{ m.description or '-' }}</td>
+                <td>
+                    <form method="POST" action="/admin/ground-truth/{{ dataset.id }}/records/{{ record.id }}/mocks/{{ m.id }}/delete" style="display: inline;">
+                        <button type="submit" class="verity-btn verity-btn-danger" style="padding: 2px 6px; font-size: 0.65rem;">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="verity-card">
+        <div style="color: var(--verity-text-light); font-size: 0.82rem;">No tool mocks defined. For agent validation, add mocks for each tool the agent calls so it receives controlled data.</div>
+    </div>
+    {% endif %}
+
+    <!-- Add mock form -->
+    <div style="margin-top: 8px;">
+        <form method="POST" action="/admin/ground-truth/{{ dataset.id }}/records/{{ record.id }}/mocks" style="display: flex; gap: 8px; align-items: end; flex-wrap: wrap;">
+            <div>
+                <label class="verity-label" style="font-size: 0.68rem;">Tool Name</label>
+                <input type="text" name="tool_name" class="verity-input" style="width: 180px; padding: 4px 8px; font-size: 0.78rem;" required placeholder="e.g., get_submission_context">
+            </div>
+            <div>
+                <label class="verity-label" style="font-size: 0.68rem;">Mock Response (JSON)</label>
+                <input type="text" name="mock_response" class="verity-input" style="width: 300px; padding: 4px 8px; font-size: 0.78rem;" required placeholder='{"named_insured": "Acme Corp", ...}'>
+            </div>
+            <div>
+                <label class="verity-label" style="font-size: 0.68rem;">Description</label>
+                <input type="text" name="description" class="verity-input" style="width: 200px; padding: 4px 8px; font-size: 0.78rem;" placeholder="What this mock provides">
+            </div>
+            <button type="submit" class="verity-btn verity-btn-secondary" style="padding: 4px 10px; font-size: 0.75rem;">Add Mock</button>
+        </form>
+    </div>
+</div>
+
+<!-- Annotations -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Annotations ({{ annotations|length }})</h2>
+
+    {% for a in annotations %}
+    <div class="verity-card" style="margin-bottom: 12px; border-left: 3px solid {% if a.is_authoritative %}var(--verity-green){% else %}var(--verity-border){% endif %};">
+        <div class="verity-card-header">
+            {% if a.is_authoritative %}
+            <span class="verity-badge verity-badge-champion">authoritative</span>
+            {% endif %}
+            <span class="verity-badge verity-badge-draft">{{ a.annotator_type }}</span>
+
+            {% if a.annotator_type in ('human_sme', 'adjudicator') %}
+                {{ a.labeled_by or '—' }}
+            {% elif a.annotator_type == 'llm_judge' %}
+                {{ a.judge_model or '—' }}
+            {% endif %}
+
+            {% if a.label_confidence %}
+            <span style="font-size: 0.75rem; color: var(--verity-text-light); margin-left: 8px;">
+                {{ "%.0f"|format(a.label_confidence * 100) }}% confidence
+            </span>
+            {% endif %}
+        </div>
+
+        <!-- Expected output -->
+        <div style="margin-top: 8px;">
+            <div class="verity-detail-label">Expected Output</div>
+            <div class="verity-code" style="max-height: 200px; overflow-y: auto; font-size: 0.8rem; white-space: pre-wrap;">{{ a.expected_output }}</div>
+        </div>
+
+        {% if a.label_notes %}
+        <div style="margin-top: 8px;">
+            <div class="verity-detail-label">Notes</div>
+            <div class="verity-detail-value">{{ a.label_notes }}</div>
+        </div>
+        {% endif %}
+
+        {% if a.judge_reasoning %}
+        <div style="margin-top: 8px;">
+            <div class="verity-detail-label">Judge Reasoning</div>
+            <div class="verity-detail-value">{{ a.judge_reasoning }}</div>
+        </div>
+        {% endif %}
+
+        {% if a.is_corrected %}
+        <div style="margin-top: 8px; border-top: 1px solid var(--verity-border-light); padding-top: 8px;">
+            <span class="verity-badge verity-badge-shadow">corrected</span>
+            <span class="verity-detail-label">Reason: {{ a.correction_reason or '—' }}</span>
+            <div class="verity-detail-label" style="margin-top: 4px;">Original Output</div>
+            <div class="verity-code" style="font-size: 0.75rem;">{{ a.original_output }}</div>
+        </div>
+        {% endif %}
+
+        <div style="margin-top: 6px; font-size: 0.7rem; color: var(--verity-text-light);">
+            Labeled {{ a.labeled_at.strftime('%Y-%m-%d %H:%M') if a.labeled_at else '—' }}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% endblock %}

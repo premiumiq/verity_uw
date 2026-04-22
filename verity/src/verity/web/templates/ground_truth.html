@@ -1,0 +1,65 @@
+<!--
+  GROUND TRUTH — Datasets with record counts
+
+  DATA: datasets (list)
+-->
+{% extends "base.html" %}
+
+{% block title %}Ground Truth — Verity{% endblock %}
+{% block page_title %}Ground Truth Datasets{% endblock %}
+
+{% block content %}
+
+<div class="verity-card" style="margin-bottom: 20px;">
+    <div class="verity-card-header">About Ground Truth</div>
+    <div class="verity-card-footer">
+        Ground truth datasets contain production-representative data labeled by subject matter experts (SMEs).
+        Each record has an input (a document, a submission context) and an authoritative annotation (the correct answer).
+        The validation runner executes an entity version against every record and compares outputs to annotations,
+        computing aggregate metrics (F1, precision, recall, Cohen's kappa). Ground truth validation gates
+        <strong>staging → champion</strong> promotion.
+        <br><br>
+        <strong>Silver tier:</strong> Single annotator — one SME labels each record. Suitable for medium-materiality tasks.<br>
+        <strong>Gold tier:</strong> Multi-annotator with inter-annotator agreement (IAA) check. Disagreements adjudicated by senior SME. Required for high-materiality agents.
+    </div>
+</div>
+
+<table class="verity-table">
+    <thead>
+        <tr>
+            <th>Dataset</th>
+            <th>Entity</th>
+            <th>Version</th>
+            <th>Quality</th>
+            <th>Status</th>
+            <th>Records</th>
+            <th>Annotated</th>
+            <th>Owner</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for d in datasets %}
+        <tr class="clickable" onclick="window.location='/admin/ground-truth/{{ d.id }}'">
+            <td><a href="/admin/ground-truth/{{ d.id }}" style="font-weight: 500;">{{ d.name }}</a></td>
+            <td>
+                <span class="verity-badge verity-badge-{{ d.entity_type }}">{{ d.entity_type }}</span>
+                {{ d.entity_display_name or '—' }}
+            </td>
+            <td>{{ d.version }}</td>
+            <td><span class="verity-badge verity-badge-{{ d.quality_tier }}">{{ d.quality_tier }}</span></td>
+            <td><span class="verity-badge verity-badge-{{ d.status }}">{{ d.status }}</span></td>
+            <td>{{ d.record_count }}</td>
+            <td>{{ d.annotated_count }}/{{ d.record_count }}</td>
+            <td style="font-size: 0.8rem;">{{ d.owner_name }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if not datasets %}
+<div class="verity-empty">
+    <div class="verity-empty-message">No ground truth datasets registered yet.</div>
+</div>
+{% endif %}
+
+{% endblock %}

@@ -163,6 +163,86 @@ async def seed_all(db=None):
     else:
         print(f"  = Collection 'general' already exists, skipping")
 
+    # ── Underwriting Collection ──────────────────────────────
+    # Organized by submission ID. Used by the UW demo app.
+    existing_uw = await db.get_collection_by_name("underwriting")
+    if not existing_uw:
+        uw_coll = await db.insert_collection(
+            name="underwriting",
+            display_name="Underwriting Submissions",
+            storage_container="submissions",
+            owner_name="UW Demo",
+            created_by="seed_script",
+            description="Insurance submission documents organized by submission ID. Source documents for the underwriting pipeline.",
+            default_tags={"sensitivity": ["confidential"]},
+            status="active",
+        )
+        uw_coll_id = uw_coll["id"]
+        print(f"  + Collection: underwriting")
+
+        # Create submissions root folder
+        submissions_folder = await db.insert_folder(
+            collection_id=uw_coll_id, name="submissions",
+            description="Root folder for all submission documents",
+            created_by="seed_script",
+        )
+        # Create per-submission sub-folders
+        submission_ids = [
+            ("00000001-0001-0001-0001-000000000001", "Acme Dynamics D&O"),
+            ("00000002-0002-0002-0002-000000000002", "TechFlow Industries D&O"),
+            ("00000003-0003-0003-0003-000000000003", "Meridian Holdings GL"),
+            ("00000004-0004-0004-0004-000000000004", "Acme Dynamics GL"),
+        ]
+        for sub_id, sub_name in submission_ids:
+            await db.insert_folder(
+                collection_id=uw_coll_id, name=sub_id,
+                description=f"Documents for {sub_name}",
+                created_by="seed_script",
+                parent_folder_id=submissions_folder["id"],
+            )
+        print(f"  + {len(submission_ids)} submission folders in underwriting")
+    else:
+        print(f"  = Collection 'underwriting' already exists, skipping")
+
+    # ── Ground Truth Collection ──────────────────────────────
+    # Organized by entity type/name, then dataset name.
+    existing_gt = await db.get_collection_by_name("ground_truth")
+    if not existing_gt:
+        gt_coll = await db.insert_collection(
+            name="ground_truth",
+            display_name="Ground Truth Datasets",
+            storage_container="ground-truth-datasets",
+            owner_name="Model Validation",
+            created_by="seed_script",
+            description="SME-labeled ground truth data for entity validation. Organized by entity and dataset.",
+            default_tags={"sensitivity": ["internal"]},
+            status="active",
+        )
+        gt_coll_id = gt_coll["id"]
+        print(f"  + Collection: ground_truth")
+
+        # Create entity folders with input sub-folders
+        gt_entities = [
+            ("task-document_classifier", "Document Classifier ground truth"),
+            ("task-field_extractor", "Field Extractor ground truth"),
+            ("agent-triage_agent", "Triage Agent ground truth"),
+            ("agent-appetite_agent", "Appetite Agent ground truth"),
+        ]
+        for entity_folder_name, desc in gt_entities:
+            entity_folder = await db.insert_folder(
+                collection_id=gt_coll_id, name=entity_folder_name,
+                description=desc, created_by="seed_script",
+            )
+            await db.insert_folder(
+                collection_id=gt_coll_id, name="input",
+                description=f"Input documents for {entity_folder_name}",
+                created_by="seed_script",
+                parent_folder_id=entity_folder["id"],
+            )
+        print(f"  + {len(gt_entities)} entity folders in ground_truth")
+    else:
+        print(f"  = Collection 'ground_truth' already exists, skipping")
+
     if own_connection:
         await db.close()
     print("EDMS Seed: Complete.")

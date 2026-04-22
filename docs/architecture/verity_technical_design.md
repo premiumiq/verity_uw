@@ -1936,16 +1936,254 @@ No tool registration needed if the agent doesn't use tools. No application regis
 
 ---
 
-## 14. Statistics
+## 14. Testing, Validation & Lifecycle Components (FC-11)
+
+Three new core modules implement the VERIFY pillar: metrics computation, test execution, and ground truth validation. These were added after the initial release and complete the governance loop from asset registration through validation to promotion.
+
+### 14.1 Metrics Engine (`core/metrics.py`)
+
+Pure computation module. No database access, no I/O. Implements all metrics from scratch for regulatory auditability (no sklearn dependency).
+
+**Functions:**
+
+| Function | Input | Output | Used By |
+|----------|-------|--------|---------|
+| `classification_metrics(actual, expected)` | Two lists of label strings | precision, recall, F1 (macro), Cohen's kappa, confusion matrix, per_class breakdown | Validation runner (classification entities) |
+| `field_accuracy(actual_fields, expected_fields, field_configs)` | Two dicts of field values + optional tolerance configs | per_field accuracy, overall_accuracy, missing/extra fields | Validation runner (extraction entities) |
+| `exact_match(actual, expected)` | Two values (any type) | matched (bool), differences (list) | Test runner (default metric) |
+| `schema_valid(output, schema)` | Dict + schema dict | valid (bool), errors (list) | Test runner (schema metric) |
+| `check_thresholds(metrics, thresholds)` | Metrics dict + threshold list | all_passed, per-threshold details | Validation runner (gate check) |
+
+**Classification metrics implementation:**
+- Builds confusion matrix from label pairs
+- Per-class: TP, FP, FN, precision, recall, F1
+- Macro F1 = unweighted mean across classes
+- Cohen's kappa: `(observed_agreement - expected_agreement) / (1 - expected_agreement)`
+
+**Field accuracy with tolerance:**
+- Supports match types: `exact`, `case_insensitive`, `contains`, `numeric_tolerance`
+- Numeric tolerance: percent-based (default 5%) or absolute
+- Normalizes `{value: "Acme", confidence: 0.95}` dicts to plain values before comparison
+- Tracks missing fields (in expected but not actual) and extra fields separately
+
+### 14.2 Test Runner (`core/test_runner.py`)
+
+Executes test suites against entity versions using the SAME execution path as production. MockContext controls what's mocked.
+
+**Key design:** Test cases use the expected output as the mock LLM response. This means:
+- When `mock_llm=True`: Claude is not called, the expected output is returned as if Claude said it, then metrics are computed to verify the execution path works correctly
+- When `mock_llm=False`: Claude is called for real (costs money), output is compared against expected
+
+```
+TestRunner.run_suite(entity_type, entity_version_id, suite_id, mock_llm=True)
+    |
+    +-- Load test cases from test_case table
+    +-- For each case:
+    |     +-- Build MockContext(llm_responses=[expected_output], mock_all_tools=True)
+    |     +-- Call execution_engine.run_agent() or run_task()
+    |     |   (full execution path: config resolution, prompt assembly, gateway calls)
+    |     +-- Compare actual_output vs expected_output using metric_type:
+    |     |     classification_f1 -> classification_metrics()
+    |     |     field_accuracy -> field_accuracy()
+    |     |     schema_valid -> schema_valid()
+    |     |     exact_match -> exact_match()
+    |     +-- Log result to test_execution_log
+    |
+    +-- Return SuiteResult(passed_cases, failed_cases, pass_rate, case_results[])
+```
+
+**Result types:**
+- `CaseResult`: test_case_id, passed, actual_output, expected_output, metric_type, metric_result, duration_ms, failure_reason
+- `SuiteResult`: suite_id, total_cases, passed_cases, pass_rate, case_results[], passed (all cases passed)
+
+**Tables read:** test_suite, test_case, plus all tables from agent/task config resolution.
+**Tables written:** test_execution_log (1 row per case), agent_decision_log (1 row per case execution).
+
+### 14.3 Validation Runner (`core/validation_runner.py`)
+
+Validates entity versions against ground truth datasets. More comprehensive than test runner: runs against every record in a dataset, computes aggregate metrics, checks thresholds, stores per-record results.
+
+**Flow:**
+
+```
+ValidationRunner.run_validation(entity_type, entity_version_id, dataset_id, run_by)
+    |
+    +-- Load dataset metadata from ground_truth_dataset
+    +-- Load authoritative annotations:
+    |     JOIN ground_truth_record + ground_truth_annotation
+    |     WHERE is_authoritative = TRUE
+    |
+    +-- For each record:
+    |     +-- Build MockContext from record.tool_mock_overrides
+    |     +-- Execute entity (agent or task)
+    |     +-- Compare output to annotation.expected_output:
+    |     |     Classification: label match on document_type/risk_score/determination
+    |     |     Extraction: field_accuracy() with 80% threshold for "correct"
+    |     +-- Collect actual/expected labels for aggregate metrics
+    |
+    +-- Compute aggregate metrics:
+    |     Classification: classification_metrics(all_actual_labels, all_expected_labels)
+    |     Extraction: field_accuracy(combined_fields) + field_extraction_configs
+    |
+    +-- Check metric thresholds from metric_threshold table
+    |     check_thresholds(metrics, thresholds) -> all_passed
+    |
+    +-- Store validation_run record (aggregate metrics, threshold results)
+    +-- Store validation_record_result per record (for drill-down)
+    |
+    +-- Return ValidationResult(precision, recall, f1, kappa, thresholds_met, per_record_results[])
+```
+
+**Ground truth integration with EDMS:**
+The ground_truth_record table has `source_provider`, `source_container`, `source_key` fields for storage-abstracted document references. Records can point to documents stored in EDMS collections. The `input_data` JSONB contains what gets fed to the entity during validation. For document-based tasks (classifier, extractor), this includes the document text extracted by EDMS.
+
+**Result types:**
+- `RecordResult`: record_id, expected_output, actual_output, correct, match_score, confidence, field_results, decision_log_id
+- `ValidationResult`: validation_run_id, total_records, correct_records, precision, recall, f1, kappa, thresholds_met, per_record_results[], passed
+
+**Tables read:** ground_truth_dataset, ground_truth_record, ground_truth_annotation, metric_threshold, field_extraction_config.
+**Tables written:** validation_run (1 row), validation_record_result (1 row per record), agent_decision_log (1 row per record execution).
+
+### 14.4 Decision Log Detail Levels
+
+A new `decision_log_detail` column on `agent_version` and `task_version` controls how much data is captured per decision. This is set per entity version as a governance policy.
+
+| Level | What's Captured | Use Case |
+|-------|----------------|----------|
+| `full` | Complete payload: input, output, message history, tool calls, all JSONB | Audit, regulatory compliance, high-materiality entities |
+| `standard` | Binary content redacted, large text truncated, tool payloads summarized | Default for most entities |
+| `summary` | First 500 chars of input/output only, no message history | Low-materiality, high-volume entities |
+| `metadata` | Status, tokens, duration only - no payload data | Operational monitoring only |
+| `none` | No decision log entry created | Testing/development only |
+
+The `agent_decision_log` table now has:
+- `decision_log_detail VARCHAR(20)` - which level was applied
+- `redaction_applied JSONB` - what was redacted (null if nothing)
+
+### 14.5 Platform Settings
+
+A new `platform_settings` table stores Verity-wide configuration as key-value pairs. Read at runtime - no restart needed to change settings.
+
+```sql
+CREATE TABLE platform_settings (
+    key          TEXT PRIMARY KEY,
+    value        TEXT NOT NULL,
+    category     TEXT NOT NULL DEFAULT 'general',
+    display_name TEXT,
+    description  TEXT,
+    input_type   TEXT DEFAULT 'text',  -- text, select, number
+    options      TEXT,                 -- comma-separated for select type
+    sort_order   INTEGER DEFAULT 0,
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+Managed via the Settings page in the admin UI (`/admin/settings`).
+
+### 14.6 New Web Routes and Templates
+
+**9 new templates** for the governance UI:
+
+| Template | Route | Purpose |
+|----------|-------|---------|
+| `lifecycle.html` | `/admin/lifecycle` | All entity versions across types with lifecycle state, gate flags |
+| `testing.html` | `/admin/testing` | Test suites overview with case counts, pass rates, last run |
+| `test_suite_detail.html` | `/admin/testing/{suite_id}` | Suite detail with cases, results, "Run Suite" button |
+| `ground_truth.html` | `/admin/ground-truth` | Ground truth datasets with record/annotation counts |
+| `ground_truth_detail.html` | `/admin/ground-truth/{dataset_id}` | Dataset detail with authoritative annotations |
+| `ground_truth_record.html` | `/admin/ground-truth/{dataset_id}/records/{record_id}` | Record detail with all annotations |
+| `validation_runs.html` | `/admin/validation-runs` | All validation runs with metrics |
+| `validation_run_detail.html` | `/admin/validation-runs/{run_id}` | Run detail with metrics, confusion matrix, per-record results |
+| `settings.html` | `/admin/settings` | Platform settings key-value editor |
+
+**Run Suite button:** The test suite detail page has a "Run Suite" button that POSTs to `/admin/testing/{suite_id}/run`. This triggers `test_runner.run_suite()` against the entity's champion version with `mock_llm=True`. Results appear immediately on page refresh.
+
+### 14.7 New SQL Queries (15+ added to testing.sql)
+
+| Query | Purpose |
+|-------|---------|
+| `list_all_test_suites` | All suites with case counts, pass counts, last run (for testing overview) |
+| `get_test_suite` | Single suite with entity name |
+| `list_test_results_for_suite` | Results for a suite (for detail page) |
+| `list_all_ground_truth_datasets` | All datasets with entity names |
+| `get_ground_truth_dataset` | Single dataset with entity name |
+| `list_ground_truth_records` | Records for a dataset |
+| `list_authoritative_annotations` | Records + authoritative annotations (for validation runner) |
+| `get_ground_truth_record` | Single record |
+| `list_annotations_for_record` | All annotations for a record (for record detail) |
+| `list_validation_runs` | All validation runs with entity/dataset names |
+| `get_validation_run_by_id` | Single run with joins |
+| `list_validation_record_results` | Per-record results for a run |
+| `list_validation_record_failures` | Failed records only (for debugging) |
+| `list_metric_thresholds` | Thresholds for an entity |
+| `list_field_extraction_configs` | Field tolerance configs for extraction entities |
+| `list_all_entity_versions_with_state` | UNION ALL across agent_version + task_version (for lifecycle overview) |
+| `insert_validation_record_result` | Store per-record validation result |
+
+### 14.8 Client Integration
+
+The Verity client (`core/client.py`) now initializes TestRunner and ValidationRunner alongside existing modules:
+
+```python
+self.test_runner = TestRunner(
+    registry=self.registry,
+    execution_engine=self.execution,
+    testing=self.testing,
+)
+self.validation_runner = ValidationRunner(
+    registry=self.registry,
+    execution_engine=self.execution,
+    testing=self.testing,
+    db=self.db,
+)
+```
+
+Both are accessible via `verity.test_runner` and `verity.validation_runner` from consuming applications.
+
+---
+
+## 15. EDMS Integration Points
+
+### 15.1 How Ground Truth Connects to EDMS
+
+Ground truth records can reference documents stored in EDMS via the storage-abstracted fields:
+
+```
+ground_truth_record:
+    source_type       = 'document'
+    source_provider   = 'minio'
+    source_container  = 'submissions'        (from EDMS collection)
+    source_key        = 'submission/00001/do_app_acme.pdf'
+    source_description = 'D&O application for Acme Dynamics'
+    input_data        = {"document_text": "...extracted text from EDMS..."}
+```
+
+The `input_data` JSONB contains what the entity receives during validation. For document-based entities, this is the extracted text from EDMS (retrieved via `get_document_text` tool during validation, or pre-populated from EDMS extraction results).
+
+### 15.2 EDMS Seed Data
+
+The EDMS seed script (`edms/src/edms/seed.py`) creates three collections aligned with Verity's use cases:
+
+| Collection | Bucket | Purpose | Default Tags |
+|-----------|--------|---------|-------------|
+| `general` | submissions | Default collection for uncategorized documents | sensitivity: internal |
+| `underwriting` | submissions | UW submission documents organized by submission ID | sensitivity: confidential |
+| `ground_truth` | ground-truth-datasets | SME-labeled data for validation | sensitivity: internal |
+
+The `underwriting` collection has per-submission folders. The `ground_truth` collection has per-entity folders with `input` subfolders.
+
+---
+
+## 16. Statistics
 
 | Metric | Count |
 |--------|-------|
-| Database tables | 33 |
-| Named SQL queries | 117 |
+| Database tables | 34 (33 + platform_settings) |
+| Named SQL queries | ~132 (117 + 15 new testing/validation) |
 | Pydantic models | ~48 |
 | Python enums | 15 |
-| Web routes | 26 |
-| Jinja2 templates | 21 |
-| Core modules | 9 (client, execution, registry, lifecycle, decisions, pipeline_executor, mock_context, testing, reporting) |
-| SDK public methods | ~50 |
-| agent_decision_log columns | 31 |
+| Web routes | ~35 (26 + 9 new governance) |
+| Jinja2 templates | 30 (21 + 9 new) |
+| Core modules | 12 (9 + metrics, test_runner, validation_runner) |
+| SDK public methods | ~55 |
+| agent_decision_log columns | 33 (31 + decision_log_detail, redaction_applied) |
