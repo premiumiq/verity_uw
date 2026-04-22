@@ -511,6 +511,9 @@ class Registry:
     async def get_task_by_name(self, name: str) -> Optional[dict]:
         return await self.db.fetch_one("get_task_by_name", {"task_name": name})
 
+    async def get_prompt_by_name(self, name: str) -> Optional[dict]:
+        return await self.db.fetch_one("get_prompt_by_name", {"prompt_name": name})
+
     async def list_agent_versions(self, agent_id: UUID) -> list[dict]:
         return await self.db.fetch_all("list_agent_versions", {"agent_id": str(agent_id)})
 
@@ -519,6 +522,9 @@ class Registry:
 
     async def list_prompt_versions(self, prompt_id: UUID) -> list[dict]:
         return await self.db.fetch_all("list_prompt_versions", {"prompt_id": str(prompt_id)})
+
+    async def list_pipeline_versions(self, pipeline_id: UUID) -> list[dict]:
+        return await self.db.fetch_all("list_pipeline_versions", {"pipeline_id": str(pipeline_id)})
 
     async def get_pipeline_by_name(self, name: str) -> Optional[dict]:
         return await self.db.fetch_one("get_pipeline_by_name", {"pipeline_name": name})

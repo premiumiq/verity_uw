@@ -377,7 +377,7 @@ ORDER BY p.name;
 SELECT p.*, pv.version_label AS latest_version
 FROM prompt p
 LEFT JOIN LATERAL (
-    SELECT version_number
+    SELECT version_label
     FROM prompt_version
     WHERE prompt_id = p.id
     ORDER BY major_version DESC, minor_version DESC, patch_version DESC
@@ -479,6 +479,24 @@ SELECT
 FROM pipeline p
 LEFT JOIN pipeline_version pv ON pv.id = p.current_champion_version_id
 WHERE p.name = %(pipeline_name)s;
+
+
+-- name: list_pipeline_versions
+-- All versions of one pipeline, newest first. Used by the /api/v1/pipelines/{name}/versions endpoint.
+SELECT
+    pv.id,
+    pv.pipeline_id,
+    pv.version_number,
+    pv.lifecycle_state,
+    pv.change_summary,
+    pv.developer_name,
+    pv.valid_from,
+    pv.valid_to,
+    pv.created_at,
+    jsonb_array_length(pv.steps) AS step_count
+FROM pipeline_version pv
+WHERE pv.pipeline_id = %(pipeline_id)s
+ORDER BY pv.version_number DESC;
 
 
 -- name: list_applications
