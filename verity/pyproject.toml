@@ -36,8 +36,10 @@ dependencies = [
 # this group. A container that runs the runtime plane installs it via:
 #   pip install -e verity/[runtime]
 #
-# Phase 3 will add `claude-agent-sdk` here once the runtime engine swaps
-# its custom agentic loop for the official SDK.
+# The runtime engine calls Anthropic's Messages API directly for full
+# control over inference parameters (temperature, max_tokens, stop
+# sequences, thinking, etc.) and audit fidelity — the decision log's
+# inference_config_snapshot reflects what was actually applied.
 runtime = [
     "anthropic>=0.40,<1",
 ]

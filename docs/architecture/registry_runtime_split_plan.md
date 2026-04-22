@@ -1,14 +1,14 @@
-# Plan: Slim Verity to Governance, Extract Runtime, Adopt Claude Agent SDK (Local Docker)
+# Plan: Slim Verity to Governance, Extract Runtime, Harden the Current Engine (Local Docker)
 
 ## Context
 
 **Why this change.** The architectural goal is to slim Verity to its governance role — registry, lifecycle, decision log, ground truth, testing, compliance reporting — and extract execution into a replaceable Runtime. The hook is that **agents, tasks, prompts, tools, and pipelines remain database-stored definitions, not code-resident**. The registry is the source of truth for those definitions; every execution resolves a versioned config from the governance plane and logs back the exact version IDs it used. That's what delivers full auditability and version pinning, regardless of which LLM framework runs the actual calls.
 
-**Runtime choice: Claude Agent SDK.** Replaces the custom agentic loop in the current [core/execution.py](../../verity/src/verity/core/execution.py). Reduces maintenance (Anthropic maintains the loop, tool-call handling, context management), aligns Verity with the official agent framework, and leaves Verity free to focus on governance.
+**Runtime choice: keep the current custom engine, harden it.** An evaluation of Anthropic's official `claude-agent-sdk` during Phase 3a found that the SDK is a wrapper around the Claude Code CLI binary — it spawns a `claude` subprocess per execution, abstracts away LLM-level parameters (no `temperature`, `max_tokens`, `top_p`, `top_k`, or `stop_sequences`), and is designed for programmatic use of the interactive developer tool, not as a production agent runtime. For a governance platform whose core pitch is "we audit what Claude did with the exact config we ran it with," losing parameter control breaks audit fidelity. Scaffold was reverted (commit `fb86d83`). Phase 3 now focuses on cleanup + planned capabilities + reliability hardening on top of the existing [runtime/engine.py](../../verity/src/verity/runtime/engine.py), which calls `anthropic.AsyncAnthropic.messages.create` directly for full control.
 
 **Platform: local Docker, Postgres.** User has free-tier Snowflake only; SPCS and paid Cortex features are unavailable. Snowflake migration is deferred to a later phase once the split is proven locally.
 
-**Decisions locked (from prior turns):** Post-demo refactor · Claude Agent SDK as runtime · Local Docker + Postgres as the deployment target · One Python package (not four distributions).
+**Decisions locked (from prior turns):** Post-demo refactor · Keep custom engine (drop Claude Agent SDK) · Local Docker + Postgres as the deployment target · One Python package (not four distributions) · Drop `MockContext.llm_responses` in favor of a new `FixtureEngine`.
 
 **Decisions deferred to future phases:** Snowflake migration, SPCS hosting, Cortex adoption, Airflow for batch orchestration.
 
@@ -206,26 +206,47 @@ Optional-deps split added to `pyproject.toml`.
 
 **Acceptance:** existing UW end-to-end flow (submit document → classify → extract → triage → audit trail) produces identical decision_log rows to pre-split baseline; test and validation runners produce identical metrics on seeded data.
 
-### Phase 3 — Swap runtime engine to Claude Agent SDK
+### Phase 3 — Engine cleanup: drop MockContext.llm_responses, add FixtureEngine
 
-Replace the manual agentic loop in `runtime/engine.py` with Claude Agent SDK. Runtime's public interface (`run_agent`, `run_task`, `run_pipeline`, `register_tool`) stays the same — UW doesn't change.
+Replace `MockContext.llm_responses` (which the SDK would not have supported cleanly anyway) with a dedicated `FixtureEngine` for deterministic no-LLM execution. This is the cleanup phase that preserves demo mode and cheap test/validation runs while retiring the old "expected output pretending to be an LLM response" pattern.
 
-- Add `claude-agent-sdk` to `[project.optional-dependencies].runtime` in `pyproject.toml`
-- New `runtime/sdk_backend.py` — wraps `ClaudeAgentSDK.run()` behind the existing engine interface
-- Tool adapter: wrap Verity tools (registered Python callables with input_schema/output_schema from the registry) as Claude Agent SDK `@tool` definitions
-- **Decision log shape preserved (31 columns):** capture SDK events (LLM turns, tool calls, final output, tokens, duration, status) and project them into `DecisionLogCreate`. `message_history` and `tool_calls_made` populate from SDK events
-- Mock/replay semantics: current `MockContext.from_decision_log` depends on controlling the LLM client directly. Options:
-  1. Use SDK's built-in testing primitives if available
-  2. Keep a minimal "replay mode" that bypasses the SDK for `audit_rerun` to preserve compliance reproducibility
-  3. Document the tradeoff in the compliance UI
-- Prompt assembly (template variable substitution from registry prompt_version records) stays in Runtime — Verity-specific, not SDK behavior
-- Pipeline executor still orchestrates step groups and parallelism; each step calls the SDK-backed `run_agent`/`run_task`
+- Add `runtime/fixture_backend.py` — a `FixtureEngine` class with the same public shape as `ExecutionEngine` (`run_agent`, `run_task`, `register_tool_implementation`). Takes pre-built `ExecutionResult`-shaped fixtures keyed by entity name or pipeline step; logs a decision exactly like a real run; returns the fixture as the result. No LLM call, no tool dispatch, no agentic loop.
+- Refactor [uw_demo/app/pipeline.py](../../uw_demo/app/pipeline.py): the `get_mock_context_*` functions become `get_fixture_*` functions returning fixture dicts. [uw_demo/app/ui/routes.py](../../uw_demo/app/ui/routes.py) passes these to a `FixtureEngine` when `pipeline_mode == "mock"` in platform settings. No more `MockContext(llm_responses=...)` in UW.
+- Refactor [runtime/test_runner.py](../../verity/src/verity/runtime/test_runner.py) and [runtime/validation_runner.py](../../verity/src/verity/runtime/validation_runner.py): use `FixtureEngine` when cheap testing is desired; use `ExecutionEngine` for real-LLM validation runs. Drop the `MockContext(llm_responses=[expected], mock_all_tools=True)` pattern entirely.
+- Delete `MockContext.llm_responses`, `has_llm_mock`, `is_simple_mock`, `get_next_llm_response`, and simplify `from_decision_log` to tool-response replay only (drop the `mock_llm` parameter).
+- Delete all `mock.has_llm_mock` / `mock.get_next_llm_response` / `mock.is_simple_mock` handling from [runtime/engine.py](../../verity/src/verity/runtime/engine.py) — `MockContext` still exists, but only with `tool_responses` and `mock_all_tools`.
+- Runtime facade ([runtime/runtime.py](../../verity/src/verity/runtime/runtime.py)) picks engine: `ExecutionEngine` by default, `FixtureEngine` when a fixture is supplied.
+- Document in the compliance UI that `audit_rerun` replays are now "best-effort re-execution with tool replay" — not "deterministic LLM reproduction."
 
-**Acceptance:** UW flows work unchanged; decision logs still contain full `message_history` and `tool_calls_made`; at least one `audit_rerun` scenario reproduces output; token counts and durations align with prior runs within 10%.
+**Acceptance:** UW demo mock mode works via `FixtureEngine`; test/validation runners produce equivalent metrics on seeded data; deciding log shape unchanged; `MockContext.llm_responses` no longer exists anywhere in the codebase.
 
-### Phase 4 — Governance REST API + HTTP client mode
+### Phase 4 — Future capabilities (FC-1 through FC-5, FC-14) and MCP integration
 
-Add FastAPI REST endpoints to the governance plane so Runtime and UW can talk over HTTP instead of in-process imports. Enables separating services in Phase 5.
+Implement the capabilities deferred to `docs/architecture/future_capabilities.md` plus new MCP integration. Each is one sub-commit. Order within phase 4 is flexible — see plan discussion for priorities.
+
+- **FC-1** Sub-agent delegation: `delegate_to_agent` meta-tool, `parent_decision_id` + `decision_depth` already in schema
+- **FC-2** Session continuity: `session` table, `create_session` + `continue_session` methods
+- **FC-3** Pre/post hooks: middleware registered on `ExecutionEngine` (input validation, output transformation, cost tracking)
+- **FC-4** Retry / backoff: retry configuration in `inference_config.extended_params`, exponential backoff on LLM + tool failures
+- **FC-5** Vision / image input: content blocks for images in `_assemble_prompts` (partial support for PDFs already exists via `_documents`)
+- **FC-14 (new)** MCP tool integration: extend `tool` table to support MCP-sourced tools (stdio, SSE, HTTP), demo with SharePoint or HubSpot MCP server. Verity's registry remains the source of truth; MCP tools are registered like any other tool but dispatched through an MCP client rather than in-process Python. Every MCP call logs to `tool_calls_made` with full input/output for audit.
+
+### Phase 5 — Engine hardening (reliable, resilient, scalable, performant)
+
+Production-grade polish on the existing `ExecutionEngine`. Each is one sub-commit.
+
+- **Prompt caching** — adopt Anthropic's prompt caching headers on long system prompts (huge cost win at scale; the inference_config_snapshot records whether caching was active per call)
+- **Streaming with tool calls** — upgrade from partial streaming today to full stream-through; UI can show in-progress reasoning
+- **Rate limiting + circuit breaker** — client-side throttling, graceful degradation when Claude API is degraded
+- **Decision log write optimization** — current path is direct INSERT per call; consider batched writer or async queue for high-throughput scenarios
+- **Connection pool tuning** — psycopg pool sizing, timeouts, retry on connection failures
+- **Test suite** — introduce pytest+pytest-asyncio with a real test harness, not just ad-hoc imports; cover engine/pipeline/runner critical paths
+- **Mypy strict** — enforce type safety across `runtime/`, `governance/`, `contracts/`, `client/`
+- **Metrics / observability** — Prometheus metrics endpoint, OpenTelemetry traces on LLM + tool calls
+
+### Phase 6 — Governance REST API + HTTP client mode
+
+Add FastAPI REST endpoints to the governance plane so Runtime and UW can talk over HTTP instead of in-process imports. Enables separating services in Phase 7.
 
 Endpoints (minimum):
 - `GET /resolve/{entity_type}/{entity_name}?version_id=...&effective_date=...` → `ResolvedConfig`
@@ -237,7 +258,7 @@ Endpoints (minimum):
 
 **Acceptance:** `HTTPClient` roundtrips match `InProcessClient` byte-for-byte (same Pydantic models both sides); admin UI unchanged; OpenAPI spec generated from FastAPI endpoints.
 
-### Phase 5 — Split into multiple Docker services
+### Phase 7 — Split into multiple Docker services
 
 Break the single container into three services in `docker-compose.yml`:
 
