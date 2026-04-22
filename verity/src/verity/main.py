@@ -21,6 +21,7 @@ from fastapi.responses import RedirectResponse
 
 from verity.client.inprocess import Verity
 from verity.utils.logging import CorrelationMiddleware, setup_logging
+from verity.web.api.router import build_api_router
 from verity.web.app import create_verity_web
 
 
@@ -85,6 +86,11 @@ async def root():
 async def health():
     return {"status": "healthy", "app": "verity", "version": "0.1.0"}
 
+
+# JSON REST API at /api/v1/*  — thin wrappers over the Verity SDK facade.
+# Lives on the main FastAPI app (not mounted as a sub-app) so endpoints
+# appear in the main OpenAPI spec at /docs and /openapi.json.
+app.include_router(build_api_router(verity))
 
 # Mount the Verity admin web UI at /admin/
 verity_web = create_verity_web(verity)
