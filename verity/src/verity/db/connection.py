@@ -6,6 +6,7 @@ No ORM — raw SQL, transparent and debuggable.
 """
 
 import re
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +58,48 @@ def _load_all_queries(queries_dir: Path) -> dict[str, str]:
                 )
         all_queries.update(file_queries)
     return all_queries
+
+
+class _TransactionHandle:
+    """Named-query dispatcher scoped to one pooled connection.
+
+    Returned by `Database.transaction()`. Every method routes through
+    the shared connection, so statements issued through a single handle
+    commit or roll back together (psycopg 3 auto-transaction semantics).
+    """
+
+    def __init__(self, conn, queries: dict[str, str]):
+        self._conn = conn
+        self._queries = queries
+
+    def _get_sql(self, query_name: str) -> str:
+        if query_name not in self._queries:
+            raise KeyError(f"Query '{query_name}' not found in loaded queries.")
+        return self._queries[query_name]
+
+    async def execute(self, query_name: str, params: dict[str, Any] | None = None) -> None:
+        await self._conn.execute(self._get_sql(query_name), params or {})
+
+    async def execute_returning(
+        self, query_name: str, params: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        cursor = await self._conn.execute(self._get_sql(query_name), params or {})
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def fetch_one(
+        self, query_name: str, params: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        cursor = await self._conn.execute(self._get_sql(query_name), params or {})
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def fetch_all(
+        self, query_name: str, params: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        cursor = await self._conn.execute(self._get_sql(query_name), params or {})
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
 
 
 class Database:
@@ -160,6 +203,28 @@ class Database:
             cursor = await conn.execute(sql, params or {})
             row = await cursor.fetchone()
             return dict(row) if row else None
+
+    @asynccontextmanager
+    async def transaction(self):
+        """Run multiple named queries in a single connection + transaction.
+
+        psycopg 3 treats each `async with pool.connection()` block as an
+        implicit transaction — all statements commit on normal exit and
+        roll back on exception. This helper yields a handle that exposes
+        the same `execute / execute_returning / fetch_one / fetch_all`
+        methods as `Database`, but routed through a single pooled
+        connection so all statements land atomically.
+
+        Usage:
+            async with db.transaction() as tx:
+                await tx.execute("delete_agent_prompt_assignments_for_version",
+                                 {"version_id": str(vid)})
+                for a in assignments:
+                    await tx.execute_returning("insert_entity_prompt_assignment",
+                                               {...})
+        """
+        async with self._pool.connection() as conn:
+            yield _TransactionHandle(conn, self.queries)
 
     async def fetch_all_raw(
         self, sql: str, params: dict[str, Any] | None = None

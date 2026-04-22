@@ -217,6 +217,9 @@ CREATE TABLE agent_version (
     limitations_this_version    TEXT,
     change_type                 VARCHAR(20),
 
+    -- Provenance: set when this version was created via the clone workflow.
+    cloned_from_version_id      UUID REFERENCES agent_version(id),
+
     -- Timestamps
     valid_from                  TIMESTAMP,
     valid_to                    TIMESTAMP,
@@ -303,6 +306,8 @@ CREATE TABLE task_version (
     change_summary              TEXT,
     change_type                 VARCHAR(20),
 
+    cloned_from_version_id      UUID REFERENCES task_version(id),
+
     valid_from                  TIMESTAMP,
     valid_to                    TIMESTAMP,
     created_at                  TIMESTAMP DEFAULT NOW(),
@@ -364,6 +369,8 @@ CREATE TABLE prompt_version (
     test_required       BOOLEAN GENERATED ALWAYS AS
                         (governance_tier = 'behavioural') STORED,
     staging_tests_passed BOOLEAN,
+
+    cloned_from_version_id UUID REFERENCES prompt_version(id),
 
     -- Temporal validity (SCD Type 2) — set by lifecycle management
     valid_from          TIMESTAMP,
@@ -614,6 +621,9 @@ CREATE TABLE pipeline_version (
 
     change_summary  TEXT,
     developer_name  VARCHAR(200),
+
+    cloned_from_version_id UUID REFERENCES pipeline_version(id),
+
     valid_from      TIMESTAMP,
     valid_to        TIMESTAMP,
     created_at      TIMESTAMP DEFAULT NOW(),
@@ -1325,3 +1335,16 @@ CREATE TABLE IF NOT EXISTS platform_settings (
     sort_order          INTEGER DEFAULT 0,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+
+-- ============================================================
+-- IDEMPOTENT ADDITIONS
+-- ============================================================
+-- Columns added to existing version tables for clone provenance.
+-- Safe to re-run: ADD COLUMN IF NOT EXISTS is a no-op on new DBs
+-- that already have the column from the CREATE TABLE above.
+
+ALTER TABLE agent_version    ADD COLUMN IF NOT EXISTS cloned_from_version_id UUID REFERENCES agent_version(id);
+ALTER TABLE task_version     ADD COLUMN IF NOT EXISTS cloned_from_version_id UUID REFERENCES task_version(id);
+ALTER TABLE prompt_version   ADD COLUMN IF NOT EXISTS cloned_from_version_id UUID REFERENCES prompt_version(id);
+ALTER TABLE pipeline_version ADD COLUMN IF NOT EXISTS cloned_from_version_id UUID REFERENCES pipeline_version(id);

@@ -17,6 +17,7 @@ All endpoints appear in the main FastAPI app's OpenAPI spec at
 from fastapi import APIRouter
 
 from verity.web.api.authoring import build_authoring_router
+from verity.web.api.draft_edit import build_draft_edit_router
 from verity.web.api.registry import build_registry_router
 from verity.web.api.reporting import build_reporting_router
 from verity.web.api.runtime import build_runtime_router
@@ -47,10 +48,14 @@ def build_api_router(verity) -> APIRouter:
     # versions, associations, governance artifacts).
     router.include_router(build_authoring_router(verity))
 
+    # Draft edit — PATCH/PUT/DELETE for in-place edits on draft versions,
+    # plus POST .../clone to produce a new draft from any prior version.
+    router.include_router(build_draft_edit_router(verity))
+
     # Reporting — dashboard + inventory aggregates.
     router.include_router(build_reporting_router(verity))
 
     # Additional sub-routers (lifecycle, decisions, applications,
-    # draft edit, clone, audit) will slot in here as they are built out.
+    # audit) will slot in here as they are built out.
 
     return router

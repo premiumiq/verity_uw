@@ -239,6 +239,7 @@ class Registry:
 
     async def register_agent_version(self, **kwargs) -> dict:
         """Register an agent version."""
+        kwargs.setdefault("cloned_from_version_id", None)
         params = _prepare_json_params(kwargs, json_fields=["output_schema", "authority_thresholds"])
         return await self.db.execute_returning("insert_agent_version", params)
 
@@ -249,6 +250,7 @@ class Registry:
 
     async def register_task_version(self, **kwargs) -> dict:
         """Register a task version."""
+        kwargs.setdefault("cloned_from_version_id", None)
         params = _prepare_json_params(kwargs, json_fields=["output_schema"])
         return await self.db.execute_returning("insert_task_version", params)
 
@@ -276,6 +278,7 @@ class Registry:
             kwargs["template_variables"] = unique_vars
         elif "template_variables" not in kwargs:
             kwargs["template_variables"] = []
+        kwargs.setdefault("cloned_from_version_id", None)
         return await self.db.execute_returning("insert_prompt_version", kwargs)
 
     async def assign_prompt(self, **kwargs) -> dict:
@@ -445,6 +448,7 @@ class Registry:
 
     async def register_pipeline_version(self, **kwargs) -> dict:
         """Register a pipeline version."""
+        kwargs.setdefault("cloned_from_version_id", None)
         params = _prepare_json_params(kwargs, json_fields=["steps"])
         return await self.db.execute_returning("insert_pipeline_version", params)
 
@@ -484,6 +488,427 @@ class Registry:
             "threshold_details", "inference_config_snapshot",
         ])
         return await self.db.execute_returning("insert_validation_run", params)
+
+    # ── DRAFT-STATE EDITS ─────────────────────────────────────
+    # Each update is guarded at the SQL layer by
+    #     WHERE lifecycle_state = 'draft'
+    # When the row isn't a draft, the UPDATE matches zero rows and we
+    # return None; the API layer converts that into a 409 Conflict.
+    # Non-draft rows (candidate / staging / shadow / challenger /
+    # champion / deprecated) stay immutable — that immutability is
+    # what makes decision-log replay meaningful.
+
+    async def update_agent_version_draft(self, version_id, **fields) -> Optional[dict]:
+        """Update mutable fields on a draft agent_version. Returns the
+        updated row on success, None if the version isn't in draft."""
+        params = dict(fields)
+        params["version_id"] = str(version_id)
+        # SQL uses COALESCE — missing keys must be present as None so
+        # psycopg has something to bind each placeholder to.
+        for key in ("inference_config_id", "output_schema", "authority_thresholds",
+                    "mock_mode_enabled", "decision_log_detail",
+                    "developer_name", "change_summary", "change_type",
+                    "limitations_this_version"):
+            params.setdefault(key, None)
+        if params["inference_config_id"] is not None:
+            params["inference_config_id"] = str(params["inference_config_id"])
+        params = _prepare_json_params(params, json_fields=["output_schema", "authority_thresholds"])
+        return await self.db.execute_returning("update_agent_version_draft", params)
+
+    async def update_task_version_draft(self, version_id, **fields) -> Optional[dict]:
+        params = dict(fields)
+        params["version_id"] = str(version_id)
+        for key in ("inference_config_id", "output_schema", "mock_mode_enabled",
+                    "decision_log_detail", "developer_name", "change_summary", "change_type"):
+            params.setdefault(key, None)
+        if params["inference_config_id"] is not None:
+            params["inference_config_id"] = str(params["inference_config_id"])
+        params = _prepare_json_params(params, json_fields=["output_schema"])
+        return await self.db.execute_returning("update_task_version_draft", params)
+
+    async def update_prompt_version_draft(self, version_id, **fields) -> Optional[dict]:
+        params = dict(fields)
+        params["version_id"] = str(version_id)
+        for key in ("content", "api_role", "governance_tier",
+                    "change_summary", "sensitivity_level", "author_name"):
+            params.setdefault(key, None)
+        return await self.db.execute_returning("update_prompt_version_draft", params)
+
+    async def update_pipeline_version_draft(self, version_id, **fields) -> Optional[dict]:
+        params = dict(fields)
+        params["version_id"] = str(version_id)
+        for key in ("steps", "change_summary", "developer_name"):
+            params.setdefault(key, None)
+        params = _prepare_json_params(params, json_fields=["steps"])
+        return await self.db.execute_returning("update_pipeline_version_draft", params)
+
+    async def delete_draft_version(self, entity_type: str, version_id) -> Optional[dict]:
+        """Delete a draft version. Cascades through associations for
+        agent / task. Non-draft rows return None (surface as 409).
+
+        For prompt_version, FK from entity_prompt_assignment means the
+        DB rejects the DELETE if the prompt is still assigned somewhere;
+        psycopg raises an IntegrityError that the API layer turns into
+        a 400 with a clear message.
+        """
+        query_name = {
+            "agent":    "delete_draft_agent_version_cascade",
+            "task":     "delete_draft_task_version_cascade",
+            "prompt":   "delete_draft_prompt_version",
+            "pipeline": "delete_draft_pipeline_version",
+        }.get(entity_type)
+        if not query_name:
+            raise ValueError(
+                f"delete_draft_version: entity_type must be one of "
+                f"agent/task/prompt/pipeline, got {entity_type!r}"
+            )
+        return await self.db.execute_returning(
+            query_name, {"version_id": str(version_id)},
+        )
+
+    # ── REPLACE ASSOCIATION SETS ─────────────────────────────
+    # "Replace the entire list of prompts/tools/delegations on this
+    # draft version with this new list." Transactional DELETE + batch
+    # INSERT through the transaction handle so a partial-write failure
+    # rolls the whole set back.
+
+    async def _assert_draft(self, tx, guard_query: str, version_id) -> None:
+        row = await tx.fetch_one(guard_query, {"version_id": str(version_id)})
+        if not row:
+            raise ValueError(
+                f"Version {version_id} is not in draft state; "
+                f"associations on promoted versions are immutable."
+            )
+
+    async def replace_agent_prompt_assignments(
+        self, agent_version_id, assignments: list[dict],
+    ) -> list[dict]:
+        """Replace all prompt assignments on a draft agent_version."""
+        results: list[dict] = []
+        async with self.db.transaction() as tx:
+            await self._assert_draft(tx, "check_agent_version_is_draft", agent_version_id)
+            await tx.execute(
+                "delete_agent_prompt_assignments_for_version",
+                {"version_id": str(agent_version_id)},
+            )
+            for a in assignments:
+                params = {
+                    "entity_type": "agent",
+                    "entity_version_id": str(agent_version_id),
+                    "prompt_version_id": a["prompt_version_id"],
+                    "api_role": a["api_role"],
+                    "governance_tier": a["governance_tier"],
+                    "execution_order": a["execution_order"],
+                    "is_required": a.get("is_required", True),
+                    "condition_logic": a.get("condition_logic"),
+                }
+                params = _prepare_json_params(params, json_fields=["condition_logic"])
+                row = await tx.execute_returning("insert_entity_prompt_assignment", params)
+                if row:
+                    results.append(row)
+        return results
+
+    async def replace_task_prompt_assignments(
+        self, task_version_id, assignments: list[dict],
+    ) -> list[dict]:
+        results: list[dict] = []
+        async with self.db.transaction() as tx:
+            await self._assert_draft(tx, "check_task_version_is_draft", task_version_id)
+            await tx.execute(
+                "delete_task_prompt_assignments_for_version",
+                {"version_id": str(task_version_id)},
+            )
+            for a in assignments:
+                params = {
+                    "entity_type": "task",
+                    "entity_version_id": str(task_version_id),
+                    "prompt_version_id": a["prompt_version_id"],
+                    "api_role": a["api_role"],
+                    "governance_tier": a["governance_tier"],
+                    "execution_order": a["execution_order"],
+                    "is_required": a.get("is_required", True),
+                    "condition_logic": a.get("condition_logic"),
+                }
+                params = _prepare_json_params(params, json_fields=["condition_logic"])
+                row = await tx.execute_returning("insert_entity_prompt_assignment", params)
+                if row:
+                    results.append(row)
+        return results
+
+    async def replace_agent_tool_authorizations(
+        self, agent_version_id, authorizations: list[dict],
+    ) -> list[dict]:
+        results: list[dict] = []
+        async with self.db.transaction() as tx:
+            await self._assert_draft(tx, "check_agent_version_is_draft", agent_version_id)
+            await tx.execute(
+                "delete_agent_tool_authorizations_for_version",
+                {"version_id": str(agent_version_id)},
+            )
+            for a in authorizations:
+                row = await tx.execute_returning("insert_agent_version_tool", {
+                    "agent_version_id": str(agent_version_id),
+                    "tool_id": a["tool_id"],
+                    "authorized": a.get("authorized", True),
+                    "notes": a.get("notes"),
+                })
+                if row:
+                    results.append(row)
+        return results
+
+    async def replace_task_tool_authorizations(
+        self, task_version_id, authorizations: list[dict],
+    ) -> list[dict]:
+        results: list[dict] = []
+        async with self.db.transaction() as tx:
+            await self._assert_draft(tx, "check_task_version_is_draft", task_version_id)
+            await tx.execute(
+                "delete_task_tool_authorizations_for_version",
+                {"version_id": str(task_version_id)},
+            )
+            for a in authorizations:
+                row = await tx.execute_returning("insert_task_version_tool", {
+                    "task_version_id": str(task_version_id),
+                    "tool_id": a["tool_id"],
+                    "authorized": a.get("authorized", True),
+                    "notes": a.get("notes"),
+                })
+                if row:
+                    results.append(row)
+        return results
+
+    async def replace_agent_delegations(
+        self, agent_version_id, delegations: list[dict],
+    ) -> list[dict]:
+        """Replace delegation authorizations on a draft agent_version."""
+        results: list[dict] = []
+        async with self.db.transaction() as tx:
+            await self._assert_draft(tx, "check_agent_version_is_draft", agent_version_id)
+            await tx.execute(
+                "delete_agent_delegations_for_parent",
+                {"version_id": str(agent_version_id)},
+            )
+            for d in delegations:
+                child_name = d.get("child_agent_name")
+                child_vid = d.get("child_agent_version_id")
+                if (child_name is None) == (child_vid is None):
+                    raise ValueError(
+                        "Each delegation must specify EXACTLY ONE of "
+                        "child_agent_name (champion-tracking) or "
+                        "child_agent_version_id (version-pinned)."
+                    )
+                params = {
+                    "parent_agent_version_id": str(agent_version_id),
+                    "child_agent_name": child_name,
+                    "child_agent_version_id": str(child_vid) if child_vid else None,
+                    "scope": d.get("scope", {}),
+                    "authorized": d.get("authorized", True),
+                    "rationale": d.get("rationale"),
+                    "notes": d.get("notes"),
+                }
+                params = _prepare_json_params(params, json_fields=["scope"])
+                row = await tx.execute_returning("insert_agent_version_delegation", params)
+                if row:
+                    results.append(row)
+        return results
+
+    # ── CLONE A VERSION INTO A NEW DRAFT ─────────────────────
+    # Reads the source version row + all its associations, inserts a
+    # new version with the supplied label (draft state, carrying the
+    # source id in cloned_from_version_id for provenance), and
+    # duplicates every association row onto the new version. One
+    # transaction — if any insert fails the whole clone rolls back.
+
+    async def clone_agent_version(
+        self, source_version_id, new_version_label: str,
+        change_summary: str = "Cloned", developer_name: Optional[str] = None,
+    ) -> dict:
+        """Clone an agent_version into a new draft with all associations."""
+        major, minor, patch = _parse_version_label(new_version_label)
+        async with self.db.transaction() as tx:
+            src = await tx.fetch_one(
+                "get_agent_version_row", {"version_id": str(source_version_id)},
+            )
+            if not src:
+                raise ValueError(f"Source agent_version {source_version_id} not found")
+
+            new_params = {
+                "agent_id": str(src["agent_id"]),
+                "major_version": major, "minor_version": minor, "patch_version": patch,
+                "lifecycle_state": "draft",
+                "channel": src.get("channel") or "development",
+                "inference_config_id": str(src["inference_config_id"]),
+                "output_schema": src.get("output_schema") or {},
+                "authority_thresholds": src.get("authority_thresholds") or {},
+                "mock_mode_enabled": src.get("mock_mode_enabled", False),
+                "decision_log_detail": src.get("decision_log_detail") or "standard",
+                "developer_name": developer_name or src.get("developer_name"),
+                "change_summary": change_summary,
+                "change_type": "minor",
+                "cloned_from_version_id": str(source_version_id),
+            }
+            new_params = _prepare_json_params(
+                new_params, json_fields=["output_schema", "authority_thresholds"],
+            )
+            new_ver = await tx.execute_returning("insert_agent_version", new_params)
+
+            # Copy prompt assignments
+            for a in await tx.fetch_all(
+                "get_agent_prompt_assignments_raw",
+                {"version_id": str(source_version_id)},
+            ):
+                params = {
+                    "entity_type": "agent",
+                    "entity_version_id": str(new_ver["id"]),
+                    "prompt_version_id": str(a["prompt_version_id"]),
+                    "api_role": a["api_role"],
+                    "governance_tier": a["governance_tier"],
+                    "execution_order": a["execution_order"],
+                    "is_required": a.get("is_required", True),
+                    "condition_logic": a.get("condition_logic"),
+                }
+                params = _prepare_json_params(params, json_fields=["condition_logic"])
+                await tx.execute_returning("insert_entity_prompt_assignment", params)
+
+            # Copy tool authorizations
+            for t in await tx.fetch_all(
+                "get_agent_tool_authorizations_raw",
+                {"version_id": str(source_version_id)},
+            ):
+                await tx.execute_returning("insert_agent_version_tool", {
+                    "agent_version_id": str(new_ver["id"]),
+                    "tool_id": str(t["tool_id"]),
+                    "authorized": t.get("authorized", True),
+                    "notes": t.get("notes"),
+                })
+
+            # Copy delegation authorizations
+            for d in await tx.fetch_all(
+                "get_agent_delegations_raw",
+                {"version_id": str(source_version_id)},
+            ):
+                params = {
+                    "parent_agent_version_id": str(new_ver["id"]),
+                    "child_agent_name": d.get("child_agent_name"),
+                    "child_agent_version_id": (
+                        str(d["child_agent_version_id"])
+                        if d.get("child_agent_version_id") else None
+                    ),
+                    "scope": d.get("scope") or {},
+                    "authorized": d.get("authorized", True),
+                    "rationale": d.get("rationale"),
+                    "notes": d.get("notes"),
+                }
+                params = _prepare_json_params(params, json_fields=["scope"])
+                await tx.execute_returning("insert_agent_version_delegation", params)
+
+            return new_ver
+
+    async def clone_task_version(
+        self, source_version_id, new_version_label: str,
+        change_summary: str = "Cloned", developer_name: Optional[str] = None,
+    ) -> dict:
+        major, minor, patch = _parse_version_label(new_version_label)
+        async with self.db.transaction() as tx:
+            src = await tx.fetch_one(
+                "get_task_version_row", {"version_id": str(source_version_id)},
+            )
+            if not src:
+                raise ValueError(f"Source task_version {source_version_id} not found")
+            new_params = {
+                "task_id": str(src["task_id"]),
+                "major_version": major, "minor_version": minor, "patch_version": patch,
+                "lifecycle_state": "draft",
+                "channel": src.get("channel") or "development",
+                "inference_config_id": str(src["inference_config_id"]),
+                "output_schema": src.get("output_schema") or {},
+                "mock_mode_enabled": src.get("mock_mode_enabled", False),
+                "decision_log_detail": src.get("decision_log_detail") or "standard",
+                "developer_name": developer_name or src.get("developer_name"),
+                "change_summary": change_summary,
+                "change_type": "minor",
+                "cloned_from_version_id": str(source_version_id),
+            }
+            new_params = _prepare_json_params(new_params, json_fields=["output_schema"])
+            new_ver = await tx.execute_returning("insert_task_version", new_params)
+
+            for a in await tx.fetch_all(
+                "get_task_prompt_assignments_raw",
+                {"version_id": str(source_version_id)},
+            ):
+                params = {
+                    "entity_type": "task",
+                    "entity_version_id": str(new_ver["id"]),
+                    "prompt_version_id": str(a["prompt_version_id"]),
+                    "api_role": a["api_role"],
+                    "governance_tier": a["governance_tier"],
+                    "execution_order": a["execution_order"],
+                    "is_required": a.get("is_required", True),
+                    "condition_logic": a.get("condition_logic"),
+                }
+                params = _prepare_json_params(params, json_fields=["condition_logic"])
+                await tx.execute_returning("insert_entity_prompt_assignment", params)
+
+            for t in await tx.fetch_all(
+                "get_task_tool_authorizations_raw",
+                {"version_id": str(source_version_id)},
+            ):
+                await tx.execute_returning("insert_task_version_tool", {
+                    "task_version_id": str(new_ver["id"]),
+                    "tool_id": str(t["tool_id"]),
+                    "authorized": t.get("authorized", True),
+                    "notes": t.get("notes"),
+                })
+
+            return new_ver
+
+    async def clone_prompt_version(
+        self, source_version_id, new_version_label: str,
+        change_summary: str = "Cloned", author_name: Optional[str] = None,
+    ) -> dict:
+        major, minor, patch = _parse_version_label(new_version_label)
+        async with self.db.transaction() as tx:
+            src = await tx.fetch_one(
+                "get_prompt_version_row", {"version_id": str(source_version_id)},
+            )
+            if not src:
+                raise ValueError(f"Source prompt_version {source_version_id} not found")
+            new_params = {
+                "prompt_id": str(src["prompt_id"]),
+                "major_version": major, "minor_version": minor, "patch_version": patch,
+                "content": src["content"],
+                "template_variables": src.get("template_variables") or [],
+                "api_role": src["api_role"],
+                "governance_tier": src["governance_tier"],
+                "lifecycle_state": "draft",
+                "change_summary": change_summary,
+                "sensitivity_level": src.get("sensitivity_level") or "high",
+                "author_name": author_name or src.get("author_name"),
+                "cloned_from_version_id": str(source_version_id),
+            }
+            return await tx.execute_returning("insert_prompt_version", new_params)
+
+    async def clone_pipeline_version(
+        self, source_version_id, new_version_number: int,
+        change_summary: str = "Cloned", developer_name: Optional[str] = None,
+    ) -> dict:
+        async with self.db.transaction() as tx:
+            src = await tx.fetch_one(
+                "get_pipeline_version_row", {"version_id": str(source_version_id)},
+            )
+            if not src:
+                raise ValueError(f"Source pipeline_version {source_version_id} not found")
+            new_params = {
+                "pipeline_id": str(src["pipeline_id"]),
+                "version_number": new_version_number,
+                "lifecycle_state": "draft",
+                "steps": src["steps"],
+                "change_summary": change_summary,
+                "developer_name": developer_name or src.get("developer_name"),
+                "cloned_from_version_id": str(source_version_id),
+            }
+            new_params = _prepare_json_params(new_params, json_fields=["steps"])
+            return await tx.execute_returning("insert_pipeline_version", new_params)
 
     # ── LISTING (browsing) ────────────────────────────────────
 
@@ -588,3 +1013,20 @@ def _prepare_json_params(params: dict, json_fields: list[str]) -> dict:
         if val is not None and not isinstance(val, str):
             result[field] = json.dumps(val)
     return result
+
+
+def _parse_version_label(label: str) -> tuple[int, int, int]:
+    """Parse a `major.minor.patch` semver label into its three parts.
+
+    Used by the clone workflow — callers supply the target label as a
+    string because notebook users read/write labels as strings.
+    """
+    try:
+        parts = label.strip().split(".")
+        if len(parts) != 3:
+            raise ValueError
+        return int(parts[0]), int(parts[1]), int(parts[2])
+    except (ValueError, AttributeError):
+        raise ValueError(
+            f"version_label must be 'major.minor.patch' (e.g. '2.0.0'), got {label!r}"
+        )

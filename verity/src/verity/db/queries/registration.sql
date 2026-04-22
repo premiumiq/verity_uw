@@ -34,14 +34,16 @@ INSERT INTO agent_version (
     lifecycle_state, channel, inference_config_id,
     output_schema, authority_thresholds, mock_mode_enabled,
     decision_log_detail,
-    developer_name, change_summary, change_type
+    developer_name, change_summary, change_type,
+    cloned_from_version_id
 )
 VALUES (
     %(agent_id)s, %(major_version)s, %(minor_version)s, %(patch_version)s,
     %(lifecycle_state)s, %(channel)s, %(inference_config_id)s,
     %(output_schema)s, %(authority_thresholds)s, %(mock_mode_enabled)s,
     %(decision_log_detail)s,
-    %(developer_name)s, %(change_summary)s, %(change_type)s
+    %(developer_name)s, %(change_summary)s, %(change_type)s,
+    %(cloned_from_version_id)s
 )
 RETURNING id, version_label, created_at;
 
@@ -66,14 +68,16 @@ INSERT INTO task_version (
     lifecycle_state, channel, inference_config_id,
     output_schema, mock_mode_enabled,
     decision_log_detail,
-    developer_name, change_summary, change_type
+    developer_name, change_summary, change_type,
+    cloned_from_version_id
 )
 VALUES (
     %(task_id)s, %(major_version)s, %(minor_version)s, %(patch_version)s,
     %(lifecycle_state)s, %(channel)s, %(inference_config_id)s,
     %(output_schema)s, %(mock_mode_enabled)s,
     %(decision_log_detail)s,
-    %(developer_name)s, %(change_summary)s, %(change_type)s
+    %(developer_name)s, %(change_summary)s, %(change_type)s,
+    %(cloned_from_version_id)s
 )
 RETURNING id, version_label, created_at;
 
@@ -88,12 +92,14 @@ RETURNING id, created_at;
 INSERT INTO prompt_version (
     prompt_id, major_version, minor_version, patch_version,
     content, template_variables, api_role, governance_tier,
-    lifecycle_state, change_summary, sensitivity_level, author_name
+    lifecycle_state, change_summary, sensitivity_level, author_name,
+    cloned_from_version_id
 )
 VALUES (
     %(prompt_id)s, %(major_version)s, %(minor_version)s, %(patch_version)s,
     %(content)s, %(template_variables)s, %(api_role)s, %(governance_tier)s,
-    %(lifecycle_state)s, %(change_summary)s, %(sensitivity_level)s, %(author_name)s
+    %(lifecycle_state)s, %(change_summary)s, %(sensitivity_level)s, %(author_name)s,
+    %(cloned_from_version_id)s
 )
 RETURNING id, version_label, created_at;
 
@@ -187,11 +193,13 @@ RETURNING id, created_at;
 -- name: insert_pipeline_version
 INSERT INTO pipeline_version (
     pipeline_id, version_number, lifecycle_state, steps,
-    change_summary, developer_name
+    change_summary, developer_name,
+    cloned_from_version_id
 )
 VALUES (
     %(pipeline_id)s, %(version_number)s, %(lifecycle_state)s, %(steps)s,
-    %(change_summary)s, %(developer_name)s
+    %(change_summary)s, %(developer_name)s,
+    %(cloned_from_version_id)s
 )
 RETURNING id, created_at;
 
