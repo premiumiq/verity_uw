@@ -112,6 +112,12 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       LOG_FILE_ENABLED: "true"
       LOG_DIR: /app/logs
+      # Gate for the DELETE /api/v1/applications/{name}/activity endpoint.
+      # Local-dev default is "1" so the DS Workbench cleanup notebook
+      # works out of the box. Set to "0" (or unset) before any shared/
+      # production deployment — the env check is the one hard fence
+      # against accidentally purging decision-log history.
+      VERITY_ALLOW_PURGE: "1"
     volumes:
       - ./verity:/app/verity
       - ./uw_demo:/app/uw_demo

@@ -208,3 +208,97 @@ WHERE task_version_id = %(version_id)s::uuid;
 -- name: get_agent_delegations_raw
 SELECT * FROM agent_version_delegation
 WHERE parent_agent_version_id = %(version_id)s::uuid;
+
+
+-- ── APPLICATION MANAGEMENT ──────────────────────────────────
+-- Support the cleanup-notebook contract: show a summary of an app's
+-- footprint, purge its activity (decisions/overrides/contexts), and
+-- finally unregister it (the application row + its entity mappings).
+-- Activity purge must run before unregister — otherwise the
+-- execution_context FK blocks the application delete. That order is
+-- the cleanup notebook's job and the API surfaces a clean 409 if the
+-- caller skips it.
+
+-- name: get_application_activity_counts
+-- Counts tied to the application, used by GET /applications/{name}/activity.
+-- `application` on agent_decision_log is a VARCHAR (app name); everything
+-- else uses the application.id FK.
+SELECT
+    (SELECT COUNT(*) FROM agent_decision_log
+     WHERE application = %(app_name)s) AS decision_count,
+    (SELECT COUNT(*) FROM override_log
+     WHERE decision_log_id IN (
+         SELECT id FROM agent_decision_log WHERE application = %(app_name)s
+     )) AS override_count,
+    (SELECT COUNT(*) FROM execution_context
+     WHERE application_id = %(app_id)s::uuid) AS execution_context_count,
+    (SELECT COUNT(*) FROM application_entity
+     WHERE application_id = %(app_id)s::uuid) AS entity_mapping_count;
+
+
+-- name: purge_override_logs_for_application
+-- Step 1 of purge: clear override_log rows that point at this app's
+-- decisions. Must run before the agent_decision_log delete.
+DELETE FROM override_log
+WHERE decision_log_id IN (
+    SELECT id FROM agent_decision_log WHERE application = %(app_name)s
+);
+
+
+-- name: purge_decisions_for_application
+-- Step 2 of purge. agent_decision_log.parent_decision_id is a self-FK
+-- with no CASCADE, but the DELETE happens in a single statement so
+-- PostgreSQL defers the FK check to end-of-statement — safe as long
+-- as no decisions from other apps reference rows in this set.
+DELETE FROM agent_decision_log WHERE application = %(app_name)s
+RETURNING id;
+
+
+-- name: purge_execution_contexts_for_application
+-- Step 3: drop the app's business-level contexts. Must run after the
+-- decisions purge because agent_decision_log.execution_context_id
+-- references execution_context.id (nullable FK, no cascade).
+DELETE FROM execution_context WHERE application_id = %(app_id)s::uuid
+RETURNING id;
+
+
+-- name: delete_all_application_entity_rows
+-- Used by unregister_application: clear every mapping for this app.
+DELETE FROM application_entity
+WHERE application_id = %(app_id)s::uuid
+RETURNING id;
+
+-- name: delete_application_entity_row
+-- Used by the single-row unmap endpoint. Psycopg can't infer types
+-- for NULL-valued parameters in conditional WHERE clauses, so we
+-- keep the "delete one" and "delete all" cases as separate named
+-- queries rather than trying to fold them into one.
+DELETE FROM application_entity
+WHERE application_id = %(app_id)s::uuid
+  AND entity_type = %(entity_type)s::entity_type
+  AND entity_id = %(entity_id)s::uuid
+RETURNING id;
+
+
+-- name: delete_application_row
+-- Final step of unregister. Fails with a FK error if any
+-- execution_context rows still point at this app — the cleanup
+-- notebook must call DELETE /activity first.
+DELETE FROM application WHERE id = %(app_id)s::uuid RETURNING id;
+
+
+-- name: list_all_application_entities
+SELECT
+    ae.id, ae.application_id, ae.entity_type, ae.entity_id, ae.created_at
+FROM application_entity ae
+WHERE ae.application_id = %(app_id)s::uuid
+ORDER BY ae.entity_type, ae.created_at;
+
+-- name: list_application_entities_by_type
+-- Same shape as the all-variant, filtered by a single entity_type value.
+SELECT
+    ae.id, ae.application_id, ae.entity_type, ae.entity_id, ae.created_at
+FROM application_entity ae
+WHERE ae.application_id = %(app_id)s::uuid
+  AND ae.entity_type = %(entity_type)s::entity_type
+ORDER BY ae.created_at;

@@ -5,6 +5,7 @@ No agent, task, prompt, or tool exists outside of Verity's registry.
 """
 
 import json
+import os
 import re
 from typing import Any, Optional
 from uuid import UUID
@@ -985,8 +986,113 @@ class Registry:
     async def get_application_by_name(self, name: str) -> Optional[dict]:
         return await self.db.fetch_one("get_application_by_name", {"app_name": name})
 
-    async def list_application_entities(self, application_id) -> list[dict]:
-        return await self.db.fetch_all("list_application_entities", {"application_id": str(application_id)})
+    async def list_application_entities(
+        self, application_id, entity_type: Optional[str] = None,
+    ) -> list[dict]:
+        """List entities mapped to an application, optionally filtered
+        by entity_type (agent / task / prompt / tool / pipeline)."""
+        if entity_type is None:
+            return await self.db.fetch_all(
+                "list_all_application_entities",
+                {"app_id": str(application_id)},
+            )
+        return await self.db.fetch_all(
+            "list_application_entities_by_type",
+            {"app_id": str(application_id), "entity_type": entity_type},
+        )
+
+    async def unmap_entity_from_application(
+        self, application_id, entity_type: str, entity_id,
+    ) -> Optional[dict]:
+        """Remove a single entity mapping from an application. Returns
+        the deleted row on success, None if no such mapping existed."""
+        return await self.db.execute_returning(
+            "delete_application_entity_row",
+            {
+                "app_id": str(application_id),
+                "entity_type": entity_type,
+                "entity_id": str(entity_id),
+            },
+        )
+
+    async def get_application_activity(self, name: str) -> Optional[dict]:
+        """Count all artifacts tied to the named application:
+        decisions, overrides, execution_contexts, entity_mappings.
+
+        Returns None if no such application is registered. The cleanup
+        notebook shows these counts before asking for confirmation
+        to purge.
+        """
+        app = await self.get_application_by_name(name)
+        if not app:
+            return None
+        counts = await self.db.fetch_one(
+            "get_application_activity_counts",
+            {"app_name": name, "app_id": str(app["id"])},
+        )
+        return {"application": app, **(counts or {})}
+
+    async def purge_application_activity(self, name: str) -> dict:
+        """Delete all decisions, overrides, and execution_contexts
+        owned by this application. Leaves the application row itself
+        and its entity mappings intact — call unregister_application
+        after a purge to remove those too.
+
+        Guarded by the VERITY_ALLOW_PURGE environment flag so this
+        irreversible operation can't be hit accidentally in prod.
+        Returns per-table counts of rows removed.
+        """
+        if os.environ.get("VERITY_ALLOW_PURGE") != "1":
+            raise ValueError(
+                "purge_application_activity requires the VERITY_ALLOW_PURGE=1 "
+                "environment variable to be set. This is an irreversible "
+                "operation and is disabled by default."
+            )
+        app = await self.get_application_by_name(name)
+        if not app:
+            raise ValueError(f"Application '{name}' not found")
+
+        async with self.db.transaction() as tx:
+            # Order matters: override_log → agent_decision_log (FK) →
+            # execution_context (referenced by agent_decision_log).
+            await tx.execute(
+                "purge_override_logs_for_application", {"app_name": name},
+            )
+            dec_rows = await tx.fetch_all(
+                "purge_decisions_for_application", {"app_name": name},
+            )
+            ctx_rows = await tx.fetch_all(
+                "purge_execution_contexts_for_application",
+                {"app_id": str(app["id"])},
+            )
+        return {
+            "decisions_deleted": len(dec_rows),
+            "execution_contexts_deleted": len(ctx_rows),
+        }
+
+    async def unregister_application(self, name: str) -> dict:
+        """Delete the application row and all its entity mappings.
+
+        Does NOT delete decisions / overrides / execution_contexts —
+        those must be cleared first via purge_application_activity,
+        otherwise the execution_context FK blocks the delete and
+        this method raises.
+        """
+        app = await self.get_application_by_name(name)
+        if not app:
+            raise ValueError(f"Application '{name}' not found")
+        async with self.db.transaction() as tx:
+            unmapped = await tx.fetch_all(
+                "delete_all_application_entity_rows",
+                {"app_id": str(app["id"])},
+            )
+            deleted = await tx.execute_returning(
+                "delete_application_row", {"app_id": str(app["id"])},
+            )
+        return {
+            "deleted_id": deleted["id"] if deleted else None,
+            "unmapped_entity_count": len(unmapped),
+        }
 
     async def get_execution_context(self, context_id) -> Optional[dict]:
         return await self.db.fetch_one("get_execution_context", {"context_id": str(context_id)})
