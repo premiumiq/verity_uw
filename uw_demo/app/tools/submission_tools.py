@@ -107,18 +107,19 @@ async def get_submission_context(submission_id: str) -> dict:
     }
 
 
-async def get_loss_history(account_id: str) -> dict:
-    """Returns loss history for a submission.
+async def get_loss_history(submission_id: str) -> dict:
+    """Returns loss history for the given submission.
 
-    Note: In the demo, account_id maps to submission_id since
-    we don't have a separate account table.
+    Takes the submission UUID (same value used in the pipeline context).
+    In the demo there is no separate account table; loss history is
+    keyed by submission_id directly on the loss_history table.
     """
     async with await _get_conn() as conn:
         async with conn.cursor() as cur:
             # Get insured name
             await cur.execute(
                 "SELECT named_insured FROM submission WHERE id = %s",
-                (account_id,),
+                (submission_id,),
             )
             row = await cur.fetchone()
             account_name = row[0] if row else "Unknown"
@@ -129,7 +130,7 @@ async def get_loss_history(account_id: str) -> dict:
                 FROM loss_history
                 WHERE submission_id = %s
                 ORDER BY policy_year""",
-                (account_id,),
+                (submission_id,),
             )
             rows = await cur.fetchall()
 

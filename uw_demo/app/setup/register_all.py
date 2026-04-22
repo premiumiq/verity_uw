@@ -246,8 +246,8 @@ async def seed_tools(verity: Verity) -> dict:
         {
             "name": "get_loss_history",
             "display_name": "Get Loss History",
-            "description": "Retrieves historical loss run data for the submission's account. Returns annual loss records with claim counts, incurred, paid, and reserves.",
-            "input_schema": {"type": "object", "properties": {"account_id": {"type": "string"}}, "required": ["account_id"]},
+            "description": "Retrieves historical loss run data for the given submission. Takes the submission UUID (the same value passed in the pipeline context as submission_id). Returns annual loss records with claim counts, incurred, paid, and reserves.",
+            "input_schema": {"type": "object", "properties": {"submission_id": {"type": "string", "description": "The submission UUID — the same value available in the pipeline context."}}, "required": ["submission_id"]},
             "output_schema": {"type": "object", "properties": {"years": {"type": "array"}, "total_incurred": {"type": "number"}}},
             "implementation_path": "uw_demo.app.tools.submission_tools.get_loss_history",
             "mock_mode_enabled": False, "mock_response_key": "default",

@@ -122,7 +122,7 @@ Named Insured: {{named_insured}}
 
 Required tool calls:
 1. get_submission_context(submission_id) — account, submission details, loss history
-2. get_loss_history(account_id) — if not already included in submission context
+2. get_loss_history(submission_id) — if not already included in submission context
 3. get_enrichment_data(named_insured) — LexisNexis, D&B, PitchBook
 
 After completing your assessment, call:
