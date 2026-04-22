@@ -13,6 +13,10 @@ authors = [
     {name = "PremiumIQ"},
 ]
 
+# Base dependencies: everything the governance plane needs.
+# Governance = registry, lifecycle, decision log reader, ground truth,
+# testing metadata, admin UI, compliance reports. No LLM calls here, so
+# no LLM SDK in base.
 dependencies = [
     "psycopg[binary]>=3.1,<4",
     "psycopg_pool>=3.1,<4",
@@ -20,7 +24,6 @@ dependencies = [
     "fastapi>=0.115,<1",
     "uvicorn>=0.30,<1",
     "jinja2>=3.1,<4",
-    "anthropic>=0.40,<1",
     "httpx>=0.27,<1",
     "minio>=7.2,<8",
     "python-multipart>=0.0.9",
@@ -28,6 +31,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Runtime plane: adds what's needed to execute agents/tasks against an
+# LLM. A container that only runs the governance plane does not install
+# this group. A container that runs the runtime plane installs it via:
+#   pip install -e verity/[runtime]
+#
+# Phase 3 will add `claude-agent-sdk` here once the runtime engine swaps
+# its custom agentic loop for the official SDK.
+runtime = [
+    "anthropic>=0.40,<1",
+]
+
+# Developer tooling — tests, linters, type-checkers.
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
