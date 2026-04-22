@@ -115,6 +115,7 @@ services:
     volumes:
       - ./verity:/app/verity
       - ./uw_demo:/app/uw_demo
+      - ./mcp_servers:/app/mcp_servers
       - ./scripts:/app/scripts
       - ./logs/verity:/app/logs
     ports:
@@ -157,6 +158,7 @@ services:
     volumes:
       - ./verity:/app/verity
       - ./uw_demo:/app/uw_demo
+      - ./mcp_servers:/app/mcp_servers
       - ./scripts:/app/scripts
       - ./logs/uw_demo:/app/logs
     ports:
