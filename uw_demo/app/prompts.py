@@ -34,15 +34,22 @@ underwriting guidelines into a structured, defensible risk assessment.
 ## TOOL USAGE
 
 You MUST call these tools before making your assessment:
-1. get_submission_context — retrieves account details, submission data, and loss history
-2. get_loss_history — retrieves detailed claims history by year
-3. get_enrichment_data — retrieves LexisNexis litigation, D&B financial, and PitchBook data
+1. get_submission_context — retrieves account details, submission data, and loss history (in-process)
+2. get_loss_history — retrieves detailed claims history by year (in-process)
+3. lexisnexis_lookup — litigation history, regulatory actions, adverse media (MCP: enrichment)
+4. dnb_lookup — Dun & Bradstreet financial stress score, Paydex, firmographics (MCP: enrichment)
+5. pitchbook_lookup — PitchBook funding history, investors, valuation (MCP: enrichment)
+6. factset_lookup — FactSet financial fundamentals + credit rating (MCP: enrichment)
+
+You MAY also call:
+7. web_search — search the public web for recent news, regulatory filings,
+   or anything else not covered by the enrichment providers (MCP: duckduckgo)
 
 Do NOT assess based on partial information. If a tool call fails, note the \
 missing data in your reasoning and lower your confidence accordingly.
 
 After assessment, call:
-4. store_triage_result — persist your risk score and routing decision
+8. store_triage_result — persist your risk score and routing decision
 
 ## OUTPUT FORMAT
 
@@ -123,10 +130,16 @@ Named Insured: {{named_insured}}
 Required tool calls:
 1. get_submission_context(submission_id) — account, submission details, loss history
 2. get_loss_history(submission_id) — if not already included in submission context
-3. get_enrichment_data(named_insured) — LexisNexis, D&B, PitchBook
+3. lexisnexis_lookup(company_name=named_insured) — litigation + regulatory + adverse media
+4. dnb_lookup(company_name=named_insured) — financial stress + paydex + firmographics
+5. pitchbook_lookup(company_name=named_insured) — funding + investors + valuation
+6. factset_lookup(company_name=named_insured) — revenue, EBITDA margin, credit rating
+
+Optional tool call (use when the enrichment providers don't cover something):
+7. web_search(query) — search the public web for recent news or regulatory filings
 
 After completing your assessment, call:
-4. store_triage_result(submission_id, risk_score, routing, reasoning)\
+8. store_triage_result(submission_id, risk_score, routing, reasoning)\
 """
 
 

@@ -60,13 +60,18 @@ from uw_demo.app.tools.submission_tools import (
 )
 from uw_demo.app.tools.guidelines_tools import get_underwriting_guidelines
 from uw_demo.app.tools.document_tools import get_documents_for_submission
-from uw_demo.app.tools.external_enrichment import get_enrichment_data
+
+# NOTE: get_enrichment_data was retired in Phase 4d-3 (FC-14). The
+# combined LexisNexis/D&B/PitchBook Python callable is replaced by four
+# MCP-sourced tools (lexisnexis_lookup, dnb_lookup, pitchbook_lookup,
+# factset_lookup), dispatched through verity.runtime.mcp_client.MCPClient
+# to the in-repo enrichment MCP server at mcp_servers/enrichment/. See
+# docs/architecture/registry_runtime_split_plan.md for the migration.
 
 verity.register_tool_implementation("get_submission_context", get_submission_context)
 verity.register_tool_implementation("get_loss_history", get_loss_history)
 verity.register_tool_implementation("get_underwriting_guidelines", get_underwriting_guidelines)
 verity.register_tool_implementation("get_documents_for_submission", get_documents_for_submission)
-verity.register_tool_implementation("get_enrichment_data", get_enrichment_data)
 verity.register_tool_implementation("store_extraction_result", store_extraction_result)
 verity.register_tool_implementation("store_triage_result", store_triage_result)
 verity.register_tool_implementation("update_submission_event", update_submission_event)

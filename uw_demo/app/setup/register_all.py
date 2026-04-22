@@ -53,6 +53,12 @@ async def main():
         print("Step 1: Registering inference configs...")
         configs = await seed_inference_configs(verity)
 
+        # ── STEP 1b: MCP servers ──────────────────────────────
+        # Must come before tools — tool.mcp_server_name has a FK to
+        # mcp_server(name).
+        print("Step 1b: Registering MCP servers...")
+        await seed_mcp_servers(verity)
+
         # ── STEP 2: Tools ─────────────────────────────────────
         print("Step 2: Registering tools...")
         tools = await seed_tools(verity)
@@ -204,6 +210,60 @@ async def seed_inference_configs(verity: Verity) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════
+# STEP 1b: MCP SERVERS
+# Register the in-repo MCP servers Verity knows about. Tools registered
+# with transport='mcp_stdio' reference these by name via mcp_server_name.
+# MCP servers must be seeded BEFORE tools because the tool table has a
+# foreign key to mcp_server(name).
+# ══════════════════════════════════════════════════════════════
+
+async def seed_mcp_servers(verity: Verity) -> dict:
+    """Register the demo MCP servers. Returns {name: id}."""
+    servers = [
+        {
+            "name": "duckduckgo",
+            "display_name": "DuckDuckGo Web Search",
+            "description": (
+                "DuckDuckGo web search via the ddgs Python package. No API "
+                "key, no account — uses the free HTML search endpoint. "
+                "Spawned as a stdio subprocess on first tool call; kept "
+                "alive for the process lifetime and terminated on "
+                "Verity.close()."
+            ),
+            "transport": "stdio",
+            "command": "python",
+            "args": ["-m", "mcp_servers.duckduckgo.server"],
+            "env": {},
+            "auth_config": {},
+        },
+        {
+            "name": "enrichment",
+            "display_name": "Company Enrichment Data Providers",
+            "description": (
+                "Simulated third-party enrichment data for UW triage: "
+                "LexisNexis, Dun & Bradstreet, PitchBook, FactSet. "
+                "Curated profiles for the demo's four seeded insureds "
+                "plus deterministic synthetic fallback for any other "
+                "company name. In production this server would be "
+                "replaced by real API integrations; the tool contract "
+                "would be unchanged."
+            ),
+            "transport": "stdio",
+            "command": "python",
+            "args": ["-m", "mcp_servers.enrichment.server"],
+            "env": {},
+            "auth_config": {},
+        },
+    ]
+    result = {}
+    for s in servers:
+        r = await verity.registry.register_mcp_server(**s)
+        result[s["name"]] = r["id"]
+    print(f"  + {len(result)} MCP servers registered")
+    return result
+
+
+# ══════════════════════════════════════════════════════════════
 # STEP 2: TOOLS
 # ══════════════════════════════════════════════════════════════
 
@@ -254,16 +314,90 @@ async def seed_tools(verity: Verity) -> dict:
             "data_classification_max": "tier3_confidential",
             "is_write_operation": False, "requires_confirmation": False, "tags": ["read", "losses"],
         },
+        # ── MCP-sourced tools ─────────────────────────────────
+        # These dispatch through verity.runtime.mcp_client.MCPClient to
+        # the stdio subprocesses registered in mcp_server. Their Verity
+        # registry shape is identical to python_inprocess tools except
+        # for transport, mcp_server_name, and mcp_tool_name. Each call
+        # logs to agent_decision_log.tool_calls_made with the transport
+        # preserved, so the audit trail shows clearly which calls went
+        # through MCP vs in-process Python.
         {
-            "name": "get_enrichment_data",
-            "display_name": "Get Enrichment Data",
-            "description": "Retrieves mock enrichment data simulating LexisNexis, D&B, and Pitchbook lookups. Returns litigation history, financial indicators, and company profile.",
+            "name": "web_search",
+            "display_name": "Web Search (DuckDuckGo)",
+            "description": "Search the public web via DuckDuckGo. Returns up to max_results text results (title, URL, snippet). Use for current events, public records, regulatory filings, news about companies, and anything not already in the agent's context.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "max_results": {"type": "integer", "default": 5, "minimum": 1, "maximum": 20},
+                },
+                "required": ["query"],
+            },
+            "output_schema": {"type": "object", "properties": {"content": {"type": "array"}, "text": {"type": "string"}}},
+            "transport": "mcp_stdio",
+            "mcp_server_name": "duckduckgo",
+            "mcp_tool_name": "web_search",
+            "implementation_path": "mcp://duckduckgo/web_search",
+            "mock_mode_enabled": False, "mock_response_key": None,
+            "data_classification_max": "tier2_internal",
+            "is_write_operation": False, "requires_confirmation": False, "tags": ["read", "mcp", "web"],
+        },
+        {
+            "name": "lexisnexis_lookup",
+            "display_name": "LexisNexis Risk Lookup",
+            "description": "LexisNexis Risk — litigation history, regulatory actions, bankruptcy filings, OFAC sanctions check, adverse media hit count. Use for legal/regulatory risk assessment.",
             "input_schema": {"type": "object", "properties": {"company_name": {"type": "string"}}, "required": ["company_name"]},
-            "output_schema": {"type": "object", "properties": {"lexisnexis": {"type": "object"}, "dnb": {"type": "object"}, "pitchbook": {"type": "object"}}},
-            "implementation_path": "uw_demo.app.tools.mock_enrichment.get_enrichment_data",
-            "mock_mode_enabled": False, "mock_response_key": "default",
+            "output_schema": {"type": "object", "properties": {"content": {"type": "array"}, "text": {"type": "string"}}},
+            "transport": "mcp_stdio",
+            "mcp_server_name": "enrichment",
+            "mcp_tool_name": "lexisnexis_lookup",
+            "implementation_path": "mcp://enrichment/lexisnexis_lookup",
+            "mock_mode_enabled": False, "mock_response_key": None,
             "data_classification_max": "tier3_confidential",
-            "is_write_operation": False, "requires_confirmation": False, "tags": ["read", "enrichment"],
+            "is_write_operation": False, "requires_confirmation": False, "tags": ["read", "mcp", "enrichment", "legal"],
+        },
+        {
+            "name": "dnb_lookup",
+            "display_name": "Dun & Bradstreet Lookup",
+            "description": "Dun & Bradstreet — DUNS number, Financial Stress Score, Paydex score, payment performance, years in business, SIC/NAICS industry codes, verified employee count and revenue. Use for financial stability and firmographic verification.",
+            "input_schema": {"type": "object", "properties": {"company_name": {"type": "string"}}, "required": ["company_name"]},
+            "output_schema": {"type": "object", "properties": {"content": {"type": "array"}, "text": {"type": "string"}}},
+            "transport": "mcp_stdio",
+            "mcp_server_name": "enrichment",
+            "mcp_tool_name": "dnb_lookup",
+            "implementation_path": "mcp://enrichment/dnb_lookup",
+            "mock_mode_enabled": False, "mock_response_key": None,
+            "data_classification_max": "tier3_confidential",
+            "is_write_operation": False, "requires_confirmation": False, "tags": ["read", "mcp", "enrichment", "credit"],
+        },
+        {
+            "name": "pitchbook_lookup",
+            "display_name": "PitchBook Lookup",
+            "description": "PitchBook — company type (Private/Public), industry, founding year, total funding raised, last funding round, investor list, latest valuation, and exit history. Use for growth-stage and investor profile on private companies.",
+            "input_schema": {"type": "object", "properties": {"company_name": {"type": "string"}}, "required": ["company_name"]},
+            "output_schema": {"type": "object", "properties": {"content": {"type": "array"}, "text": {"type": "string"}}},
+            "transport": "mcp_stdio",
+            "mcp_server_name": "enrichment",
+            "mcp_tool_name": "pitchbook_lookup",
+            "implementation_path": "mcp://enrichment/pitchbook_lookup",
+            "mock_mode_enabled": False, "mock_response_key": None,
+            "data_classification_max": "tier3_confidential",
+            "is_write_operation": False, "requires_confirmation": False, "tags": ["read", "mcp", "enrichment", "funding"],
+        },
+        {
+            "name": "factset_lookup",
+            "display_name": "FactSet Fundamentals Lookup",
+            "description": "FactSet — ticker and exchange (if public), trailing twelve-month revenue, EBITDA margin, net debt to EBITDA, current ratio, credit rating and agency, and going-concern opinion flag. Use for financial fundamentals analysis.",
+            "input_schema": {"type": "object", "properties": {"company_name": {"type": "string"}}, "required": ["company_name"]},
+            "output_schema": {"type": "object", "properties": {"content": {"type": "array"}, "text": {"type": "string"}}},
+            "transport": "mcp_stdio",
+            "mcp_server_name": "enrichment",
+            "mcp_tool_name": "factset_lookup",
+            "implementation_path": "mcp://enrichment/factset_lookup",
+            "mock_mode_enabled": False, "mock_response_key": None,
+            "data_classification_max": "tier3_confidential",
+            "is_write_operation": False, "requires_confirmation": False, "tags": ["read", "mcp", "enrichment", "financials"],
         },
         {
             "name": "update_submission_event",
@@ -823,12 +957,19 @@ async def seed_prompt_assignments(verity, agent_versions, task_versions, prompt_
 async def seed_tool_authorizations(verity, agent_versions, tools):
     """Authorize tools for agent versions."""
     auth = [
-        # Triage agent tools
+        # Triage agent tools — in-process Python tools
         (agent_versions[("triage_agent", "1.0.0")], tools["get_submission_context"]),
         (agent_versions[("triage_agent", "1.0.0")], tools["get_underwriting_guidelines"]),
         (agent_versions[("triage_agent", "1.0.0")], tools["get_loss_history"]),
-        (agent_versions[("triage_agent", "1.0.0")], tools["get_enrichment_data"]),
         (agent_versions[("triage_agent", "1.0.0")], tools["store_triage_result"]),
+        # Triage agent tools — MCP-sourced (replaces the old
+        # get_enrichment_data Python tool with four provider-native tools
+        # plus DuckDuckGo web search for current news/regulatory filings)
+        (agent_versions[("triage_agent", "1.0.0")], tools["web_search"]),
+        (agent_versions[("triage_agent", "1.0.0")], tools["lexisnexis_lookup"]),
+        (agent_versions[("triage_agent", "1.0.0")], tools["dnb_lookup"]),
+        (agent_versions[("triage_agent", "1.0.0")], tools["pitchbook_lookup"]),
+        (agent_versions[("triage_agent", "1.0.0")], tools["factset_lookup"]),
         # Appetite agent tools
         (agent_versions[("appetite_agent", "1.0.0")], tools["get_submission_context"]),
         (agent_versions[("appetite_agent", "1.0.0")], tools["get_underwriting_guidelines"]),
@@ -1035,7 +1176,6 @@ async def seed_test_suites(verity, agents, tasks) -> dict:
                  "tool_mocks": [
                      {"tool_name": "get_submission_context", "mock_response": {"account": {"name": "SafeCorp LLC", "sic_code": "7372", "years_in_business": 15}, "submission": {"lob": "DO", "annual_revenue": 50000000, "employee_count": 250, "board_size": 7, "independent_directors": 4}, "loss_history": [{"year": 2023, "claims": 0}, {"year": 2024, "claims": 0}, {"year": 2025, "claims": 0}]}, "description": "Clean D&O submission - no risk factors"},
                      {"tool_name": "get_loss_history", "mock_response": {"total_claims": 0, "total_incurred": 0, "years": [{"year": 2023, "claims": 0}, {"year": 2024, "claims": 0}, {"year": 2025, "claims": 0}]}, "description": "Clean loss history"},
-                     {"tool_name": "get_enrichment_data", "mock_response": {"lexisnexis": {"litigation_history": [], "risk_score": "low"}, "dnb": {"financial_stress_score": 85}}, "description": "No red flags from enrichment"},
                  ]},
                 {"name": "triage_amber_risk", "description": "Borderline submission should score Amber",
                  "input_data": {"submission_id": "test-amber", "lob": "DO", "named_insured": "RiskyCorp Inc"},
@@ -1044,7 +1184,6 @@ async def seed_test_suites(verity, agents, tasks) -> dict:
                  "tool_mocks": [
                      {"tool_name": "get_submission_context", "mock_response": {"account": {"name": "RiskyCorp Inc", "sic_code": "7372", "years_in_business": 8}, "submission": {"lob": "DO", "annual_revenue": 120000000, "board_size": 9, "independent_directors": 5, "regulatory_investigation": "SEC routine inquiry"}, "loss_history": [{"year": 2023, "claims": 1}, {"year": 2024, "claims": 0}, {"year": 2025, "claims": 1}]}, "description": "D&O with SEC inquiry and 2 claims at threshold"},
                      {"tool_name": "get_loss_history", "mock_response": {"total_claims": 2, "total_incurred": 225000, "years": [{"year": 2023, "claims": 1, "incurred": 75000}, {"year": 2024, "claims": 0}, {"year": 2025, "claims": 1, "incurred": 150000}]}, "description": "2 claims in 5 years at maximum threshold"},
-                     {"tool_name": "get_enrichment_data", "mock_response": {"lexisnexis": {"litigation_history": [], "regulatory_actions": [{"type": "SEC routine inquiry"}], "risk_score": "medium"}, "dnb": {"financial_stress_score": 72}}, "description": "SEC routine inquiry flagged"},
                  ]},
                 {"name": "triage_red_risk", "description": "High-risk submission should score Red",
                  "input_data": {"submission_id": "test-red", "lob": "GL", "named_insured": "DangerCo LLC"},
@@ -1053,7 +1192,6 @@ async def seed_test_suites(verity, agents, tasks) -> dict:
                  "tool_mocks": [
                      {"tool_name": "get_submission_context", "mock_response": {"account": {"name": "DangerCo LLC", "sic_code": "6159", "years_in_business": 22}, "submission": {"lob": "GL", "annual_revenue": 25000000, "going_concern_opinion": True}, "loss_history": [{"year": 2023, "claims": 5}, {"year": 2024, "claims": 4}, {"year": 2025, "claims": 3}]}, "description": "GL with going concern, excluded SIC, excessive claims"},
                      {"tool_name": "get_loss_history", "mock_response": {"total_claims": 12, "total_incurred": 600000, "years": [{"year": 2023, "claims": 5, "incurred": 220000}, {"year": 2024, "claims": 4, "incurred": 190000}, {"year": 2025, "claims": 3, "incurred": 190000}]}, "description": "12 claims in 3 years, way above threshold"},
-                     {"tool_name": "get_enrichment_data", "mock_response": {"lexisnexis": {"litigation_history": [{"type": "negligence", "status": "settled"}], "risk_score": "high"}, "dnb": {"financial_stress_score": 45}}, "description": "High risk enrichment data"},
                  ]},
             ],
         },
@@ -1510,7 +1648,6 @@ async def seed_ground_truth_records(verity, gt_datasets, tasks, agents, edms_doc
          "tool_mocks": [
              ("get_submission_context", {"account": {"name": "Acme Dynamics LLC", "sic_code": "3599", "years_in_business": 15}, "submission": {"lob": "DO", "annual_revenue": 50000000, "employee_count": 250, "board_size": 7, "independent_directors": 4}, "loss_history": [{"year": 2023, "claims": 0}, {"year": 2024, "claims": 0}, {"year": 2025, "claims": 0}]}),
              ("get_loss_history", {"total_claims": 0, "total_incurred": 0, "years": [{"year": 2023, "claims": 0}, {"year": 2024, "claims": 0}, {"year": 2025, "claims": 0}]}),
-             ("get_enrichment_data", {"lexisnexis": {"litigation_history": [], "risk_score": "low"}, "dnb": {"financial_stress_score": 85}}),
          ]},
         {"sub_id": "00000002-0002-0002-0002-000000000002", "name": "TechFlow D&O",
          "lob": "DO", "named_insured": "TechFlow Industries Inc",
@@ -1519,7 +1656,6 @@ async def seed_ground_truth_records(verity, gt_datasets, tasks, agents, edms_doc
          "tool_mocks": [
              ("get_submission_context", {"account": {"name": "TechFlow Industries Inc", "sic_code": "7372", "years_in_business": 8}, "submission": {"lob": "DO", "annual_revenue": 120000000, "board_size": 9, "independent_directors": 5, "regulatory_investigation": "SEC routine inquiry"}, "loss_history": [{"year": 2023, "claims": 1, "incurred": 75000}, {"year": 2024, "claims": 0}, {"year": 2025, "claims": 1, "incurred": 150000}]}),
              ("get_loss_history", {"total_claims": 2, "total_incurred": 225000, "years": [{"year": 2023, "claims": 1}, {"year": 2024, "claims": 0}, {"year": 2025, "claims": 1}]}),
-             ("get_enrichment_data", {"lexisnexis": {"regulatory_actions": [{"type": "SEC routine inquiry"}], "risk_score": "medium"}, "dnb": {"financial_stress_score": 72}}),
          ]},
         {"sub_id": "00000003-0003-0003-0003-000000000003", "name": "Meridian GL",
          "lob": "GL", "named_insured": "Meridian Holdings Corp",
@@ -1528,7 +1664,6 @@ async def seed_ground_truth_records(verity, gt_datasets, tasks, agents, edms_doc
          "tool_mocks": [
              ("get_submission_context", {"account": {"name": "Meridian Holdings Corp", "sic_code": "6159", "years_in_business": 22}, "submission": {"lob": "GL", "annual_revenue": 25000000, "going_concern_opinion": True}, "loss_history": [{"year": 2023, "claims": 5, "incurred": 220000}, {"year": 2024, "claims": 4, "incurred": 190000}, {"year": 2025, "claims": 3, "incurred": 190000}]}),
              ("get_loss_history", {"total_claims": 12, "total_incurred": 600000, "years": [{"year": 2023, "claims": 5}, {"year": 2024, "claims": 4}, {"year": 2025, "claims": 3}]}),
-             ("get_enrichment_data", {"lexisnexis": {"litigation_history": [{"type": "negligence"}], "risk_score": "high"}, "dnb": {"financial_stress_score": 45}}),
          ]},
         {"sub_id": "00000004-0004-0004-0004-000000000004", "name": "Acme GL",
          "lob": "GL", "named_insured": "Acme Dynamics LLC",
@@ -1537,7 +1672,6 @@ async def seed_ground_truth_records(verity, gt_datasets, tasks, agents, edms_doc
          "tool_mocks": [
              ("get_submission_context", {"account": {"name": "Acme Dynamics LLC", "sic_code": "3599", "years_in_business": 15}, "submission": {"lob": "GL", "annual_revenue": 50000000, "manufacturing_operations": True}, "loss_history": [{"year": 2023, "claims": 2, "incurred": 65000}, {"year": 2024, "claims": 1, "incurred": 45000}, {"year": 2025, "claims": 2, "incurred": 80000}]}),
              ("get_loss_history", {"total_claims": 5, "total_incurred": 190000, "years": [{"year": 2023, "claims": 2}, {"year": 2024, "claims": 1}, {"year": 2025, "claims": 2}]}),
-             ("get_enrichment_data", {"lexisnexis": {"litigation_history": [], "risk_score": "low"}, "dnb": {"financial_stress_score": 78}}),
          ]},
     ]
 
