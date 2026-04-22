@@ -83,6 +83,14 @@ async def main():
         print("Step 7: Authorizing tools for agent versions...")
         await seed_tool_authorizations(verity, agent_versions, tools)
 
+        # ── STEP 7b: Sub-agent Delegation Authorizations ──────
+        # FC-1: Which parent agent_versions can delegate to which
+        # sub-agents. Governed separately from tool authorizations —
+        # granting the delegate_to_agent tool enables the CAPABILITY,
+        # this table specifies the allowed targets.
+        print("Step 7b: Registering delegation authorizations...")
+        await seed_delegations(verity, agent_versions)
+
         # ── STEP 8: Pipeline ──────────────────────────────────
         print("Step 8: Registering pipeline...")
         pipeline = await seed_pipeline(verity)
@@ -398,6 +406,66 @@ async def seed_tools(verity: Verity) -> dict:
             "mock_mode_enabled": False, "mock_response_key": None,
             "data_classification_max": "tier3_confidential",
             "is_write_operation": False, "requires_confirmation": False, "tags": ["read", "mcp", "enrichment", "financials"],
+        },
+        # ── Verity-builtin meta-tool ──────────────────────────
+        # delegate_to_agent is the FC-1 sub-agent delegation primitive.
+        # Granting this tool authorization to an agent version lets that
+        # agent CALL delegate_to_agent at runtime; WHICH specific sub-agents
+        # it may target is governed separately by the agent_version_delegation
+        # table (seeded in seed_delegations).
+        {
+            "name": "delegate_to_agent",
+            "display_name": "Delegate to Sub-Agent",
+            "description": (
+                "Verity meta-tool. Invoke another governed agent as a "
+                "sub-agent during your own reasoning. Pass the target "
+                "agent_name, a context dict for the sub-agent, and a short "
+                "reason string. Authorized targets are governed by the "
+                "agent_version_delegation registry — calls to unauthorized "
+                "agents return an error listing the agents you ARE "
+                "authorized to delegate to. The sub-agent's structured "
+                "output is returned in the tool result for you to "
+                "incorporate into your final answer. Use sparingly — only "
+                "delegate when a specialist sub-agent will produce a "
+                "materially better analysis than you can produce directly."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "agent_name": {
+                        "type": "string",
+                        "description": "Registered Verity agent name of the sub-agent to invoke.",
+                    },
+                    "context": {
+                        "type": "object",
+                        "description": "Input context dict passed to the sub-agent (e.g., {submission_id, lob, named_insured}).",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "One-sentence rationale for why delegating is appropriate here. Stored in the audit trail.",
+                    },
+                },
+                "required": ["agent_name", "context"],
+            },
+            "output_schema": {
+                "type": "object",
+                "properties": {
+                    "sub_decision_log_id": {"type": "string"},
+                    "sub_entity_name": {"type": "string"},
+                    "sub_version_label": {"type": "string"},
+                    "sub_status": {"type": "string"},
+                    "output": {"type": "object"},
+                    "reasoning_text": {"type": "string"},
+                },
+            },
+            "transport": "verity_builtin",
+            "mcp_server_name": None,
+            "mcp_tool_name": None,
+            "implementation_path": "verity.runtime.engine.ExecutionEngine._delegate_to_agent",
+            "mock_mode_enabled": False, "mock_response_key": None,
+            "data_classification_max": "tier3_confidential",
+            "is_write_operation": False, "requires_confirmation": False,
+            "tags": ["meta", "delegation", "verity_builtin"],
         },
         {
             "name": "update_submission_event",
@@ -970,6 +1038,11 @@ async def seed_tool_authorizations(verity, agent_versions, tools):
         (agent_versions[("triage_agent", "1.0.0")], tools["dnb_lookup"]),
         (agent_versions[("triage_agent", "1.0.0")], tools["pitchbook_lookup"]),
         (agent_versions[("triage_agent", "1.0.0")], tools["factset_lookup"]),
+        # Triage agent tool — Verity-builtin meta-tool for sub-agent
+        # delegation (FC-1). Granting the tool authorizes the CAPABILITY;
+        # which specific sub-agents triage can target is governed by the
+        # agent_version_delegation rows seeded in seed_delegations.
+        (agent_versions[("triage_agent", "1.0.0")], tools["delegate_to_agent"]),
         # Appetite agent tools
         (agent_versions[("appetite_agent", "1.0.0")], tools["get_submission_context"]),
         (agent_versions[("appetite_agent", "1.0.0")], tools["get_underwriting_guidelines"]),
@@ -981,6 +1054,46 @@ async def seed_tool_authorizations(verity, agent_versions, tools):
             agent_version_id=av_id, tool_id=tool_id, authorized=True, notes=None,
         )
     print(f"  + {len(auth)} tool authorizations created")
+
+
+# ══════════════════════════════════════════════════════════════
+# STEP 7b: SUB-AGENT DELEGATION AUTHORIZATIONS (FC-1)
+# Governs which parent agent versions can delegate to which specific
+# sub-agents via the delegate_to_agent meta-tool. Distinct from the
+# agent_version_tool junction (which only grants the CAPABILITY to call
+# the meta-tool at all). See agent_version_delegation table docs.
+# ══════════════════════════════════════════════════════════════
+
+async def seed_delegations(verity: Verity, agent_versions: dict) -> None:
+    """Register authorized parent→child delegation relationships.
+
+    Each row authorizes ONE specific parent agent_version to delegate to
+    ONE specific child agent. Champion-tracking (child_agent_name) means
+    the delegation follows whichever version of the child agent is
+    currently promoted to champion — newer champions light up automatically
+    without re-authorizing.
+    """
+    delegations = [
+        {
+            "parent_agent_version_id": agent_versions[("triage_agent", "1.0.0")],
+            "child_agent_name": "appetite_agent",  # champion-tracking
+            "scope": {},
+            "rationale": (
+                "Triage delegates detailed guideline-compliance analysis to "
+                "the appetite specialist agent when the submission's "
+                "regulatory or policy fit is ambiguous (pending SEC inquiry, "
+                "edge-case SIC code, borderline revenue, etc.). The "
+                "sub-agent's determination is then factored into triage's "
+                "final risk score and routing."
+            ),
+            "notes": "FC-1 demo delegation (seeded 2026-04).",
+        },
+    ]
+
+    for d in delegations:
+        await verity.registry.register_delegation(**d)
+
+    print(f"  + {len(delegations)} delegation authorization(s) registered")
 
 
 # ══════════════════════════════════════════════════════════════
