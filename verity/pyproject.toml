@@ -36,10 +36,13 @@ dependencies = [
 # this group. A container that runs the runtime plane installs it via:
 #   pip install -e verity/[runtime]
 #
-# Phase 3 will add `claude-agent-sdk` here once the runtime engine swaps
-# its custom agentic loop for the official SDK.
+# The runtime engine uses Anthropic's official Claude Agent SDK for the
+# agentic loop (tool dispatch, message management, session lifecycle).
+# `anthropic` is kept as a transitive / low-level dep in case components
+# need to touch the raw Messages API directly.
 runtime = [
     "anthropic>=0.40,<1",
+    "claude-agent-sdk>=0.1,<1",
 ]
 
 # Developer tooling — tests, linters, type-checkers.
