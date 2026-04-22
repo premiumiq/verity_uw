@@ -6,7 +6,15 @@
 -- name: log_decision
 -- Insert a decision log entry for every AI invocation (agent, task, or tool).
 -- Business context is linked via execution_context_id, NOT direct business keys.
+--
+-- The `id` column accepts an optional caller-supplied UUID (COALESCE with the
+-- column's default uuid_generate_v4()). This lets the runtime pre-generate
+-- a decision's UUID at the START of run_agent so that sub-agent calls
+-- made during the agentic loop can set their parent_decision_id to this
+-- value BEFORE the parent's decision row has actually been written.
+-- Added in FC-1 (sub-agent delegation).
 INSERT INTO agent_decision_log (
+    id,
     entity_type, entity_version_id, prompt_version_ids,
     inference_config_snapshot, channel, mock_mode, pipeline_run_id,
     parent_decision_id, decision_depth, step_name,
@@ -19,6 +27,7 @@ INSERT INTO agent_decision_log (
     hitl_required, status, error_message
 )
 VALUES (
+    COALESCE(%(id)s::uuid, uuid_generate_v4()),
     %(entity_type)s, %(entity_version_id)s, %(prompt_version_ids)s,
     %(inference_config_snapshot)s, %(channel)s, %(mock_mode)s, %(pipeline_run_id)s,
     %(parent_decision_id)s, %(decision_depth)s, %(step_name)s,

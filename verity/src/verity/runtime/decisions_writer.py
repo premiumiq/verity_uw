@@ -36,6 +36,13 @@ class DecisionsWriter:
         Returns the decision_log_id so the caller can link it.
         """
         params = {
+            # Optional caller-supplied UUID. The log_decision SQL
+            # COALESCEs this with uuid_generate_v4() at INSERT time, so
+            # passing None preserves the original auto-generate behaviour.
+            # FC-1's sub-agent delegation uses this to pre-generate the
+            # parent decision's id before the row is written, letting
+            # sub-agent rows set their parent_decision_id correctly.
+            "id": str(decision.id) if decision.id else None,
             "entity_type": decision.entity_type.value,
             "entity_version_id": str(decision.entity_version_id),
             "prompt_version_ids": [str(p) for p in decision.prompt_version_ids],

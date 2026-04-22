@@ -6,6 +6,8 @@ Registry/Runtime split. It is re-exported here for backward compatibility.
 What stays here (governance-internal DB read shapes):
 - Agent — the agent header row
 - AgentVersion — a versioned agent with lifecycle state, channel, thresholds
+- AgentVersionDelegation — a row from agent_version_delegation (FC-1:
+  parent agent version authorized to delegate to a specific sub-agent)
 """
 
 from datetime import datetime
@@ -68,3 +70,33 @@ class AgentVersion(BaseModel):
     valid_to: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+
+class AgentVersionDelegation(BaseModel):
+    """One row from agent_version_delegation.
+
+    Added in FC-1 (sub-agent delegation). Records that a specific
+    parent agent_version is authorized to delegate to a named (or
+    version-pinned) child agent. See schema.sql for the table docs.
+
+    Exactly one of `child_agent_name` (champion-tracking) or
+    `child_agent_version_id` (version-pinned) is set.
+    """
+    id: UUID
+    parent_agent_version_id: UUID
+    child_agent_name: Optional[str] = None
+    child_agent_version_id: Optional[UUID] = None
+    scope: dict[str, Any] = {}
+    authorized: bool = True
+    rationale: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    # Populated by list_delegations_for_parent / list_delegations_to_agent
+    # with JOINed names and labels; None when the row is freshly inserted.
+    effective_child_name: Optional[str] = None
+    is_version_pinned: Optional[bool] = None
+    child_version_label: Optional[str] = None
+    parent_agent_name: Optional[str] = None
+    parent_version_label: Optional[str] = None

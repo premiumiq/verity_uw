@@ -340,6 +340,105 @@ class Registry:
         """Authorize a tool for a task version."""
         return await self.db.execute_returning("insert_task_version_tool", kwargs)
 
+    # ── AGENT VERSION DELEGATION (FC-1) ────────────────────────
+    # First-class governance of "agent A can delegate to agent B"
+    # relationships. These methods back the agent_version_delegation
+    # table — see schema.sql and docs for the semantics.
+
+    async def register_delegation(self, **kwargs) -> dict:
+        """Register a delegation from a parent agent_version to a child agent.
+
+        Required:
+          - parent_agent_version_id: UUID of the parent agent version
+          - Exactly ONE of:
+              child_agent_name:     str, champion-tracking sub-agent by name
+              child_agent_version_id: UUID, pin to a specific child version
+
+        Optional:
+          - scope: dict  (per-relationship constraints, freeform JSONB)
+          - authorized: bool (default True)
+          - rationale: str (why this delegation is allowed — governance audit)
+          - notes: str
+
+        Raises ValueError if the child target is under- or over-specified.
+        """
+        child_name = kwargs.get("child_agent_name")
+        child_version_id = kwargs.get("child_agent_version_id")
+        if (child_name is None) == (child_version_id is None):
+            raise ValueError(
+                "register_delegation requires EXACTLY one of child_agent_name "
+                "(champion-tracking) or child_agent_version_id (version-pinned), "
+                f"got child_agent_name={child_name!r}, "
+                f"child_agent_version_id={child_version_id!r}."
+            )
+
+        kwargs.setdefault("scope", {})
+        kwargs.setdefault("authorized", True)
+        kwargs.setdefault("rationale", None)
+        kwargs.setdefault("notes", None)
+        kwargs.setdefault("child_agent_name", None)
+        kwargs.setdefault("child_agent_version_id", None)
+
+        # Coerce UUIDs to strings for psycopg.
+        params = dict(kwargs)
+        if params["parent_agent_version_id"] is not None:
+            params["parent_agent_version_id"] = str(params["parent_agent_version_id"])
+        if params["child_agent_version_id"] is not None:
+            params["child_agent_version_id"] = str(params["child_agent_version_id"])
+        params = _prepare_json_params(params, json_fields=["scope"])
+
+        return await self.db.execute_returning("insert_agent_version_delegation", params)
+
+    async def check_delegation_authorized(
+        self,
+        parent_agent_version_id: UUID,
+        child_agent_name: str,
+    ) -> Optional[dict]:
+        """Runtime gate for the delegate_to_agent meta-tool.
+
+        Returns a dict with `delegation_id`, `scope`, and the resolved
+        `resolved_child_version_id` when (parent, child) has an authorized
+        delegation row. Returns None when not authorized — the engine
+        surfaces this as a tool_result error to the calling agent.
+
+        Champion-tracking rows resolve via agent.current_champion_version_id
+        at query time, so delegation follows champion promotions without
+        parent version reauthorization (unless pinned).
+        """
+        return await self.db.fetch_one(
+            "check_delegation_authorized",
+            {
+                "parent_version_id": str(parent_agent_version_id),
+                "child_name": child_agent_name,
+            },
+        )
+
+    async def list_delegations_for_parent(
+        self,
+        parent_agent_version_id: UUID,
+    ) -> list[dict]:
+        """Enumerate all delegations authorized from a parent agent_version.
+
+        Used by the admin UI's "this agent can delegate to:" view and by
+        the engine's error-path hint when an unauthorized delegation is
+        attempted (Claude sees the list of authorized targets).
+        """
+        return await self.db.fetch_all(
+            "list_delegations_for_parent",
+            {"parent_version_id": str(parent_agent_version_id)},
+        )
+
+    async def list_delegations_to_agent(self, agent_name: str) -> list[dict]:
+        """Inverse query: which parents can delegate to this agent?
+
+        Handles both name-based and version-pinned rows. Used by the
+        admin UI's "this agent is delegated to by:" view.
+        """
+        return await self.db.fetch_all(
+            "list_delegations_to_agent",
+            {"agent_name": agent_name},
+        )
+
     async def register_pipeline(self, **kwargs) -> dict:
         """Register a pipeline."""
         return await self.db.execute_returning("insert_pipeline", kwargs)

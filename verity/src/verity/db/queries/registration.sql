@@ -152,6 +152,32 @@ VALUES (%(task_version_id)s, %(tool_id)s, %(authorized)s, %(notes)s)
 RETURNING id;
 
 
+-- name: insert_agent_version_delegation
+-- Record that a parent agent version is authorized to delegate to a
+-- specific child agent (either by name, champion-tracking, or by a
+-- pinned child agent_version_id). See schema.sql for the table docs.
+-- Added in FC-1.
+INSERT INTO agent_version_delegation (
+    parent_agent_version_id,
+    child_agent_name,
+    child_agent_version_id,
+    scope,
+    authorized,
+    rationale,
+    notes
+)
+VALUES (
+    %(parent_agent_version_id)s,
+    %(child_agent_name)s,
+    %(child_agent_version_id)s,
+    %(scope)s,
+    %(authorized)s,
+    %(rationale)s,
+    %(notes)s
+)
+RETURNING id, created_at;
+
+
 -- name: insert_pipeline
 INSERT INTO pipeline (name, display_name, description)
 VALUES (%(name)s, %(display_name)s, %(description)s)

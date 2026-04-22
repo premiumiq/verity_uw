@@ -28,6 +28,12 @@ class DecisionLogCreate(BaseModel):
     context_ref="submission:SUB-001" and passes the execution_context_id.
     Verity never knows what a "submission" is.
     """
+    # Optional caller-supplied UUID. When None, the SQL defaults to
+    # uuid_generate_v4() at INSERT time (original behaviour). The
+    # runtime sets this explicitly from FC-1 onward so it can reference
+    # the parent's in-flight decision id from within sub-agent calls
+    # BEFORE the parent's decision row has been written.
+    id: Optional[UUID] = None
     entity_type: EntityType
     entity_version_id: UUID
     prompt_version_ids: list[UUID] = []

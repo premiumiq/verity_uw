@@ -562,3 +562,89 @@ FROM execution_context ec
 JOIN application app ON app.id = ec.application_id
 ORDER BY ec.created_at DESC
 LIMIT 50;
+
+
+-- ── AGENT VERSION DELEGATION (FC-1) ──────────────────────────
+-- Queries against agent_version_delegation. The runtime uses
+-- check_delegation_authorized to gate the delegate_to_agent meta-tool;
+-- the admin UI uses the list_ queries to surface delegation graphs.
+
+
+-- name: check_delegation_authorized
+-- Given (parent_version_id, child_name), return the delegation row plus
+-- the resolved child agent_version_id to run, or no rows if unauthorized.
+--
+-- Resolution rules:
+--   - If the delegation row pins child_agent_version_id, use that directly.
+--   - Otherwise the row has child_agent_name — resolve to the named
+--     agent's current champion via agent.current_champion_version_id.
+-- Returned columns:
+--   delegation_id, child_agent_name, child_agent_version_id, scope,
+--   resolved_child_version_id.
+SELECT
+    d.id AS delegation_id,
+    d.child_agent_name,
+    d.child_agent_version_id,
+    d.scope,
+    COALESCE(
+        d.child_agent_version_id,
+        (SELECT current_champion_version_id FROM agent WHERE name = d.child_agent_name)
+    ) AS resolved_child_version_id
+FROM agent_version_delegation d
+LEFT JOIN agent_version cav ON d.child_agent_version_id = cav.id
+LEFT JOIN agent ca ON ca.id = cav.agent_id
+WHERE d.parent_agent_version_id = %(parent_version_id)s
+  AND d.authorized = TRUE
+  AND (
+      d.child_agent_name = %(child_name)s
+      OR ca.name = %(child_name)s
+  )
+LIMIT 1;
+
+
+-- name: list_delegations_for_parent
+-- All delegations authorized from a specific parent agent_version.
+-- For the admin UI's "this agent can delegate to:" view.
+SELECT
+    d.id AS delegation_id,
+    d.parent_agent_version_id,
+    d.child_agent_name,
+    d.child_agent_version_id,
+    d.scope,
+    d.authorized,
+    d.rationale,
+    d.notes,
+    d.created_at,
+    COALESCE(d.child_agent_name, ca.name) AS effective_child_name,
+    (d.child_agent_version_id IS NOT NULL) AS is_version_pinned,
+    cav.version_label AS child_version_label
+FROM agent_version_delegation d
+LEFT JOIN agent_version cav ON d.child_agent_version_id = cav.id
+LEFT JOIN agent ca ON ca.id = cav.agent_id
+WHERE d.parent_agent_version_id = %(parent_version_id)s
+ORDER BY effective_child_name, d.created_at;
+
+
+-- name: list_delegations_to_agent
+-- All delegations pointing at a given child agent (by name or via a
+-- version pin). For the admin UI's "this agent is delegated to by:" view.
+SELECT
+    d.id AS delegation_id,
+    d.parent_agent_version_id,
+    d.child_agent_name,
+    d.child_agent_version_id,
+    d.scope,
+    d.authorized,
+    d.rationale,
+    d.notes,
+    d.created_at,
+    pa.name AS parent_agent_name,
+    pav.version_label AS parent_version_label
+FROM agent_version_delegation d
+JOIN agent_version pav ON d.parent_agent_version_id = pav.id
+JOIN agent pa ON pa.id = pav.agent_id
+LEFT JOIN agent_version cav ON d.child_agent_version_id = cav.id
+LEFT JOIN agent ca ON ca.id = cav.agent_id
+WHERE d.child_agent_name = %(agent_name)s
+   OR ca.name = %(agent_name)s
+ORDER BY pa.name, pav.major_version DESC, pav.minor_version DESC;

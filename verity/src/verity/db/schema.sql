@@ -538,6 +538,61 @@ CREATE TABLE task_version_tool (
 );
 
 
+-- ── AGENT VERSION ↔ AGENT DELEGATION JUNCTION ────────────────
+-- First-class registry of "agent A can delegate to agent B" relationships.
+-- Independent of agent_version_tool (which grants the capability to use
+-- the delegate_to_agent meta-tool at all) — this table specifies WHICH
+-- sub-agents a given parent version is authorized to delegate to.
+--
+-- Added in FC-1 (sub-agent delegation). The runtime enforces this
+-- table during dispatch of the delegate_to_agent meta-tool: if no row
+-- matches (parent_agent_version_id, target child agent), the tool call
+-- comes back to Claude as an error listing the authorized targets, so
+-- the agent can correct itself.
+--
+-- Exactly one of child_agent_name or child_agent_version_id must be set:
+--   child_agent_name: champion-tracking — the delegation follows whichever
+--     version of the named agent is currently promoted to champion.
+--     Useful default; delegation stays current as sub-agents get promoted.
+--   child_agent_version_id: version-pinned — locks the parent to a specific
+--     child version. Use when you want the parent to keep calling a
+--     previously-validated child version even after newer challengers arrive.
+
+CREATE TABLE agent_version_delegation (
+    id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    parent_agent_version_id UUID NOT NULL REFERENCES agent_version(id),
+
+    -- Exactly one must be set (see CHECK below).
+    child_agent_name        VARCHAR(100),
+    child_agent_version_id  UUID REFERENCES agent_version(id),
+
+    -- Optional per-relationship constraints. JSONB so it can grow
+    -- without schema churn. Examples:
+    --   {"max_additional_depth": 2}
+    --   {"allowed_lob": ["DO"]}
+    --   {"reason_required": true}
+    scope                   JSONB NOT NULL DEFAULT '{}',
+
+    authorized              BOOLEAN NOT NULL DEFAULT TRUE,
+    rationale               TEXT,   -- why this delegation is allowed (governance audit)
+    notes                   TEXT,
+    created_at              TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMP NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT chk_child_target CHECK (
+        (child_agent_name IS NOT NULL AND child_agent_version_id IS NULL) OR
+        (child_agent_name IS NULL AND child_agent_version_id IS NOT NULL)
+    ),
+    CONSTRAINT uq_avd_parent_child UNIQUE (
+        parent_agent_version_id, child_agent_name, child_agent_version_id
+    )
+);
+
+CREATE INDEX idx_avd_parent ON agent_version_delegation(parent_agent_version_id);
+CREATE INDEX idx_avd_child_name ON agent_version_delegation(child_agent_name);
+CREATE INDEX idx_avd_child_version ON agent_version_delegation(child_agent_version_id);
+
+
 -- ── PIPELINES ────────────────────────────────────────────────
 
 CREATE TABLE pipeline (
