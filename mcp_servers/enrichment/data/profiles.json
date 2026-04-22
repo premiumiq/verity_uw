@@ -1,0 +1,232 @@
+{
+  "Acme Dynamics LLC": {
+    "lexisnexis": {
+      "risk_score": "low",
+      "litigation_history": [],
+      "regulatory_actions": [],
+      "bankruptcy_filings": [],
+      "ofac_sanctions_check": "clear",
+      "adverse_media_hits": 0,
+      "last_searched": "2026-04-15"
+    },
+    "dnb": {
+      "duns_number": "12-345-6789",
+      "financial_stress_score": 85,
+      "paydex_score": 82,
+      "payment_performance": "prompt",
+      "years_in_business": 15,
+      "sic_code": "7372",
+      "naics_code": "511210",
+      "industry": "Prepackaged Software",
+      "employees_verified": 245,
+      "annual_revenue_verified_usd": 48500000,
+      "legal_entity_type": "LLC",
+      "state_of_incorporation": "DE"
+    },
+    "pitchbook": {
+      "company_type": "Private",
+      "industry": "Industrial Machinery",
+      "founded_year": 2011,
+      "total_funding_usd": null,
+      "last_funding_round": null,
+      "investors": [],
+      "latest_valuation_usd": null,
+      "exits": [],
+      "ipo_expected": false
+    },
+    "factset": {
+      "ticker": null,
+      "exchange": null,
+      "revenue_ttm_usd": 48500000,
+      "ebitda_margin_pct": 12.3,
+      "net_debt_to_ebitda": 1.2,
+      "current_ratio": 2.1,
+      "credit_rating_agency": "S&P",
+      "credit_rating": "BBB",
+      "going_concern_opinion": false
+    }
+  },
+  "TechFlow Industries Inc": {
+    "lexisnexis": {
+      "risk_score": "medium",
+      "litigation_history": [
+        {"case": "SEC v. TechFlow Industries",
+         "type": "regulatory_inquiry",
+         "status": "pending",
+         "filed": "2025-08-14",
+         "description": "Routine review of revenue recognition practices following 10-K restatement."}
+      ],
+      "regulatory_actions": [
+        {"agency": "SEC",
+         "type": "inquiry",
+         "status": "open",
+         "severity": "routine",
+         "opened": "2025-08"}
+      ],
+      "bankruptcy_filings": [],
+      "ofac_sanctions_check": "clear",
+      "adverse_media_hits": 3,
+      "last_searched": "2026-04-15"
+    },
+    "dnb": {
+      "duns_number": "98-765-4321",
+      "financial_stress_score": 72,
+      "paydex_score": 74,
+      "payment_performance": "generally_prompt",
+      "years_in_business": 12,
+      "sic_code": "7372",
+      "naics_code": "511210",
+      "industry": "Enterprise Software",
+      "employees_verified": 790,
+      "annual_revenue_verified_usd": 118000000,
+      "legal_entity_type": "C-Corp",
+      "state_of_incorporation": "DE"
+    },
+    "pitchbook": {
+      "company_type": "Private",
+      "industry": "Enterprise Software",
+      "founded_year": 2014,
+      "total_funding_usd": 45000000,
+      "last_funding_round": "Series C - 2023",
+      "investors": ["Sequoia Capital", "Accel Partners", "Founders Fund"],
+      "latest_valuation_usd": 420000000,
+      "exits": [],
+      "ipo_expected": true
+    },
+    "factset": {
+      "ticker": null,
+      "exchange": null,
+      "revenue_ttm_usd": 118000000,
+      "ebitda_margin_pct": -3.1,
+      "net_debt_to_ebitda": null,
+      "current_ratio": 1.4,
+      "credit_rating_agency": null,
+      "credit_rating": null,
+      "going_concern_opinion": false
+    }
+  },
+  "Meridian Holdings Corp": {
+    "lexisnexis": {
+      "risk_score": "high",
+      "litigation_history": [
+        {"case": "Smith v. Meridian Holdings",
+         "type": "negligence",
+         "status": "settled",
+         "filed": "2024-03-12",
+         "amount_usd": 125000,
+         "description": "Premises liability — slip and fall at corporate campus."},
+        {"case": "Jones v. Meridian Holdings",
+         "type": "breach_of_contract",
+         "status": "pending",
+         "filed": "2025-01-22",
+         "description": "Former distributor alleging improper termination of supply agreement."}
+      ],
+      "regulatory_actions": [],
+      "bankruptcy_filings": [],
+      "ofac_sanctions_check": "clear",
+      "adverse_media_hits": 6,
+      "last_searched": "2026-04-15"
+    },
+    "dnb": {
+      "duns_number": "55-123-4567",
+      "financial_stress_score": 45,
+      "paydex_score": 52,
+      "payment_performance": "slow",
+      "years_in_business": 22,
+      "sic_code": "6159",
+      "naics_code": "522220",
+      "industry": "Financial Services",
+      "employees_verified": 148,
+      "annual_revenue_verified_usd": 23500000,
+      "legal_entity_type": "Corporation",
+      "state_of_incorporation": "NV"
+    },
+    "pitchbook": {
+      "company_type": "Public (OTC)",
+      "industry": "Financial Services",
+      "founded_year": 2004,
+      "total_funding_usd": null,
+      "last_funding_round": null,
+      "investors": [],
+      "latest_valuation_usd": null,
+      "exits": [],
+      "ipo_expected": false
+    },
+    "factset": {
+      "ticker": "MERH",
+      "exchange": "OTC",
+      "revenue_ttm_usd": 23500000,
+      "ebitda_margin_pct": 4.8,
+      "net_debt_to_ebitda": 3.9,
+      "current_ratio": 1.1,
+      "credit_rating_agency": "Moody's",
+      "credit_rating": "B2",
+      "going_concern_opinion": true
+    }
+  },
+  "DangerCo LLC": {
+    "lexisnexis": {
+      "risk_score": "high",
+      "litigation_history": [
+        {"case": "California AG v. DangerCo",
+         "type": "consumer_protection",
+         "status": "settled",
+         "filed": "2023-06-01",
+         "amount_usd": 2400000,
+         "description": "Unfair business practices settlement."},
+        {"case": "Garcia et al. v. DangerCo",
+         "type": "class_action",
+         "status": "pending",
+         "filed": "2025-02-08",
+         "description": "Proposed wage-and-hour class action."}
+      ],
+      "regulatory_actions": [
+        {"agency": "CA Dept of Industrial Relations",
+         "type": "citation",
+         "status": "resolved",
+         "severity": "moderate",
+         "opened": "2024-09"}
+      ],
+      "bankruptcy_filings": [],
+      "ofac_sanctions_check": "clear",
+      "adverse_media_hits": 11,
+      "last_searched": "2026-04-15"
+    },
+    "dnb": {
+      "duns_number": "77-888-9999",
+      "financial_stress_score": 38,
+      "paydex_score": 48,
+      "payment_performance": "slow_to_very_slow",
+      "years_in_business": 8,
+      "sic_code": "1711",
+      "naics_code": "238220",
+      "industry": "Plumbing, Heating, and Air-Conditioning Contractors",
+      "employees_verified": 62,
+      "annual_revenue_verified_usd": 14200000,
+      "legal_entity_type": "LLC",
+      "state_of_incorporation": "CA"
+    },
+    "pitchbook": {
+      "company_type": "Private",
+      "industry": "Construction Services",
+      "founded_year": 2018,
+      "total_funding_usd": null,
+      "last_funding_round": null,
+      "investors": [],
+      "latest_valuation_usd": null,
+      "exits": [],
+      "ipo_expected": false
+    },
+    "factset": {
+      "ticker": null,
+      "exchange": null,
+      "revenue_ttm_usd": 14200000,
+      "ebitda_margin_pct": 1.2,
+      "net_debt_to_ebitda": 5.8,
+      "current_ratio": 0.9,
+      "credit_rating_agency": null,
+      "credit_rating": null,
+      "going_concern_opinion": false
+    }
+  }
+}
