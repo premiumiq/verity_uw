@@ -19,7 +19,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 
-from verity.core.client import Verity
+from verity.client.inprocess import Verity
 from verity.utils.logging import CorrelationMiddleware, setup_logging
 from verity.web.app import create_verity_web
 

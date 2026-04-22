@@ -54,7 +54,7 @@ def main():
     elif args.command == "serve":
         import uvicorn
         from verity.api.app import create_verity_api
-        from verity.core.client import Verity
+        from verity.client.inprocess import Verity
 
         verity = Verity(database_url=args.database_url)
         app = create_verity_api(verity)
@@ -64,7 +64,7 @@ def main():
         import uvicorn
         from verity.api.app import create_verity_api
         from verity.web.app import create_verity_web
-        from verity.core.client import Verity
+        from verity.client.inprocess import Verity
         from fastapi import FastAPI
 
         verity = Verity(database_url=args.database_url)

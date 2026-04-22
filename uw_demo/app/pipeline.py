@@ -14,7 +14,7 @@ This module only provides mock LLM outputs for demo/testing.
 
 from typing import Optional
 
-from verity.core.mock_context import MockContext
+from verity.contracts import MockContext
 
 
 # ══════════════════════════════════════════════════════════════

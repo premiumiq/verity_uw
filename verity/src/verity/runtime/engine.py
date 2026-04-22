@@ -39,17 +39,16 @@ from verity.contracts.decision import (  # noqa: F401
     ExecutionEventType,
     ExecutionResult,
 )
-# MockContext lives in verity.contracts.mock (runtime/mock_context.py is a shim
-# for backward compat). Import directly from contracts for clarity.
+# MockContext lives in verity.contracts.mock — runtime-side boundary control.
 from verity.contracts.mock import MockContext
-# Governance-side dependencies: the runtime reads configs from the registry and
-# writes decisions through Decisions. Both are stable seams — same object
-# whether imported from governance/ (new) or core/ (shim).
+# Governance-side dependency: the runtime reads configs from the registry.
+# This is the version-pinning seam — the engine cannot execute without
+# resolving a config through the governance plane.
 from verity.governance.registry import Registry
-# Decisions still lives at core/decisions.py; it splits into
-# governance.decisions (reader + override) and runtime.decisions_writer
-# (log_decision) in Phase 2c.
-from verity.core.decisions import Decisions
+# Decisions writer: the single write the runtime makes to the audit table.
+# After Phase 2e, we no longer take the unified Decisions class here;
+# DecisionsWriter is all the engine needs (it only calls .log_decision()).
+from verity.runtime.decisions_writer import DecisionsWriter
 from verity.models.decision import DecisionLogCreate
 from verity.models.lifecycle import DeploymentChannel, EntityType, RunPurpose
 from verity.models.prompt import PromptAssignment
@@ -63,7 +62,7 @@ class ExecutionEngine:
     def __init__(
         self,
         registry: Registry,
-        decisions: Decisions,
+        decisions: DecisionsWriter,
         anthropic_api_key: str,
         tool_implementations: Optional[dict[str, Callable]] = None,
         application: str = "default",

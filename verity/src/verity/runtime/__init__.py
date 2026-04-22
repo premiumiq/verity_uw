@@ -11,8 +11,4 @@ This subpackage holds the execution machinery:
 - decisions_writer   — single write: log_decision() to governance's audit table
 - tool_registry      — the in-process Python callables dict for tool dispatch
 - runtime            — internal facade that wires the above together
-
-Populated over Phase 2 of the registry/runtime split. During the
-transition, verity.core.* modules exist as thin shims that re-export
-from here so no caller has to change in a single step.
 """

@@ -2,7 +2,7 @@
 
 import logging
 
-from verity.core.client import Verity
+from verity.client.inprocess import Verity
 
 __all__ = ["Verity"]
 __version__ = "0.1.0"

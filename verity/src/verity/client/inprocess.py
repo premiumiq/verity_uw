@@ -36,9 +36,9 @@ the new underlying module instances.
 from typing import Any, Callable, Optional
 from uuid import UUID
 
-from verity.core.decisions import Decisions  # unified Reader+Writer for backward compat
 from verity.db.connection import Database
 from verity.governance.coordinator import GovernanceCoordinator
+from verity.governance.decisions import DecisionsReader
 from verity.models.decision import (
     AuditTrailEntry,
     DecisionLog,
@@ -47,10 +47,32 @@ from verity.models.decision import (
 )
 from verity.models.lifecycle import EntityType, LifecycleState, PromotionRequest
 from verity.models.reporting import DashboardCounts, ModelInventoryAgent, ModelInventoryTask
+from verity.runtime.decisions_writer import DecisionsWriter
 from verity.runtime.engine import ExecutionResult
 from verity.runtime.mock_context import MockContext
 from verity.runtime.pipeline import PipelineResult
 from verity.runtime.runtime import Runtime
+
+
+# ── UNIFIED DECISIONS CLASS (backward-compat helper) ──────────
+# Consuming code written before the split sometimes does:
+#   await verity.decisions.log_decision(...)        # writer
+#   await verity.decisions.record_override(...)     # reader-side write
+#   count = await verity.decisions.count_decisions() # reader
+# To preserve that flat API, we expose a single attribute `verity.decisions`
+# pointing at a class that has BOTH the reader and writer methods. Defined
+# inline here because it's a pure backward-compat convenience for the
+# in-process client — the governance REST API (Phase 4) exposes these as
+# separate endpoints.
+
+class _UnifiedDecisions(DecisionsReader, DecisionsWriter):
+    """Combined reader+writer interface for `verity.decisions.*` callers.
+
+    Both parents' __init__ just set self.db, so multiple inheritance is
+    unambiguous. Stateless besides the shared DB — safe to have multiple
+    instances pointing at the same pool.
+    """
+    pass
 
 
 class Verity:
@@ -108,7 +130,7 @@ class Verity:
 
         # Unified Decisions (reader + writer) for legacy `verity.decisions.*`
         # callers. Stateless — the DB is the only state, and it's shared.
-        self.decisions = Decisions(self.db)
+        self.decisions = _UnifiedDecisions(self.db)
 
     async def connect(self) -> None:
         """Open the database connection pool."""
