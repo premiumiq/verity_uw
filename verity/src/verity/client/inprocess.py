@@ -217,14 +217,59 @@ class Verity:
         context: dict[str, Any],
         channel: str = "production",
         mock: Optional[MockContext] = None,
+        fixtures: Optional[dict[str, Any]] = None,
         execution_context_id: Optional[UUID] = None,
     ) -> PipelineResult:
         """Execute a full pipeline with dependency resolution and parallel groups.
 
-        Pass execution_context_id to link all decisions to a business context.
-        Pass mock=MockContext(...) to mock all steps.
+        Pass `execution_context_id` to link all decisions to a business context.
+
+        Pipeline engine selection:
+          - fixtures=None (default): the pipeline runs on the real
+            ExecutionEngine, which calls Claude and dispatches registered
+            tools. `mock=MockContext(...)` can override tool responses.
+          - fixtures={step_name: Fixture or dict, ...}: the pipeline runs
+            on a FixtureEngine, which returns pre-built outputs without
+            calling Claude or tools. Every step's decision is logged with
+            mock_mode=True. Use this for the UW demo's "mock mode" and
+            other scenarios where you want deterministic execution with
+            full governance but zero LLM cost. `mock` is ignored in this
+            path.
         """
         await self.ensure_connected()
+
+        # Fixture path: build a disposable FixtureEngine + PipelineExecutor
+        # per request. Cheap — both are lightweight wiring classes — and
+        # keeps the default pipeline_executor (which wraps ExecutionEngine)
+        # untouched for real runs.
+        if fixtures is not None:
+            from verity.runtime.fixture_backend import FixtureEngine
+            from verity.runtime.pipeline import PipelineExecutor
+
+            fixture_engine = FixtureEngine(
+                registry=self._gov.registry,
+                decisions=self._rt.decisions_writer,
+                fixtures=fixtures,
+                application=self.application,
+            )
+            # Share tool_implementations so callers that register tools at
+            # app startup don't have to care which engine ultimately runs.
+            # (FixtureEngine never dispatches tools, but it accepts
+            # registrations for interface parity.)
+            fixture_engine.tool_implementations = self._rt.execution.tool_implementations
+
+            fixture_pipeline = PipelineExecutor(
+                registry=self._gov.registry,
+                execution_engine=fixture_engine,
+            )
+            return await fixture_pipeline.run_pipeline(
+                pipeline_name=pipeline_name,
+                context=context,
+                channel=channel,
+                execution_context_id=execution_context_id,
+            )
+
+        # Real path: the persistent pipeline_executor over ExecutionEngine.
         return await self._rt.pipeline_executor.run_pipeline(
             pipeline_name=pipeline_name,
             context=context,

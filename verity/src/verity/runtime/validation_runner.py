@@ -27,6 +27,7 @@ from verity.db.connection import Database
 from verity.governance.registry import Registry
 from verity.governance.testing_meta import Testing
 from verity.runtime.engine import ExecutionEngine
+from verity.runtime.fixture_backend import Fixture, FixtureEngine
 from verity.runtime.metrics import (
     check_thresholds,
     classification_metrics,
@@ -320,19 +321,29 @@ class ValidationRunner:
             else:
                 tool_responses[name] = response
 
-        # Build MockContext
-        mock = None
+        # Pick engine based on mock_llm. See test_runner for the same pattern
+        # and rationale.
         if mock_llm:
-            # Mock BOTH LLM and tools - for testing the runner only
-            mock = MockContext(llm_responses=[expected], tool_responses=tool_responses or None, mock_all_tools=True)
-        elif tool_responses:
-            # Mock tools only - Claude called for real. This is real validation.
-            mock = MockContext(tool_responses=tool_responses)
+            # Cheap mode: route through FixtureEngine. Verifies the plumbing,
+            # does not measure model quality. Real validation uses mock_llm=False.
+            engine = FixtureEngine(
+                registry=self.registry,
+                decisions=self.engine.decisions,
+                fixtures={
+                    f"validation:record_{record_index}": Fixture(output=expected),
+                },
+                application=self.engine.application,
+            )
+            mock = None
+        else:
+            # Real validation: Claude is called; tool mocks shape the inputs.
+            engine = self.engine
+            mock = MockContext(tool_responses=tool_responses) if tool_responses else None
 
         # Execute
         try:
             if entity_type == "agent":
-                exec_result = await self.engine.run_agent(
+                exec_result = await engine.run_agent(
                     agent_name=entity_name,
                     context=input_data,
                     channel=channel,
@@ -340,7 +351,7 @@ class ValidationRunner:
                     step_name=f"validation:record_{record_index}",
                 )
             else:
-                exec_result = await self.engine.run_task(
+                exec_result = await engine.run_task(
                     task_name=entity_name,
                     input_data=input_data,
                     channel=channel,

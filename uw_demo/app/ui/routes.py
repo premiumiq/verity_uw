@@ -37,8 +37,8 @@ from fastapi.templating import Jinja2Templates
 
 from uw_demo.app.config import settings
 from uw_demo.app.pipeline import (
-    get_mock_context_doc_processing,
-    get_mock_context_risk_assessment,
+    get_fixtures_doc_processing,
+    get_fixtures_risk_assessment,
 )
 
 
@@ -461,11 +461,11 @@ def create_uw_routes(verity) -> APIRouter:
         try:
             use_mock = await _use_mock()
             if use_mock:
-                mock = get_mock_context_doc_processing(submission_id)
+                fixtures = get_fixtures_doc_processing(submission_id)
                 result = await verity.execute_pipeline(
                     pipeline_name="uw_document_processing",
                     context=pipeline_context,
-                    mock=mock,
+                    fixtures=fixtures,
                     execution_context_id=exec_ctx_id,
                 )
             else:
@@ -636,11 +636,11 @@ async def _run_risk_assessment_internal(verity, submission_id: str, sub: dict, t
     try:
         use_mock = await _use_mock()
         if use_mock:
-            mock = get_mock_context_risk_assessment(submission_id)
+            fixtures = get_fixtures_risk_assessment(submission_id)
             result = await verity.execute_pipeline(
                 pipeline_name="uw_risk_assessment",
                 context=pipeline_context,
-                mock=mock,
+                fixtures=fixtures,
                 execution_context_id=exec_ctx_id,
             )
         else:

@@ -25,6 +25,7 @@ from verity.contracts.mock import MockContext
 from verity.governance.registry import Registry
 from verity.governance.testing_meta import Testing
 from verity.runtime.engine import ExecutionEngine
+from verity.runtime.fixture_backend import Fixture, FixtureEngine
 from verity.runtime.metrics import classification_metrics, field_accuracy, exact_match, schema_valid
 
 logger = logging.getLogger(__name__)
@@ -187,17 +188,32 @@ class TestRunner:
                 tool_responses[name] = response
 
         if mock_llm:
-            # Mock BOTH LLM and tools - for testing the runner only
-            mock = MockContext(llm_responses=[expected], tool_responses=tool_responses or None, mock_all_tools=True)
-        elif tool_responses:
-            # Mock tools only - Claude called for real. This is the normal test mode.
-            mock = MockContext(tool_responses=tool_responses)
-        # else: no mocks at all - fully live execution
+            # Cheap mode: route through FixtureEngine with the expected output
+            # as a pre-built fixture. No Claude call, no tool dispatch; the
+            # decision log is marked mock_mode=True. This tests the execution
+            # plumbing (config resolution, prompt assembly, decision logging),
+            # not model quality. Replaces the previous MockContext.llm_responses
+            # pattern now that llm_responses has been retired in favor of
+            # a dedicated engine.
+            engine = FixtureEngine(
+                registry=self.registry,
+                decisions=self.engine.decisions,
+                fixtures={f"test:{case_name}": Fixture(output=expected)},
+                application=self.engine.application,
+            )
+            mock = None
+        else:
+            # Real-LLM test: Claude is called; registered tool mocks shape
+            # the inputs it sees. This is the meaningful test mode — it
+            # measures whether the current agent/task version produces
+            # outputs matching expected given controlled tool data.
+            engine = self.engine
+            mock = MockContext(tool_responses=tool_responses) if tool_responses else None
 
         # Execute the entity
         try:
             if entity_type == "agent":
-                exec_result = await self.engine.run_agent(
+                exec_result = await engine.run_agent(
                     agent_name=case.get("entity_name", ""),
                     context=input_data,
                     channel=channel,
@@ -205,7 +221,7 @@ class TestRunner:
                     step_name=f"test:{case_name}",
                 )
             else:
-                exec_result = await self.engine.run_task(
+                exec_result = await engine.run_task(
                     task_name=case.get("entity_name", ""),
                     input_data=input_data,
                     channel=channel,

@@ -1,42 +1,45 @@
-"""UW Demo Pipeline — mock context builders for two pipelines.
+"""UW Demo Pipeline — fixture builders for two pipelines.
 
-Provides MockContext builders for:
+Provides fixture dicts for:
 1. Document Processing pipeline (classify + extract)
 2. Risk Assessment pipeline (triage + appetite)
 
-IMPORTANT: This module does NOT bypass the execution engine.
-Mock mode uses MockContext → goes through the gateway → skips Claude →
-logs decisions normally. The governance trail is identical to live mode.
+IMPORTANT: This module does NOT bypass the governance trail. Fixtures
+go through FixtureEngine, which resolves the entity's config from the
+registry (so decision_log.entity_version_id is correct), then logs a
+DecisionLogCreate with mock_mode=True. The trail is identical in shape
+to a live run — just without the real LLM or tool calls.
 
 Submission data is now in uw_db (no longer hardcoded here).
-This module only provides mock LLM outputs for demo/testing.
+This module only provides pre-built pipeline-step outputs for demo mode.
 """
 
 from typing import Optional
 
-from verity.contracts import MockContext
+from verity.runtime.fixture_backend import Fixture
 
 
 # ══════════════════════════════════════════════════════════════
-# PIPELINE 1: DOCUMENT PROCESSING MOCK CONTEXT
+# PIPELINE 1: DOCUMENT PROCESSING FIXTURES
 # ══════════════════════════════════════════════════════════════
 
-def get_mock_context_doc_processing(submission_id: str) -> Optional[MockContext]:
-    """Build a MockContext for the document processing pipeline.
+def get_fixtures_doc_processing(submission_id: str) -> Optional[dict[str, Fixture]]:
+    """Build fixtures (keyed by pipeline step_name) for the doc-processing pipeline.
 
-    2 steps: classify_documents → extract_fields.
+    2 steps: classify_documents → extract_fields. Fixture keys match the
+    step_names registered in register_all.py so FixtureEngine routes each
+    step to the right pre-built output.
+
+    Returns None when there's no fixture for this submission_id — the
+    caller should fall back to live execution in that case.
     """
     outputs = _get_doc_processing_outputs(submission_id)
     if not outputs:
         return None
-
-    return MockContext(
-        llm_responses=[
-            outputs["classify_documents"],
-            outputs["extract_fields"],
-        ],
-        mock_all_tools=True,
-    )
+    return {
+        "classify_documents": Fixture(output=outputs["classify_documents"]),
+        "extract_fields": Fixture(output=outputs["extract_fields"]),
+    }
 
 
 def _get_doc_processing_outputs(submission_id: str) -> Optional[dict]:
@@ -155,25 +158,25 @@ def _get_doc_processing_outputs(submission_id: str) -> Optional[dict]:
 
 
 # ══════════════════════════════════════════════════════════════
-# PIPELINE 2: RISK ASSESSMENT MOCK CONTEXT
+# PIPELINE 2: RISK ASSESSMENT FIXTURES
 # ══════════════════════════════════════════════════════════════
 
-def get_mock_context_risk_assessment(submission_id: str) -> Optional[MockContext]:
-    """Build a MockContext for the risk assessment pipeline.
+def get_fixtures_risk_assessment(submission_id: str) -> Optional[dict[str, Fixture]]:
+    """Build fixtures (keyed by pipeline step_name) for the risk-assessment pipeline.
 
-    2 steps: triage_submission → assess_appetite.
+    2 steps: triage_submission → assess_appetite. Fixture keys match the
+    step_names registered in register_all.py.
+
+    Returns None when there's no fixture for this submission_id — the
+    caller should fall back to live execution in that case.
     """
     outputs = _get_risk_assessment_outputs(submission_id)
     if not outputs:
         return None
-
-    return MockContext(
-        llm_responses=[
-            outputs["triage_submission"],
-            outputs["assess_appetite"],
-        ],
-        mock_all_tools=True,
-    )
+    return {
+        "triage_submission": Fixture(output=outputs["triage_submission"]),
+        "assess_appetite": Fixture(output=outputs["assess_appetite"]),
+    }
 
 
 def _get_risk_assessment_outputs(submission_id: str) -> Optional[dict]:
