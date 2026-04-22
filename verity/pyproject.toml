@@ -50,6 +50,11 @@ dependencies = [
 runtime = [
     "anthropic>=0.40,<1",
     "mcp>=1.0,<2",
+    # In-repo MCP servers (mcp_servers/<name>/) that ship with the demo
+    # need their dependencies available in whatever venv Verity runs in,
+    # because Verity spawns them as subprocesses over stdio.
+    # ddgs → DuckDuckGo web search, used by mcp_servers/duckduckgo/server.py
+    "ddgs>=9.0,<10",
 ]
 
 # Developer tooling — tests, linters, type-checkers.
