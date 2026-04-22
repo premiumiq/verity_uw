@@ -144,9 +144,34 @@
     <h2 class="verity-section-title">Tool Calls ({{ decision.tool_calls_made|length }})</h2>
 
     {% for tc in decision.tool_calls_made %}
+    {# ──────────────────────────────────────────────────────────
+       Per-tool-call card. Shows which transport the call took
+       (in-process Python vs MCP) so the audit trail makes the
+       governance story visible at a glance. Fields transport,
+       mcp_server_name, mcp_tool_name were added in Phase 4c/FC-14;
+       older decisions missing them fall through to "in-process".
+    ── ────────────────────────────────────────────────────────── #}
+    {% set tc_transport = tc.get('transport', 'python_inprocess') %}
+    {% set tc_is_mcp = tc_transport.startswith('mcp_') %}
     <div class="verity-card" style="margin-bottom: 8px;">
-        <div style="font-weight: 600; margin-bottom: 6px;">
-            #{{ tc.call_order }} — {{ tc.tool_name }}
+        <div style="font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            <span>#{{ tc.call_order }} — {{ tc.tool_name }}</span>
+            {% if tc_is_mcp %}
+                <span class="verity-badge" style="background: #e8f0fe; color: #1967d2; border: 1px solid #a5c4f4;"
+                      title="Dispatched via Model Context Protocol ({{ tc_transport }}) to server '{{ tc.get('mcp_server_name', '?') }}'">
+                    MCP: {{ tc.get('mcp_server_name', 'unknown') }}
+                </span>
+                {% if tc.get('mcp_tool_name') and tc.mcp_tool_name != tc.tool_name %}
+                    <span style="font-size: 0.7rem; color: var(--verity-text-light); font-weight: 400;">
+                        → remote tool: <code>{{ tc.mcp_tool_name }}</code>
+                    </span>
+                {% endif %}
+            {% else %}
+                <span class="verity-badge" style="background: #f5f5f5; color: #5f6368; border: 1px solid #dadce0;"
+                      title="Dispatched in-process via registered Python callable">
+                    in-process
+                </span>
+            {% endif %}
             {% if tc.get('mock_mode') %}<span class="verity-badge verity-badge-draft">mock</span>{% endif %}
             {% if tc.get('error') %}<span class="verity-badge verity-badge-failed">error</span>{% endif %}
         </div>

@@ -364,6 +364,46 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             usage=usage,
         )
 
+    # ── MCP SERVERS (Phase 4f / FC-14) ─────────────────────────
+    # Registry view of MCP servers Verity knows about. One row per
+    # mcp_server record; each page shows its transport config and the
+    # tools bound to it. Tool rows on /admin/tools link here via the
+    # MCP: <server> badge in the Transport column.
+
+    @router.get("/mcp-servers", response_class=HTMLResponse)
+    async def mcp_servers_list(request: Request):
+        """Browse registered MCP servers with per-server tool counts."""
+        await verity.ensure_connected()
+        servers = await verity.registry.list_mcp_servers()
+        # Per-server tool count (how many Verity tools dispatch through each)
+        all_tools = await verity.list_tools()
+        counts: dict[str, int] = {}
+        for t in all_tools:
+            name = t.get("mcp_server_name")
+            if name:
+                counts[name] = counts.get(name, 0) + 1
+        return _render(templates, request, "mcp_servers.html",
+            active_page="mcp-servers",
+            servers=servers,
+            tool_counts=counts,
+        )
+
+    @router.get("/mcp-servers/{server_name}", response_class=HTMLResponse)
+    async def mcp_server_detail(request: Request, server_name: str):
+        """Show one MCP server's config plus the tools bound to it."""
+        await verity.ensure_connected()
+        server = await verity.registry.get_mcp_server_by_name(server_name)
+        if not server:
+            return HTMLResponse("<h1>MCP server not found</h1>", status_code=404)
+        # Filter the tool list to just tools bound to this server.
+        all_tools = await verity.list_tools()
+        bound_tools = [t for t in all_tools if t.get("mcp_server_name") == server_name]
+        return _render(templates, request, "mcp_server_detail.html",
+            active_page="mcp-servers",
+            server=server,
+            tools=bound_tools,
+        )
+
     # ── PIPELINES ─────────────────────────────────────────────
 
     @router.get("/pipelines", response_class=HTMLResponse)

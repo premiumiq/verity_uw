@@ -30,6 +30,7 @@
     <thead>
         <tr>
             <th>Tool</th>
+            <th>Transport</th>
             <th>Used By</th>
             <th>Write</th>
             <th>Mock</th>
@@ -38,6 +39,8 @@
     </thead>
     <tbody>
         {% for t in tools %}
+        {% set t_transport = t.transport if t.transport else 'python_inprocess' %}
+        {% set t_is_mcp = t_transport.startswith('mcp_') %}
         <tr class="clickable" onclick="window.location='/admin/tools/{{ t.name }}'">
             <!-- Tool name with description -->
             <td>
@@ -46,6 +49,28 @@
                 <div style="font-size: 0.75rem; color: var(--verity-text-light); margin-top: 2px;">
                     {{ t.description[:100] }}{% if t.description|length > 100 %}...{% endif %}
                 </div>
+            </td>
+
+            <!-- Transport: MCP badge (clickable) or plain in-process -->
+            <td style="font-size: 0.8rem;">
+                {% if t_is_mcp %}
+                    <a href="/admin/mcp-servers/{{ t.mcp_server_name }}"
+                       onclick="event.stopPropagation();"
+                       class="verity-badge"
+                       style="background: #e8f0fe; color: #1967d2; border: 1px solid #a5c4f4; text-decoration: none;"
+                       title="Dispatched via MCP ({{ t_transport }})">
+                        MCP: {{ t.mcp_server_name }}
+                    </a>
+                    {% if t.mcp_tool_name and t.mcp_tool_name != t.name %}
+                    <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 2px;">
+                        remote: <code>{{ t.mcp_tool_name }}</code>
+                    </div>
+                    {% endif %}
+                {% else %}
+                    <span class="verity-badge" style="background: #f5f5f5; color: #5f6368; border: 1px solid #dadce0;">
+                        in-process
+                    </span>
+                {% endif %}
             </td>
 
             <!-- Which agents/tasks use this tool -->

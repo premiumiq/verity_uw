@@ -1,0 +1,103 @@
+<!--
+  MCP SERVERS PAGE — Browse Model Context Protocol servers registered with Verity.
+
+  Each row is one mcp_server record. Shows transport (stdio/sse/http),
+  the launch command or URL, active flag, and how many Verity tool
+  rows are bound to the server. Tools bound to an MCP server dispatch
+  through verity.runtime.mcp_client.MCPClient to this server.
+
+  Added in Phase 4f / FC-14 as the final piece of UI polish on the MCP
+  integration story.
+
+  DATA PASSED BY ROUTE:
+  - servers: list of dicts from registry.list_mcp_servers()
+  - tool_counts: dict {server_name: int} — how many tools dispatch here
+-->
+{% extends "base.html" %}
+
+{% block title %}MCP Servers — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <span>MCP Servers</span>
+{% endblock %}
+
+{% block page_title %}MCP Servers{% endblock %}
+
+{% block content %}
+
+<p class="verity-page-description">
+    MCP (Model Context Protocol) servers expose tools that Verity's runtime dispatches to alongside in-process Python tools. Each server is registered here with its transport and connection config; the <a href="/admin/tools">tools table</a> shows which Verity tool rows are bound to each server. Every MCP tool call is logged to the decision audit trail with the same shape as an in-process tool call.
+</p>
+
+{% if servers %}
+<table class="verity-table">
+    <thead>
+        <tr>
+            <th>Server</th>
+            <th>Transport</th>
+            <th>Launch / Endpoint</th>
+            <th>Tools</th>
+            <th>Active</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for s in servers %}
+        <tr class="clickable" onclick="window.location='/admin/mcp-servers/{{ s.name }}'">
+            <!-- Server name + description -->
+            <td>
+                <a href="/admin/mcp-servers/{{ s.name }}" style="font-weight: 600;">{{ s.display_name }}</a>
+                <div style="font-size: 0.7rem; color: var(--verity-text-light); font-family: monospace;">{{ s.name }}</div>
+                {% if s.description %}
+                <div style="font-size: 0.75rem; color: var(--verity-text-light); margin-top: 2px;">
+                    {{ s.description[:120] }}{% if s.description|length > 120 %}...{% endif %}
+                </div>
+                {% endif %}
+            </td>
+
+            <!-- Transport badge -->
+            <td>
+                <span class="verity-badge" style="background: #e8f0fe; color: #1967d2; border: 1px solid #a5c4f4;">
+                    {{ s.transport }}
+                </span>
+            </td>
+
+            <!-- Command+args for stdio, URL for sse/http -->
+            <td style="font-size: 0.8rem; font-family: monospace;">
+                {% if s.transport == 'stdio' %}
+                    {{ s.command }}{% if s.args %} {{ s.args | join(' ') }}{% endif %}
+                {% elif s.url %}
+                    {{ s.url }}
+                {% else %}
+                    <span style="color: var(--verity-text-light);">—</span>
+                {% endif %}
+            </td>
+
+            <!-- How many Verity tool rows dispatch here -->
+            <td>
+                {% set n = tool_counts.get(s.name, 0) %}
+                {% if n %}
+                    <span class="verity-badge" style="background: #f5f5f5; color: #5f6368; border: 1px solid #dadce0;">
+                        {{ n }} tool{{ 's' if n != 1 else '' }}
+                    </span>
+                {% else %}
+                    <span style="color: var(--verity-text-light); font-size: 0.8rem;">—</span>
+                {% endif %}
+            </td>
+
+            <td>{{ '✓' if s.active else '—' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="verity-empty">
+    <div class="verity-empty-message">No MCP servers registered yet.</div>
+    <div style="font-size: 0.85rem; color: var(--verity-text-light); margin-top: 8px;">
+        Register one by calling <code>verity.registry.register_mcp_server(...)</code> or by adding an entry
+        to <code>seed_mcp_servers()</code> in your setup script.
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}

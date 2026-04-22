@@ -36,6 +36,41 @@
             <div class="verity-detail-label">Description</div>
             <div class="verity-detail-value">{{ tool.description }}</div>
 
+            {# Transport — added in Phase 4f. Distinguishes in-process Python
+               tools from MCP-sourced tools; MCP tools link to their server. #}
+            {% set t_transport = tool.transport if tool.transport else 'python_inprocess' %}
+            {% set t_is_mcp = t_transport.startswith('mcp_') %}
+            <div class="verity-detail-label">Transport</div>
+            <div class="verity-detail-value">
+                {% if t_is_mcp %}
+                    <a href="/admin/mcp-servers/{{ tool.mcp_server_name }}"
+                       class="verity-badge"
+                       style="background: #e8f0fe; color: #1967d2; border: 1px solid #a5c4f4; text-decoration: none;">
+                        MCP: {{ tool.mcp_server_name }}
+                    </a>
+                    <span style="font-size: 0.75rem; color: var(--verity-text-light); margin-left: 8px;">
+                        ({{ t_transport }})
+                    </span>
+                {% else %}
+                    <span class="verity-badge" style="background: #f5f5f5; color: #5f6368; border: 1px solid #dadce0;">
+                        in-process
+                    </span>
+                    <span style="font-size: 0.75rem; color: var(--verity-text-light); margin-left: 8px;">
+                        (python_inprocess)
+                    </span>
+                {% endif %}
+            </div>
+
+            {% if t_is_mcp and tool.mcp_tool_name and tool.mcp_tool_name != tool.name %}
+            <div class="verity-detail-label">Remote Tool Name</div>
+            <div class="verity-detail-value" style="font-family: monospace; font-size: 0.85rem;">
+                {{ tool.mcp_tool_name }}
+                <span style="font-size: 0.7rem; color: var(--verity-text-light); font-family: inherit;">
+                    (name this tool has on the MCP server; differs from Verity's unique name)
+                </span>
+            </div>
+            {% endif %}
+
             <div class="verity-detail-label">Implementation</div>
             <div class="verity-detail-value" style="font-family: monospace; font-size: 0.8rem;">{{ tool.implementation_path }}</div>
 

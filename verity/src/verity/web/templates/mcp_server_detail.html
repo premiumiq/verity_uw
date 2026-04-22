@@ -1,0 +1,139 @@
+<!--
+  MCP SERVER DETAIL PAGE — Full view of one registered MCP server.
+
+  Shows transport config (how Verity connects to it) and the tools
+  bound to it (which Verity tool rows dispatch through this server).
+
+  DATA PASSED BY ROUTE:
+  - server: dict from registry.get_mcp_server_by_name()
+  - tools: list of tool dicts whose mcp_server_name matches this server
+-->
+{% extends "base.html" %}
+
+{% block title %}{{ server.display_name }} — MCP Server — Verity{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/mcp-servers">MCP Servers</a>
+    <span class="separator">›</span>
+    <span>{{ server.display_name }}</span>
+{% endblock %}
+
+{% block page_title %}{{ server.display_name }}{% endblock %}
+
+{% block content %}
+
+<!-- ── SERVER METADATA ─────────────────────────────────────── -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Server Details</h2>
+    <div class="verity-card">
+        <div class="verity-detail-grid">
+            <div class="verity-detail-label">Display Name</div>
+            <div class="verity-detail-value" style="font-weight: 600;">{{ server.display_name }}</div>
+
+            <div class="verity-detail-label">Machine Name</div>
+            <div class="verity-detail-value" style="font-family: monospace; font-size: 0.85rem;">{{ server.name }}</div>
+
+            {% if server.description %}
+            <div class="verity-detail-label">Description</div>
+            <div class="verity-detail-value">{{ server.description }}</div>
+            {% endif %}
+
+            <div class="verity-detail-label">Transport</div>
+            <div class="verity-detail-value">
+                <span class="verity-badge" style="background: #e8f0fe; color: #1967d2; border: 1px solid #a5c4f4;">
+                    {{ server.transport }}
+                </span>
+                <span style="font-size: 0.75rem; color: var(--verity-text-light); margin-left: 8px;">
+                    {% if server.transport == 'stdio' %}
+                        (subprocess — spawned on first tool call)
+                    {% elif server.transport == 'sse' %}
+                        (Server-Sent Events endpoint)
+                    {% elif server.transport == 'http' %}
+                        (JSON-RPC HTTP endpoint)
+                    {% endif %}
+                </span>
+            </div>
+
+            {# Transport-specific connection details #}
+            {% if server.transport == 'stdio' %}
+                {% if server.command %}
+                <div class="verity-detail-label">Command</div>
+                <div class="verity-detail-value" style="font-family: monospace; font-size: 0.85rem;">{{ server.command }}</div>
+                {% endif %}
+                {% if server.args %}
+                <div class="verity-detail-label">Args</div>
+                <div class="verity-detail-value" style="font-family: monospace; font-size: 0.85rem;">{{ server.args | join(' ') }}</div>
+                {% endif %}
+            {% elif server.url %}
+                <div class="verity-detail-label">URL</div>
+                <div class="verity-detail-value" style="font-family: monospace; font-size: 0.85rem;">{{ server.url }}</div>
+            {% endif %}
+
+            {% if server.env %}
+            <div class="verity-detail-label">Environment</div>
+            <div class="verity-detail-value">
+                <div class="verity-code">{{ server.env | tojson(indent=2) }}</div>
+            </div>
+            {% endif %}
+
+            {% if server.auth_config %}
+            <div class="verity-detail-label">Auth Config</div>
+            <div class="verity-detail-value">
+                <div class="verity-code">{{ server.auth_config | tojson(indent=2) }}</div>
+                <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 4px;">
+                    Auth config is free-form JSONB — shape varies by transport. Secrets should be referenced
+                    here by env var name, not pasted in plaintext.
+                </div>
+            </div>
+            {% endif %}
+
+            <div class="verity-detail-label">Active</div>
+            <div class="verity-detail-value">{{ 'Yes' if server.active else 'No' }}</div>
+        </div>
+    </div>
+</div>
+
+
+<!-- ── TOOLS BOUND TO THIS SERVER ──────────────────────────── -->
+<div class="verity-section">
+    <h2 class="verity-section-title">Tools Bound to This Server ({{ tools|length }})</h2>
+
+    {% if tools %}
+    <table class="verity-table">
+        <thead>
+            <tr>
+                <th>Verity Tool</th>
+                <th>Remote Tool Name</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for t in tools %}
+            <tr class="clickable" onclick="window.location='/admin/tools/{{ t.name }}'">
+                <td>
+                    <a href="/admin/tools/{{ t.name }}" style="font-weight: 600;">{{ t.display_name }}</a>
+                    <div style="font-size: 0.7rem; color: var(--verity-text-light); font-family: monospace;">{{ t.name }}</div>
+                </td>
+                <td style="font-family: monospace; font-size: 0.85rem;">
+                    {% if t.mcp_tool_name %}{{ t.mcp_tool_name }}{% else %}<span style="color: var(--verity-text-light);">{{ t.name }}</span>{% endif %}
+                </td>
+                <td style="font-size: 0.85rem; color: var(--verity-text-light);">
+                    {{ t.description[:120] }}{% if t.description|length > 120 %}...{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="verity-empty">
+        <div class="verity-empty-message">No Verity tools are currently bound to this server.</div>
+        <div style="font-size: 0.85rem; color: var(--verity-text-light); margin-top: 8px;">
+            Register a tool with <code>transport='mcp_{{ server.transport }}'</code> and
+            <code>mcp_server_name='{{ server.name }}'</code> to route it through this server.
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+{% endblock %}
