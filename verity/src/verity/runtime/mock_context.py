@@ -6,6 +6,6 @@ module re-exports it so runtime-side code can do `from verity.runtime.mock_conte
 import MockContext` when that reads more naturally than reaching into contracts.
 """
 
-from verity.contracts.mock import MockContext, _is_tool_use_response  # noqa: F401
+from verity.contracts.mock import MockContext  # noqa: F401
 
 __all__ = ["MockContext"]

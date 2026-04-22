@@ -1,33 +1,28 @@
-"""MockContext — runtime mock control that crosses the caller→runtime boundary.
+"""MockContext — tool-level mock control passed from caller to runtime.
 
 MockContext is constructed by the caller (UW app, test runner, validation
-runner) and passed into the runtime's execute_* methods. It controls what
-gets mocked during the execution.
+runner) and passed into the runtime's execute_* methods. It lets the
+caller specify mock tool outputs for a live LLM run so the agent reasons
+against controlled tool data instead of hitting external systems.
 
-DESIGN PRINCIPLE:
-    Two independent dimensions, each independently controllable:
+LLM-level mocking (previously `MockContext.llm_responses`) was retired in
+Phase 3d. For deterministic no-LLM execution, use `FixtureEngine` instead
+(see `verity.runtime.fixture_backend`) — it's a separate engine, honestly
+marked `mock_mode=True` in the decision log, and doesn't pretend to be
+the real ExecutionEngine.
 
-    1. LLM CALLS:  Either all mocked (skip Claude) or all live.
-    2. TOOL CALLS:  Any combination mocked by name. Dict-keyed, not
-                    position-keyed. Works for N tools in any order,
-                    called any number of times.
-
-    These dimensions are orthogonal:
-    - All LLM mocked + all tools live      → test tool implementations
-    - All LLM live   + specific tools mock  → test prompts with controlled data
-    - All LLM mocked + all tools mocked     → pipeline testing, demo, UI dev
-    - All LLM live   + all tools live       → production (mock=None)
-    - Replay from prior execution           → audit, regression
-
-    When a MockContext is provided, the caller has EXPLICIT CONTROL.
-    DB-level mock flags (tool.mock_mode_enabled) are IGNORED — only
-    the MockContext's settings matter. DB flags only apply as defaults
-    when no MockContext is passed (mock=None).
+What MockContext covers today:
+  - tool_responses   — per-tool canned outputs, keyed by tool name. Tools
+                       NOT in this dict make real calls (unless
+                       mock_all_tools=True or the tool's DB
+                       mock_mode_enabled flag is set).
+  - mock_all_tools   — when True, ALL tools return their DB-registered
+                       `mock_responses` entry (one per tool). Specific
+                       entries in `tool_responses` still override.
+  - sub_agent_mocks  — per-sub-agent MockContexts (for FC-1 sub-agent
+                       delegation when that ships).
 
 USAGE:
-
-    # Skip Claude entirely, return pre-built final output
-    mock = MockContext(llm_responses=[{"risk_score": "Green"}])
 
     # Real Claude, mock specific tools (any number, by name)
     mock = MockContext(tool_responses={
@@ -39,15 +34,21 @@ USAGE:
     # Real Claude, ALL tools mocked from DB-registered responses
     mock = MockContext(mock_all_tools=True)
 
-    # Replay a prior execution exactly
+    # Partial replay from a prior execution — tool outputs only
+    # (LLM-level replay retired; use audit_rerun for governance narrative)
     mock = MockContext.from_decision_log(prior_decision)
 
     # Production — everything live
     result = await verity.execute_agent("triage_agent", context)
 
-Kept as @dataclass (not BaseModel) for Phase 1 — matches the current
-shape exactly. Will be promoted to BaseModel in Phase 4 when we need
-HTTP serialization over the wire.
+When a MockContext is provided, the caller has EXPLICIT CONTROL over
+which tools are mocked. DB-level mock flags (tool.mock_mode_enabled)
+are ignored in this mode — caller decides everything. DB flags only
+apply as defaults when `mock=None`.
+
+Kept as @dataclass (not BaseModel) to keep the current behavior exactly.
+Will be promoted to BaseModel if we ever need HTTP serialization of
+mock contexts across the wire.
 """
 
 from dataclasses import dataclass, field
@@ -56,26 +57,13 @@ from typing import Any, Optional
 
 @dataclass
 class MockContext:
-    """Controls what gets mocked during an execution.
+    """Controls tool-level mocking during an execution.
 
     Passed as an optional parameter to execute_agent(), execute_task(),
-    execute_pipeline(), or run_tool(). When None (the default),
-    everything runs live.
+    execute_pipeline(), or run_tool(). When None (the default), tools
+    fall back to their DB-registered `mock_mode_enabled` flag, which
+    defaults to off for production tools.
     """
-
-    # ── LLM MOCK ──────────────────────────────────────────────
-    # If set, each LLM call returns the next response from this list
-    # instead of calling Claude.
-    #
-    # For single-turn tasks: one entry (the final output).
-    # For multi-turn agents:
-    #   - Simple mode: one entry (final answer) → loop ends immediately
-    #   - Replay mode: multiple entries matching the original turn sequence
-    #
-    # Each entry is a dict. If it contains a "type": "tool_use" key,
-    # the execution engine treats it as Claude requesting a tool call.
-    # Otherwise, it's treated as a final text/JSON response.
-    llm_responses: Optional[list[dict[str, Any]]] = None
 
     # ── TOOL MOCK ─────────────────────────────────────────────
     # Per-tool mock responses. Key = tool name, value = response dict.
@@ -91,50 +79,15 @@ class MockContext:
     # Individual entries in tool_responses override this.
     mock_all_tools: bool = False
 
-    # ── SUB-AGENT MOCK (future) ───────────────────────────────
+    # ── SUB-AGENT MOCK (FC-1 groundwork) ──────────────────────
     # Per-sub-agent MockContexts. Key = agent name.
     # When an agent delegates to a sub-agent, the sub-agent's
     # execution uses this MockContext instead of the parent's.
     sub_agent_mocks: Optional[dict[str, "MockContext"]] = None
 
     # ── INTERNAL STATE (managed by the gateway) ───────────────
-    # Tracks which LLM response to return next (auto-incremented)
-    _llm_call_index: int = field(default=0, repr=False)
-    # Tracks per-tool call counts for list-based tool_responses
+    # Tracks per-tool call counts for list-based tool_responses.
     _tool_call_counts: dict[str, int] = field(default_factory=dict, repr=False)
-
-    @property
-    def has_llm_mock(self) -> bool:
-        """True if LLM calls should be mocked."""
-        return self.llm_responses is not None and len(self.llm_responses) > 0
-
-    @property
-    def is_simple_mock(self) -> bool:
-        """True if this is a simple 'skip LLM, return final output' mock.
-
-        Simple mock = one LLM response that is NOT a tool_use request.
-        The agentic loop should end immediately.
-        """
-        if not self.has_llm_mock:
-            return False
-        if len(self.llm_responses) == 1:
-            first = self.llm_responses[0]
-            # If it doesn't look like a tool_use, it's a final answer
-            return not _is_tool_use_response(first)
-        return False
-
-    def get_next_llm_response(self) -> Optional[dict]:
-        """Get the next mock LLM response (auto-advances the index).
-
-        Returns None if no more mock responses available (fall through to real call).
-        """
-        if not self.has_llm_mock:
-            return None
-        if self._llm_call_index >= len(self.llm_responses):
-            return None
-        response = self.llm_responses[self._llm_call_index]
-        self._llm_call_index += 1
-        return response
 
     def get_tool_response(self, tool_name: str) -> Optional[dict]:
         """Get mock response for a specific tool.
@@ -166,69 +119,33 @@ class MockContext:
         return None
 
     @classmethod
-    def from_decision_log(cls, decision, mock_llm: bool = True, mock_tools: bool = True) -> "MockContext":
-        """Build a MockContext from a prior execution's stored data.
+    def from_decision_log(cls, decision) -> "MockContext":
+        """Build a tool-only MockContext from a prior execution's stored tool calls.
 
-        Args:
-            decision: A DecisionLogDetail with message_history and tool_calls_made.
-            mock_llm: If True, mock LLM calls using stored responses.
-                      If False, LLM runs live (Claude called for real).
-            mock_tools: If True, mock tool calls using stored responses.
-                        If False, tools run live (real implementations called).
+        Rebuilds `tool_responses` from the decision's `tool_calls_made`,
+        keyed by tool name. If the same tool was called multiple times,
+        the responses are ordered in a list.
 
-        Common patterns:
-            # Full replay (audit reproducibility proof)
-            mock = MockContext.from_decision_log(prior)
-
-            # Audit re-test: live LLM with old tool data
-            # "Does the current prompt produce the same result with the same inputs?"
-            mock = MockContext.from_decision_log(prior, mock_llm=False, mock_tools=True)
-
-            # Test new tool implementation with original LLM behavior
-            mock = MockContext.from_decision_log(prior, mock_llm=True, mock_tools=False)
+        Previously this method also rebuilt LLM responses from the stored
+        message_history (via a `mock_llm` parameter). That capability was
+        retired in Phase 3d along with `MockContext.llm_responses`. For
+        deterministic no-LLM replay of a prior decision, use
+        `FixtureEngine` with a Fixture built from the decision's
+        output_json instead.
         """
-        # Build LLM responses from message_history if available
-        llm_responses = None
-        if mock_llm:
-            if hasattr(decision, 'message_history') and decision.message_history:
-                llm_responses = [
-                    msg.get("content", {})
-                    for msg in decision.message_history
-                    if msg.get("role") == "assistant"
-                ]
-            elif hasattr(decision, 'output_json') and decision.output_json:
-                llm_responses = [decision.output_json]
-
-        # Build tool responses from tool_calls_made
-        tool_responses = None
-        if mock_tools:
-            if hasattr(decision, 'tool_calls_made') and decision.tool_calls_made:
-                tool_responses = {}
-                for tc in decision.tool_calls_made:
-                    name = tc.get("tool_name", "")
-                    output = tc.get("output_data", {})
-                    if name in tool_responses:
-                        existing = tool_responses[name]
-                        if isinstance(existing, list):
-                            existing.append(output)
-                        else:
-                            tool_responses[name] = [existing, output]
+        tool_responses: Optional[dict] = None
+        if hasattr(decision, "tool_calls_made") and decision.tool_calls_made:
+            tool_responses = {}
+            for tc in decision.tool_calls_made:
+                name = tc.get("tool_name", "")
+                output = tc.get("output_data", {})
+                if name in tool_responses:
+                    existing = tool_responses[name]
+                    if isinstance(existing, list):
+                        existing.append(output)
                     else:
-                        tool_responses[name] = output
+                        tool_responses[name] = [existing, output]
+                else:
+                    tool_responses[name] = output
 
-        return cls(
-            llm_responses=llm_responses,
-            tool_responses=tool_responses,
-        )
-
-
-def _is_tool_use_response(response: dict) -> bool:
-    """Check if a mock LLM response represents a tool_use request."""
-    if isinstance(response, dict):
-        return response.get("type") == "tool_use"
-    if isinstance(response, list):
-        return any(
-            isinstance(block, dict) and block.get("type") == "tool_use"
-            for block in response
-        )
-    return False
+        return cls(tool_responses=tool_responses)

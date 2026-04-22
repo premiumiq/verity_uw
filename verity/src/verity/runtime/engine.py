@@ -1,22 +1,27 @@
-"""Verity Execution Engine — run agents, tasks, and tools with full governance.
+"""Verity Execution Engine — run agents and tasks with full governance.
 
 ARCHITECTURE:
-Every call to an external system (Claude API, tool implementation) passes
-through a gateway function. The gateway checks MockContext and either:
-- Returns a mock response (if mocking is active for this call)
-- Makes the real call (if no mock applies)
+This engine calls Claude's Messages API directly (anthropic.AsyncAnthropic)
+and runs the agentic loop in-process. Two gateways mediate external calls:
 
-This makes EVERYTHING testable and mockable:
-- LLM calls: gateway_llm_call()
-- Tool calls: gateway_tool_call()
+  - _gateway_llm_call: one Claude API call per turn. Transient errors
+    (429/500/502/503/529) retry with exponential backoff.
+  - _gateway_tool_call: one tool dispatch per Claude-requested tool use.
+    Checks MockContext.tool_responses first, then the tool's DB-registered
+    mock_mode_enabled flag, then dispatches the registered Python callable.
 
 EXECUTION MODES:
-1. Full live (no MockContext): LLM + tools all real
-2. Live LLM + mock tools: Real Claude reasoning, controlled tool data
-3. Full mock: Pre-built LLM output, no API calls at all
-4. Replay: Reproduce a prior execution from stored message_history
+  1. Fully live (mock=None)                      — LLM + tools both real
+  2. Live LLM + caller-supplied tool mocks       — MockContext(tool_responses={...})
+  3. Live LLM + all tools from DB mock registry — MockContext(mock_all_tools=True)
 
-All modes log decisions identically — the governance trail is the same.
+For deterministic no-LLM execution (demos, cheap tests), use the separate
+FixtureEngine in runtime/fixture_backend.py — it's not a mode of this
+engine. LLM-level mocking was retired in Phase 3d; see the FixtureEngine
+docstring for the replacement story.
+
+All modes write a DecisionLogCreate row with the same 31-column shape.
+mock_mode=True is set whenever any caller-supplied mocking was active.
 """
 
 import asyncio
@@ -86,26 +91,26 @@ class ExecutionEngine:
     async def _gateway_llm_call(
         self, api_params: dict, mock: Optional[MockContext]
     ) -> Any:
-        """Gateway for all LLM calls.
+        """Gateway for the single Claude API call this engine makes per turn.
 
-        If MockContext has a mock LLM response, returns it instead
-        of calling Claude. Otherwise makes the real async API call.
+        LLM-level mocking was retired in Phase 3d — there is no longer a
+        "canned LLM response" path in this engine. Callers that want
+        deterministic no-LLM execution use FixtureEngine, which is a
+        separate class entirely (see runtime/fixture_backend.py).
 
-        Uses AsyncAnthropic so the event loop stays free while
-        waiting for Claude's response (~5-15 seconds per call).
+        The `mock` parameter is still accepted and forwarded to
+        `_gateway_tool_call` for tool-level mocking. It has no effect on
+        the LLM call itself.
+
+        Uses AsyncAnthropic so the event loop stays free while waiting
+        for Claude's response (~5-15 seconds per call). Retries on
+        transient errors (429/500/502/503/529) with exponential backoff.
         """
-        if mock and mock.has_llm_mock:
-            next_response = mock.get_next_llm_response()
-            if next_response is not None:
-                return _build_mock_llm_response(next_response)
-
-        # No mock — make real Claude API call with retry + exponential backoff.
-        # Handles transient errors: 429 (rate limited), 529 (overloaded),
-        # 500 (server error), and network timeouts.
         if not self.client:
             raise RuntimeError(
-                "No Anthropic API key configured. Pass mock=MockContext(...) "
-                "to run without Claude, or set ANTHROPIC_API_KEY."
+                "No Anthropic API key configured. Set ANTHROPIC_API_KEY to run "
+                "via this engine, or use FixtureEngine (runtime/fixture_backend.py) "
+                "for deterministic no-LLM execution with pre-built fixtures."
             )
 
         max_retries = 3
@@ -268,11 +273,15 @@ class ExecutionEngine:
         stream: bool = False,
         execution_context_id: Optional[UUID] = None,
     ) -> ExecutionResult:
-        """Execute an agent with full governance and mock support."""
+        """Execute an agent: resolve config, assemble prompts, run the agentic loop.
+
+        `mock` controls tool-level mocking only (see MockContext).
+        LLM-level mocking was retired in Phase 3d — use FixtureEngine
+        for deterministic no-LLM execution.
+        """
         start_ms = _now_ms()
-        is_mock = mock is not None and mock.is_simple_mock
-        logger.info("Agent execution starting: %s (step=%s, mock=%s)",
-                     agent_name, step_name or "standalone", is_mock)
+        logger.info("Agent execution starting: %s (step=%s, tool_mocks=%s)",
+                     agent_name, step_name or "standalone", mock is not None)
         config = await self.registry.get_agent_config(agent_name)
         system_prompt, user_messages = _assemble_prompts(config.prompts, context)
         tools = _build_tool_definitions(config.tools)
@@ -282,39 +291,10 @@ class ExecutionEngine:
             total_input_tokens = 0
             total_output_tokens = 0
             tool_calls_made = []
-            # Track full message history for replay support
+            # Track full message history for audit / future replay tooling.
             message_history = []
 
-            # Check for simple mock (skip entire agentic loop)
-            if mock and mock.is_simple_mock:
-                output = mock.llm_responses[0]
-                mock._llm_call_index = 1  # Mark as consumed
-                duration_ms = _now_ms() - start_ms
-
-                log_result = await self._log_decision(
-                    entity_type=EntityType.AGENT, config=config, context=context,
-                    output=output, output_text=json.dumps(output, default=str)[:500],
-                    tool_calls_made=[], message_history=[],
-                    total_input_tokens=0, total_output_tokens=0,
-                    duration_ms=duration_ms, 
-                    channel=channel, pipeline_run_id=pipeline_run_id,
-                    parent_decision_id=parent_decision_id,
-                    decision_depth=decision_depth, step_name=step_name,
-                    status="complete", mock_mode=True,
-                    execution_context_id=execution_context_id,
-                )
-                return ExecutionResult(
-                    decision_log_id=log_result["decision_log_id"],
-                    entity_type="agent", entity_name=agent_name,
-                    version_label=config.version_label,
-                    output=output, output_summary=json.dumps(output, default=str)[:500],
-                    reasoning_text=output.get("reasoning", "") if isinstance(output, dict) else "",
-                    confidence_score=output.get("confidence") if isinstance(output, dict) else None,
-                    risk_factors=output.get("risk_factors") if isinstance(output, dict) else None,
-                    duration_ms=duration_ms, status="complete",
-                )
-
-            # Multi-turn loop (real or replay mock)
+            # Multi-turn agentic loop — Claude may request tools up to max_turns times.
             max_turns = 10
             response = None
             for turn in range(max_turns):
@@ -373,7 +353,10 @@ class ExecutionEngine:
             output_text = _extract_text(response)
             output = _try_parse_json(output_text)
             duration_ms = _now_ms() - start_ms
-            is_mocked = mock is not None and mock.has_llm_mock
+            # With LLM mocking removed, mock_mode in the log reflects
+            # "any form of caller-supplied mocking was active" — which
+            # today means tool_responses or mock_all_tools.
+            is_mocked = mock is not None
 
             log_result = await self._log_decision(
                 entity_type=EntityType.AGENT, config=config, context=context,
@@ -453,32 +436,9 @@ class ExecutionEngine:
         system_prompt, user_messages = _assemble_prompts(config.prompts, input_data)
 
         try:
-            # Check for mock (simple mock applies to tasks)
-            if mock and mock.has_llm_mock:
-                output = mock.get_next_llm_response() or {}
-                duration_ms = _now_ms() - start_ms
-
-                log_result = await self._log_decision(
-                    entity_type=EntityType.TASK, config=config, context=input_data,
-                    output=output, output_text=json.dumps(output, default=str)[:500],
-                    tool_calls_made=[], message_history=[],
-                    total_input_tokens=0, total_output_tokens=0,
-                    duration_ms=duration_ms, 
-                    channel=channel, pipeline_run_id=pipeline_run_id,
-                    parent_decision_id=parent_decision_id,
-                    decision_depth=decision_depth, step_name=step_name,
-                    status="complete", mock_mode=True,
-                    execution_context_id=execution_context_id,
-                )
-                return ExecutionResult(
-                    decision_log_id=log_result["decision_log_id"],
-                    entity_type="task", entity_name=task_name,
-                    version_label=config.version_label,
-                    output=output, output_summary=json.dumps(output, default=str)[:500],
-                    duration_ms=duration_ms, status="complete",
-                )
-
-            # Real execution
+            # Build messages — tasks are single-turn structured output via Claude.
+            # LLM-level mocking was retired in Phase 3d; use FixtureEngine for
+            # deterministic no-LLM task execution.
             messages = [{"role": "user", "content": msg} for msg in user_messages]
 
             # For tasks with output_schema in valid JSON Schema format,
@@ -503,7 +463,11 @@ class ExecutionEngine:
             )
 
             # ── LLM GATEWAY (async) ──
-            response = await self._gateway_llm_call(api_params, mock=None)  # mock already handled above
+            # `mock` is passed through for symmetry with run_agent, but has
+            # no effect: the gateway doesn't mock LLM calls after Phase 3d,
+            # and tasks use a synthetic `structured_output` tool (not a
+            # registered one) so tool-level mocking doesn't apply either.
+            response = await self._gateway_llm_call(api_params, mock=mock)
 
             # Extract output
             if tool_choice and response.content:
@@ -879,78 +843,6 @@ def _build_api_params(
             if key not in params:
                 params[key] = value
     return params
-
-
-def _build_mock_llm_response(mock_output) -> Any:
-    """Build a mock object that mimics a Claude API response.
-
-    Must have .content, .usage, and .stop_reason attributes.
-
-    DESIGN PRINCIPLE:
-    The mock system has two independent dimensions:
-      - LLM mocking: controlled by llm_responses list
-      - Tool mocking: controlled by tool_responses dict (keyed by tool name)
-
-    These are independent. You can mock all LLM calls, all tool calls,
-    any combination, or none — regardless of how many there are or what
-    order they occur in. The tool_responses dict catches tools by NAME,
-    not by position, so it works for any number of calls in any order.
-
-    For LLM mocking, this function must handle two response types:
-    1. Final answer: {"risk_score": "Green", ...}
-       → stop_reason="end_turn" — loop ends
-    2. Tool use request: {"tool_use": {"name": "...", "input": {...}}}
-       or multiple: {"tool_use": [{"name": "...", "input": {...}}, ...]}
-       → stop_reason="tool_use" — loop continues, tools get called
-
-    Type 2 is needed for replay mode (MockContext.from_decision_log)
-    where we reproduce the exact sequence of a prior execution.
-    For the common case (mode 2: live LLM + selective tool mock),
-    llm_responses is None and this function is never called.
-    """
-    class MockUsage:
-        input_tokens = 0
-        output_tokens = 0
-
-    class MockTextBlock:
-        def __init__(self, text):
-            self.type = "text"
-            self.text = text
-
-    class MockToolUseBlock:
-        def __init__(self, name, input_data, tool_id=None):
-            self.type = "tool_use"
-            self.name = name
-            self.input = input_data
-            self.id = tool_id or f"mock_{name}_{id(self)}"
-
-    class MockResponse:
-        def __init__(self, output):
-            self.usage = MockUsage()
-
-            if isinstance(output, dict) and "tool_use" in output:
-                tu = output["tool_use"]
-                if isinstance(tu, list):
-                    self.content = [
-                        MockToolUseBlock(t["name"], t.get("input", {}), t.get("id"))
-                        for t in tu
-                    ]
-                else:
-                    self.content = [MockToolUseBlock(
-                        tu["name"], tu.get("input", {}), tu.get("id"),
-                    )]
-                self.stop_reason = "tool_use"
-            elif isinstance(output, dict):
-                self.content = [MockTextBlock(json.dumps(output))]
-                self.stop_reason = "end_turn"
-            elif isinstance(output, str):
-                self.content = [MockTextBlock(output)]
-                self.stop_reason = "end_turn"
-            else:
-                self.content = [MockTextBlock(json.dumps(output, default=str))]
-                self.stop_reason = "end_turn"
-
-    return MockResponse(mock_output)
 
 
 def _serialize_content_blocks(content) -> list[dict]:
