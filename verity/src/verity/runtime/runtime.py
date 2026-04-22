@@ -18,6 +18,7 @@ from verity.governance.registry import Registry
 from verity.governance.testing_meta import Testing
 from verity.runtime.decisions_writer import DecisionsWriter
 from verity.runtime.engine import ExecutionEngine
+from verity.runtime.mcp_client import MCPClient
 from verity.runtime.pipeline import PipelineExecutor
 from verity.runtime.test_runner import TestRunner
 from verity.runtime.validation_runner import ValidationRunner
@@ -35,7 +36,10 @@ class Runtime:
 
     Runtime-plane capabilities exposed via its attributes:
       - decisions_writer   : log_decision() — one write per execution
-      - execution          : ExecutionEngine (agentic loop; swapped to Claude Agent SDK in Phase 3)
+      - mcp_client         : MCPClient — shared pool of MCP server connections for
+                             tools registered with transport='mcp_*' (Phase 4c)
+      - execution          : ExecutionEngine (agentic loop; holds the mcp_client
+                             so tool dispatch can route by transport)
       - pipeline_executor  : multi-step orchestrator with dependency resolution
       - test_runner        : execute test suites against entity versions
       - validation_runner  : run entity versions against ground truth datasets
@@ -52,6 +56,10 @@ class Runtime:
         self.db = db
         self.application = application
         self.decisions_writer = DecisionsWriter(db)
+        # One MCP connection pool per Runtime. Empty until a tool with
+        # transport='mcp_*' dispatches and the engine lazily opens the
+        # referenced mcp_server. Closed via Runtime.close() on shutdown.
+        self.mcp_client = MCPClient()
         # ExecutionEngine takes a decisions-shaped object — it only calls
         # `.log_decision(...)` on it, so DecisionsWriter is a drop-in replacement
         # for the legacy unified Decisions class.
@@ -60,6 +68,7 @@ class Runtime:
             decisions=self.decisions_writer,
             anthropic_api_key=anthropic_api_key,
             application=application,
+            mcp_client=self.mcp_client,
         )
         self.pipeline_executor = PipelineExecutor(
             registry=registry,
@@ -76,6 +85,10 @@ class Runtime:
             testing=testing,
             db=db,
         )
+
+    async def close(self) -> None:
+        """Release runtime-owned resources. Called by Verity.close()."""
+        await self.mcp_client.close_all()
 
 
 __all__ = ["Runtime"]

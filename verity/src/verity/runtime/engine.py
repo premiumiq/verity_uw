@@ -54,8 +54,12 @@ from verity.governance.registry import Registry
 # After Phase 2e, we no longer take the unified Decisions class here;
 # DecisionsWriter is all the engine needs (it only calls .log_decision()).
 from verity.runtime.decisions_writer import DecisionsWriter
+# MCP client for tools registered with transport='mcp_*'. Optional — the
+# engine only needs it when such tools are actually authorized for a run.
+from verity.runtime.mcp_client import MCPClient
 from verity.models.decision import DecisionLogCreate
 from verity.models.lifecycle import DeploymentChannel, EntityType, RunPurpose
+from verity.models.mcp import MCPServer
 from verity.models.prompt import PromptAssignment
 
 
@@ -71,6 +75,7 @@ class ExecutionEngine:
         anthropic_api_key: str,
         tool_implementations: Optional[dict[str, Callable]] = None,
         application: str = "default",
+        mcp_client: Optional[MCPClient] = None,
     ):
         self.registry = registry
         self.decisions = decisions
@@ -79,6 +84,10 @@ class ExecutionEngine:
         self.client = anthropic.AsyncAnthropic(api_key=anthropic_api_key) if anthropic_api_key else None
         self.tool_implementations = tool_implementations or {}
         self.application = application
+        # Optional MCP client for tools with transport='mcp_*'. If None and
+        # an MCP tool is dispatched, we return an error result rather than
+        # crash — the error is fed back to Claude and logged to the audit trail.
+        self.mcp_client = mcp_client
 
     def register_tool_implementation(self, tool_name: str, func: Callable):
         """Register a Python function as a tool implementation."""
@@ -171,6 +180,10 @@ class ExecutionEngine:
         control over which tools are mocked. The DB flag only applies
         as a default when no MockContext is present.
         """
+        # Look up the authorized tool definition once — we need it for
+        # transport routing, DB-mock-flag fallback, and better error messages.
+        tool_def = next((t for t in authorized_tools if t.name == tool_name), None)
+
         if mock:
             # Explicit mock control — caller decides what's mocked
 
@@ -203,7 +216,6 @@ class ExecutionEngine:
 
         else:
             # No MockContext — use DB flag as default behavior
-            tool_def = next((t for t in authorized_tools if t.name == tool_name), None)
             if tool_def and tool_def.mock_mode_enabled:
                 db_response = _get_db_mock_response(tool_name, authorized_tools)
                 return {
@@ -215,13 +227,53 @@ class ExecutionEngine:
                     "mock_source": "db_flag",
                 }
 
-        # Real tool implementation
-        return await self._execute_real_tool(tool_name, tool_input, call_order)
+        # Real tool implementation — dispatch based on tool_def.transport
+        return await self._execute_real_tool(tool_name, tool_input, call_order, tool_def)
 
     async def _execute_real_tool(
-        self, tool_name: str, tool_input: dict, call_order: int
+        self, tool_name: str, tool_input: dict, call_order: int, tool_def
     ) -> dict[str, Any]:
-        """Execute a real tool implementation."""
+        """Dispatch a real (non-mocked) tool call.
+
+        Routes based on tool_def.transport:
+          - 'python_inprocess' (default) — look up `tool_name` in the
+            runtime's tool_implementations dict and call the Python callable.
+          - 'mcp_stdio' | 'mcp_sse' | 'mcp_http' — forward through MCPClient
+            to the server identified by tool_def.mcp_server_name, addressing
+            the remote tool as tool_def.mcp_tool_name (falling back to
+            tool_name if the remote name matches Verity's name).
+
+        All error paths return a dict with `error=True` and an error message
+        in output_data — they never raise, because the caller (the agentic
+        loop) feeds the result back to Claude as a tool_result with
+        is_error=True and lets Claude decide how to proceed.
+        """
+        transport = getattr(tool_def, "transport", "python_inprocess")
+
+        if transport == "python_inprocess":
+            return await self._dispatch_python_tool(tool_name, tool_input, call_order)
+
+        if transport in ("mcp_stdio", "mcp_sse", "mcp_http"):
+            return await self._dispatch_mcp_tool(
+                tool_name, tool_input, call_order, tool_def,
+            )
+
+        return {
+            "tool_name": tool_name,
+            "call_order": call_order,
+            "input_data": tool_input,
+            "output_data": {
+                "error": f"Unknown tool transport {transport!r} on '{tool_name}'. "
+                         f"Expected python_inprocess, mcp_stdio, mcp_sse, or mcp_http."
+            },
+            "error": True,
+            "transport": transport,
+        }
+
+    async def _dispatch_python_tool(
+        self, tool_name: str, tool_input: dict, call_order: int,
+    ) -> dict[str, Any]:
+        """Current path: in-process Python callable via tool_implementations dict."""
         impl = self.tool_implementations.get(tool_name)
         if not impl:
             return {
@@ -230,9 +282,10 @@ class ExecutionEngine:
                 "input_data": tool_input,
                 "output_data": {"error": f"No implementation registered for tool '{tool_name}'"},
                 "error": True,
+                "transport": "python_inprocess",
             }
         try:
-            logger.info("Tool call starting: %s (call_order=%d)", tool_name, call_order)
+            logger.info("Tool call starting: %s (call_order=%d, transport=python)", tool_name, call_order)
             tool_start = _now_ms()
             if asyncio.iscoroutinefunction(impl):
                 result = await impl(**tool_input)
@@ -244,6 +297,7 @@ class ExecutionEngine:
                 "call_order": call_order,
                 "input_data": tool_input,
                 "output_data": result,
+                "transport": "python_inprocess",
             }
         except Exception as e:
             logger.error("Tool execution failed: %s", tool_name, exc_info=True)
@@ -253,7 +307,86 @@ class ExecutionEngine:
                 "input_data": tool_input,
                 "output_data": {"error": f"Tool execution failed: {str(e)}"},
                 "error": True,
+                "transport": "python_inprocess",
             }
+
+    async def _dispatch_mcp_tool(
+        self, tool_name: str, tool_input: dict, call_order: int, tool_def,
+    ) -> dict[str, Any]:
+        """New path (Phase 4c): dispatch via MCPClient to a registered MCP server.
+
+        On first use of a server, lazy-opens the connection (stdio subprocess
+        or sse/http endpoint per the mcp_server config). Subsequent calls
+        reuse the open session. Errors at any stage (no MCPClient configured,
+        server not registered, server fails to open, MCP call raises, MCP
+        returns isError=True) come back as error result dicts the agentic
+        loop can feed to Claude.
+        """
+        transport = tool_def.transport
+        server_name = getattr(tool_def, "mcp_server_name", None)
+
+        if self.mcp_client is None:
+            return _mcp_error(
+                tool_name, tool_input, call_order, transport, server_name,
+                "No MCPClient configured on this ExecutionEngine. Wire one "
+                "through the Runtime facade before dispatching MCP tools.",
+            )
+        if not server_name:
+            return _mcp_error(
+                tool_name, tool_input, call_order, transport, server_name,
+                f"Tool '{tool_name}' has transport={transport!r} but no "
+                "mcp_server_name on the ToolAuthorization. Check the tool's "
+                "registration in the mcp_server + tool tables.",
+            )
+
+        # Lazy-open the server on first use.
+        try:
+            if not self.mcp_client.is_open(server_name):
+                server_row = await self.registry.get_mcp_server_by_name(server_name)
+                if not server_row:
+                    return _mcp_error(
+                        tool_name, tool_input, call_order, transport, server_name,
+                        f"MCP server {server_name!r} is not registered in "
+                        "mcp_server. Register it before binding a tool to it.",
+                    )
+                await self.mcp_client.open(MCPServer(**server_row))
+        except Exception as e:
+            logger.error("MCP server open failed: %s", server_name, exc_info=True)
+            return _mcp_error(
+                tool_name, tool_input, call_order, transport, server_name,
+                f"Failed to open MCP server {server_name!r}: {e}",
+            )
+
+        remote_name = tool_def.mcp_tool_name or tool_name
+        try:
+            logger.info(
+                "Tool call starting: %s (call_order=%d, transport=%s, server=%s, remote=%s)",
+                tool_name, call_order, transport, server_name, remote_name,
+            )
+            tool_start = _now_ms()
+            mcp_result = await self.mcp_client.call_tool(
+                server_name, remote_name, tool_input,
+            )
+            logger.info(
+                "Tool call complete: %s (%dms, is_error=%s)",
+                tool_name, _now_ms() - tool_start, mcp_result.get("is_error", False),
+            )
+            return {
+                "tool_name": tool_name,
+                "call_order": call_order,
+                "input_data": tool_input,
+                "output_data": mcp_result,
+                "transport": transport,
+                "mcp_server_name": server_name,
+                "mcp_tool_name": remote_name,
+                "error": bool(mcp_result.get("is_error", False)),
+            }
+        except Exception as e:
+            logger.error("MCP tool dispatch failed: %s on %s", tool_name, server_name, exc_info=True)
+            return _mcp_error(
+                tool_name, tool_input, call_order, transport, server_name,
+                f"MCP tool execution failed: {e}",
+            )
 
     # ══════════════════════════════════════════════════════════
     # AGENT EXECUTION (multi-turn tool loop)
@@ -912,3 +1045,29 @@ def _is_valid_json_schema(properties: dict) -> bool:
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _mcp_error(
+    tool_name: str,
+    tool_input: dict,
+    call_order: int,
+    transport: str,
+    server_name: Optional[str],
+    message: str,
+) -> dict[str, Any]:
+    """Build an error-shaped tool_calls_made entry for an MCP dispatch failure.
+
+    Same shape as successful MCP results so the decision log and audit UI
+    don't need a special case for failed MCP calls. `error=True` and
+    `output_data.error` both signal the failure; `transport` and
+    `mcp_server_name` are preserved so the audit shows which server failed.
+    """
+    return {
+        "tool_name": tool_name,
+        "call_order": call_order,
+        "input_data": tool_input,
+        "output_data": {"error": message},
+        "error": True,
+        "transport": transport,
+        "mcp_server_name": server_name,
+    }

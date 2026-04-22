@@ -139,8 +139,13 @@ class Verity:
             self._connected = True
 
     async def close(self) -> None:
-        """Close the database connection pool."""
+        """Close runtime resources and the database connection pool.
+
+        Drains any open MCP server connections first (Phase 4c), then
+        closes the DB pool. Safe to call multiple times.
+        """
         if self._connected:
+            await self._rt.close()
             await self.db.close()
             self._connected = False
 
