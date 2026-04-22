@@ -23,6 +23,31 @@
 
 {% block content %}
 
+{# ── PARENT DECISION LINK (FC-1d) ──────────────────────────
+   When this decision is itself a sub-agent run (parent_decision_id
+   is set), surface a breadcrumb up to the parent's decision page
+   so auditors can walk the delegation tree upward. decision_depth
+   > 0 confirms we're inside a delegation chain. #}
+{% if decision.parent_decision_id %}
+<div style="margin-bottom: 16px; padding: 12px 16px; background: #faf4fb; border: 1px solid #ce93d8; border-radius: 6px; display: flex; align-items: center; gap: 12px;">
+    <span class="verity-badge" style="background: #f3e5f5; color: #6a1b9a; border: 1px solid #ce93d8;">
+        sub-agent run
+    </span>
+    <span style="font-size: 0.85rem; color: var(--verity-text);">
+        This decision was spawned by a parent agent's
+        <code>delegate_to_agent</code> call
+        {% if decision.decision_depth %}
+            (depth {{ decision.decision_depth }})
+        {% endif %}.
+    </span>
+    <a href="/admin/decisions/{{ decision.parent_decision_id }}"
+       style="margin-left: auto; font-size: 0.8rem; color: #6a1b9a; text-decoration: none; border: 1px solid #ce93d8; padding: 4px 10px; border-radius: 4px; background: white;">
+        ↑ View parent decision
+    </a>
+</div>
+{% endif %}
+
+
 <!-- ── ENTITY & EXECUTION INFO ────────────────────────────── -->
 <div class="verity-section">
     <h2 class="verity-section-title">Execution Summary</h2>
@@ -146,13 +171,18 @@
     {% for tc in decision.tool_calls_made %}
     {# ──────────────────────────────────────────────────────────
        Per-tool-call card. Shows which transport the call took
-       (in-process Python vs MCP) so the audit trail makes the
-       governance story visible at a glance. Fields transport,
-       mcp_server_name, mcp_tool_name were added in Phase 4c/FC-14;
-       older decisions missing them fall through to "in-process".
+       (in-process Python, MCP, or Verity built-in) so the audit
+       trail makes the governance story visible at a glance. Fields
+       transport, mcp_server_name, mcp_tool_name were added in
+       Phase 4c/FC-14; verity_builtin transport + sub_decision_log_id
+       were added in FC-1b for sub-agent delegation. Older decisions
+       missing transport fall through to "in-process".
     ── ────────────────────────────────────────────────────────── #}
     {% set tc_transport = tc.get('transport', 'python_inprocess') %}
     {% set tc_is_mcp = tc_transport.startswith('mcp_') %}
+    {% set tc_is_builtin = tc_transport == 'verity_builtin' %}
+    {% set tc_is_delegation = tc_is_builtin and tc.tool_name == 'delegate_to_agent' %}
+    {% set sub_id = tc.get('output_data', {}).get('sub_decision_log_id') if tc_is_delegation else None %}
     <div class="verity-card" style="margin-bottom: 8px;">
         <div style="font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
             <span>#{{ tc.call_order }} — {{ tc.tool_name }}</span>
@@ -166,6 +196,21 @@
                         → remote tool: <code>{{ tc.mcp_tool_name }}</code>
                     </span>
                 {% endif %}
+            {% elif tc_is_builtin %}
+                <span class="verity-badge" style="background: #f3e5f5; color: #6a1b9a; border: 1px solid #ce93d8;"
+                      title="Verity engine-internal meta-tool">
+                    {% if tc_is_delegation %}delegation{% else %}builtin{% endif %}
+                </span>
+                {% if tc_is_delegation and tc.get('output_data', {}).get('sub_entity_name') %}
+                    <span style="font-size: 0.75rem; color: var(--verity-text-light); font-weight: 400;">
+                        → <a href="/admin/agents/{{ tc.output_data.sub_entity_name }}" style="color: #6a1b9a;">
+                            {{ tc.output_data.sub_entity_name }}
+                        </a>
+                        {% if tc.output_data.get('sub_version_label') %}
+                            <code>v{{ tc.output_data.sub_version_label }}</code>
+                        {% endif %}
+                    </span>
+                {% endif %}
             {% else %}
                 <span class="verity-badge" style="background: #f5f5f5; color: #5f6368; border: 1px solid #dadce0;"
                       title="Dispatched in-process via registered Python callable">
@@ -174,6 +219,17 @@
             {% endif %}
             {% if tc.get('mock_mode') %}<span class="verity-badge verity-badge-draft">mock</span>{% endif %}
             {% if tc.get('error') %}<span class="verity-badge verity-badge-failed">error</span>{% endif %}
+
+            {# Drill-through to the sub-agent's own decision row — only
+               meaningful for delegate_to_agent calls that succeeded in
+               spawning a sub-run (sub_decision_log_id populated). #}
+            {% if sub_id %}
+                <a href="/admin/decisions/{{ sub_id }}"
+                   style="margin-left: auto; font-size: 0.75rem; font-weight: 500; color: #6a1b9a; text-decoration: none; border: 1px solid #ce93d8; padding: 2px 8px; border-radius: 4px; background: #faf4fb;"
+                   title="Open the sub-agent's decision log row">
+                    View sub-decision ↗
+                </a>
+            {% endif %}
         </div>
         <div style="font-size: 0.75rem; color: var(--verity-text-light); margin-bottom: 4px;">Input:</div>
         <div class="verity-code" style="margin-bottom: 8px;">{{ tc.input_data | tojson(indent=2) if tc.input_data else '—' }}</div>

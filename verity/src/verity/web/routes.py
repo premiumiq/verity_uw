@@ -184,7 +184,7 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
 
     @router.get("/agents/{agent_name}", response_class=HTMLResponse)
     async def agent_detail(request: Request, agent_name: str):
-        """Show full detail for one agent: versions, prompts, tools, model card."""
+        """Show full detail for one agent: versions, prompts, tools, model card, delegations."""
         await verity.ensure_connected()
 
         agent = await verity.registry.get_agent_by_name(agent_name)
@@ -197,6 +197,8 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
         tools = []
         model_cards = []
         validation = None
+        # Outbound delegations FROM this agent's champion version (FC-1d).
+        delegations_out: list[dict] = []
 
         if agent.get("current_champion_version_id"):
             champion_id = agent["current_champion_version_id"]
@@ -210,6 +212,17 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             model_cards = await verity.testing.list_model_cards("agent", champion_id)
             validation = await verity.testing.get_latest_validation("agent", champion_id)
 
+            # Outbound: what this champion version is authorized to delegate to.
+            delegations_out = await verity.registry.list_delegations_for_parent(
+                parent_agent_version_id=champion_id,
+            )
+
+        # Inbound: all delegations that target THIS agent, across any
+        # parent version. Useful for "which agents delegate to me?".
+        delegations_in = await verity.registry.list_delegations_to_agent(
+            agent_name=agent_name,
+        )
+
         return _render(templates, request, "agent_detail.html",
             active_page="agents",
             agent=agent,
@@ -218,6 +231,8 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             tools=tools,
             model_cards=model_cards,
             validation=validation,
+            delegations_out=delegations_out,
+            delegations_in=delegations_in,
         )
 
     # ── TASKS ─────────────────────────────────────────────────

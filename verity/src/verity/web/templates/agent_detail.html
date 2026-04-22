@@ -173,6 +173,138 @@
 </div>
 
 
+<!-- ── SUB-AGENT DELEGATIONS (FC-1) ────────────────────────── -->
+{#
+  Two views side-by-side:
+    Outbound — "this agent's champion version can delegate to these sub-agents"
+    Inbound  — "these parent agent versions can delegate to this agent"
+  Backed by agent_version_delegation. Outbound is shown only for the
+  current champion; inbound spans all parent versions that reference
+  this agent (by name or pinned to one of its versions).
+#}
+<div class="verity-section">
+    <h2 class="verity-section-title">Sub-Agent Delegation Authorizations</h2>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+
+        {# ── Outbound ────────────────────────────────────── #}
+        <div>
+            <h3 style="font-size: 0.95rem; margin: 0 0 8px 0; color: var(--verity-text-light);">
+                Can delegate to (from champion)
+            </h3>
+            {% if delegations_out %}
+            <table class="verity-table">
+                <thead>
+                    <tr>
+                        <th>Target</th>
+                        <th>Binding</th>
+                        <th>Authorized</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in delegations_out %}
+                    <tr class="clickable"
+                        onclick="window.location='/admin/agents/{{ d.effective_child_name }}'">
+                        <td>
+                            <a href="/admin/agents/{{ d.effective_child_name }}"
+                               style="font-weight: 600;">
+                                {{ d.effective_child_name }}
+                            </a>
+                            {% if d.rationale %}
+                            <div style="font-size: 0.75rem; color: var(--verity-text-light); margin-top: 2px;">
+                                {{ d.rationale[:140] }}{% if d.rationale|length > 140 %}...{% endif %}
+                            </div>
+                            {% endif %}
+                        </td>
+                        <td style="font-size: 0.8rem;">
+                            {% if d.is_version_pinned %}
+                                <span class="verity-badge" style="background: #fff3e0; color: #e65100; border: 1px solid #ffcc80;"
+                                      title="Pinned to a specific sub-agent version">
+                                    pinned{% if d.child_version_label %}: v{{ d.child_version_label }}{% endif %}
+                                </span>
+                            {% else %}
+                                <span class="verity-badge" style="background: #e6f4ea; color: #1e8e3e; border: 1px solid #a7d2b1;"
+                                      title="Delegation follows the target agent's current champion">
+                                    champion-tracking
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td>{{ '✓' if d.authorized else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="verity-empty" style="padding: 16px;">
+                <div style="font-size: 0.85rem; color: var(--verity-text-light);">
+                    {% if agent.current_champion_version_id %}
+                    Champion version has no authorized delegation targets.
+                    {% else %}
+                    No champion promoted yet — outbound delegations apply to the champion only.
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        {# ── Inbound ─────────────────────────────────────── #}
+        <div>
+            <h3 style="font-size: 0.95rem; margin: 0 0 8px 0; color: var(--verity-text-light);">
+                Delegated to by (all parent versions)
+            </h3>
+            {% if delegations_in %}
+            <table class="verity-table">
+                <thead>
+                    <tr>
+                        <th>Parent</th>
+                        <th>Binding</th>
+                        <th>Authorized</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in delegations_in %}
+                    <tr class="clickable"
+                        onclick="window.location='/admin/agents/{{ d.parent_agent_name }}'">
+                        <td>
+                            <a href="/admin/agents/{{ d.parent_agent_name }}"
+                               style="font-weight: 600;">
+                                {{ d.parent_agent_name }}
+                            </a>
+                            {% if d.parent_version_label %}
+                            <span style="font-size: 0.7rem; color: var(--verity-text-light);">
+                                v{{ d.parent_version_label }}
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td style="font-size: 0.8rem;">
+                            {% if d.child_agent_version_id %}
+                                <span class="verity-badge" style="background: #fff3e0; color: #e65100; border: 1px solid #ffcc80;">
+                                    pinned
+                                </span>
+                            {% else %}
+                                <span class="verity-badge" style="background: #e6f4ea; color: #1e8e3e; border: 1px solid #a7d2b1;">
+                                    champion-tracking
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td>{{ '✓' if d.authorized else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="verity-empty" style="padding: 16px;">
+                <div style="font-size: 0.85rem; color: var(--verity-text-light);">
+                    No agent is authorized to delegate to this one.
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+    </div>
+</div>
+
+
 <!-- ── VALIDATION STATUS ───────────────────────────────────── -->
 {% if validation %}
 <div class="verity-section">
