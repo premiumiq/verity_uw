@@ -403,8 +403,54 @@ CREATE TABLE entity_prompt_assignment (
 CREATE INDEX idx_epa_entity ON entity_prompt_assignment(entity_type, entity_version_id);
 
 
+-- ── MCP SERVERS ──────────────────────────────────────────────
+-- Registry of Model Context Protocol servers Verity can dispatch tools to.
+-- Each row represents one MCP server (stdio subprocess or remote endpoint);
+-- the tool table references this table via tool.mcp_server_name for tools
+-- whose transport is one of the mcp_* variants.
+--
+-- Added in Phase 4a / FC-14 (MCP tool integration).
+
+CREATE TABLE mcp_server (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name            VARCHAR(100) UNIQUE NOT NULL,
+    display_name    VARCHAR(200) NOT NULL,
+    description     TEXT,
+
+    -- Transport type.
+    --   'stdio' — spawn a subprocess (command + args); speak MCP over stdin/stdout
+    --   'sse'   — connect to an SSE endpoint at `url`
+    --   'http'  — call a JSON-RPC HTTP endpoint at `url`
+    transport       VARCHAR(50) NOT NULL,
+
+    -- stdio transport: how to launch the server. Ignored for sse/http.
+    command         VARCHAR(500),
+    args            TEXT[] DEFAULT '{}',
+
+    -- sse/http transport: where to reach the server. Ignored for stdio.
+    url             VARCHAR(500),
+
+    -- Environment variables passed to the subprocess (stdio) or extra
+    -- request headers (sse/http). JSONB because values may be structured.
+    env             JSONB NOT NULL DEFAULT '{}',
+
+    -- Auth config (API keys, bearer tokens, OAuth client IDs, etc).
+    -- Kept as JSONB so we can evolve without schema changes.
+    auth_config     JSONB NOT NULL DEFAULT '{}',
+
+    active          BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_mcp_server_name ON mcp_server(name);
+
+
 -- ── TOOLS ────────────────────────────────────────────────────
--- Callable Python functions registered with governed descriptions.
+-- Callable actions registered with governed descriptions. A tool is
+-- either dispatched in-process as a registered Python callable
+-- (transport='python_inprocess') or forwarded to an MCP server
+-- (transport='mcp_*', mcp_server_name points at mcp_server.name).
 
 CREATE TABLE tool (
     id                          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -421,6 +467,26 @@ CREATE TABLE tool (
     input_schema                JSONB NOT NULL,
     output_schema               JSONB NOT NULL,
 
+    -- Dispatch transport. See mcp_server above for the MCP values.
+    --   'python_inprocess' — implementation_path names a Python callable the
+    --                        runtime dispatches directly (current default).
+    --   'mcp_stdio' | 'mcp_sse' | 'mcp_http' — runtime forwards the call
+    --                        through an MCP client to the server identified
+    --                        by mcp_server_name, addressing the remote tool
+    --                        as mcp_tool_name.
+    transport                   VARCHAR(50) NOT NULL DEFAULT 'python_inprocess',
+
+    -- Links this tool to an mcp_server row when transport is an mcp_* variant.
+    -- NULL for python_inprocess tools.
+    mcp_server_name             VARCHAR(100) REFERENCES mcp_server(name),
+
+    -- The tool's name on the MCP server (may differ from Verity's `name`,
+    -- which must be globally unique in the registry).
+    mcp_tool_name               VARCHAR(200),
+
+    -- For python_inprocess tools: dotted path of the registered callable
+    -- (documentation / debugging only; runtime looks up by `name` in
+    -- tool_implementations). For mcp_* tools: optional descriptor.
     implementation_path         VARCHAR(500) NOT NULL,
 
     mock_mode_enabled           BOOLEAN DEFAULT TRUE,

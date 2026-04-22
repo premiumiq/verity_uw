@@ -98,6 +98,9 @@ class Registry:
                 description=t["description"],
                 input_schema=t["input_schema"],
                 output_schema=t["output_schema"],
+                transport=t.get("transport", "python_inprocess"),
+                mcp_server_name=t.get("mcp_server_name"),
+                mcp_tool_name=t.get("mcp_tool_name"),
                 implementation_path=t["implementation_path"],
                 mock_mode_enabled=t["mock_mode_enabled"],
                 mock_response_key=t.get("mock_response_key"),
@@ -191,6 +194,9 @@ class Registry:
                 description=t["description"],
                 input_schema=t["input_schema"],
                 output_schema=t["output_schema"],
+                transport=t.get("transport", "python_inprocess"),
+                mcp_server_name=t.get("mcp_server_name"),
+                mcp_tool_name=t.get("mcp_tool_name"),
                 implementation_path=t["implementation_path"],
                 mock_mode_enabled=t["mock_mode_enabled"],
                 mock_response_key=t.get("mock_response_key"),
@@ -278,9 +284,53 @@ class Registry:
         return await self.db.execute_returning("insert_entity_prompt_assignment", params)
 
     async def register_tool(self, **kwargs) -> dict:
-        """Register a tool."""
+        """Register a tool.
+
+        New dispatch columns (Phase 4a / FC-14) have sensible defaults so
+        existing Python-in-process tool registrations don't need to pass
+        them explicitly:
+          - transport defaults to 'python_inprocess'
+          - mcp_server_name / mcp_tool_name default to None (NULL in DB)
+        MCP-sourced tools pass transport='mcp_stdio' | 'mcp_sse' | 'mcp_http'
+        and mcp_server_name to bind the tool to a registered mcp_server row.
+        """
+        kwargs.setdefault("transport", "python_inprocess")
+        kwargs.setdefault("mcp_server_name", None)
+        kwargs.setdefault("mcp_tool_name", None)
         params = _prepare_json_params(kwargs, json_fields=["input_schema", "output_schema"])
         return await self.db.execute_returning("insert_tool", params)
+
+    # ── MCP SERVERS (Phase 4a groundwork) ──────────────────────
+
+    async def register_mcp_server(self, **kwargs) -> dict:
+        """Register an MCP server. Used in FC-14b+ when wiring actual servers.
+
+        Required kwargs: name, display_name, transport.
+        Transport-dependent kwargs:
+          - transport='stdio': command (required), args (optional list[str])
+          - transport='sse' | 'http': url (required)
+        Optional: env (dict), auth_config (dict), description, active.
+        """
+        kwargs.setdefault("description", None)
+        kwargs.setdefault("command", None)
+        kwargs.setdefault("args", [])
+        kwargs.setdefault("url", None)
+        kwargs.setdefault("env", {})
+        kwargs.setdefault("auth_config", {})
+        kwargs.setdefault("active", True)
+        params = _prepare_json_params(kwargs, json_fields=["env", "auth_config"])
+        return await self.db.execute_returning("insert_mcp_server", params)
+
+    async def list_mcp_servers(self) -> list[dict]:
+        """All active MCP servers registered with Verity."""
+        return await self.db.fetch_all("list_mcp_servers")
+
+    async def get_mcp_server_by_name(self, mcp_server_name: str) -> Optional[dict]:
+        """Look up one MCP server by name (runtime uses this during dispatch)."""
+        return await self.db.fetch_one(
+            "get_mcp_server_by_name",
+            {"mcp_server_name": mcp_server_name},
+        )
 
     async def authorize_agent_tool(self, **kwargs) -> dict:
         """Authorize a tool for an agent version."""

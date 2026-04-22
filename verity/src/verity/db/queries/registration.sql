@@ -113,13 +113,29 @@ RETURNING id;
 -- name: insert_tool
 INSERT INTO tool (
     name, display_name, description, input_schema, output_schema,
+    transport, mcp_server_name, mcp_tool_name,
     implementation_path, mock_mode_enabled, mock_response_key,
     data_classification_max, is_write_operation, requires_confirmation, tags
 )
 VALUES (
     %(name)s, %(display_name)s, %(description)s, %(input_schema)s, %(output_schema)s,
+    %(transport)s, %(mcp_server_name)s, %(mcp_tool_name)s,
     %(implementation_path)s, %(mock_mode_enabled)s, %(mock_response_key)s,
     %(data_classification_max)s, %(is_write_operation)s, %(requires_confirmation)s, %(tags)s
+)
+RETURNING id, created_at;
+
+
+-- name: insert_mcp_server
+-- Register an MCP server. Used in FC-14b+ when wiring actual MCP servers;
+-- Phase 4a just defines the insert.
+INSERT INTO mcp_server (
+    name, display_name, description, transport,
+    command, args, url, env, auth_config, active
+)
+VALUES (
+    %(name)s, %(display_name)s, %(description)s, %(transport)s,
+    %(command)s, %(args)s, %(url)s, %(env)s, %(auth_config)s, %(active)s
 )
 RETURNING id, created_at;
 

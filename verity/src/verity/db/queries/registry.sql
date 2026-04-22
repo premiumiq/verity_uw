@@ -206,6 +206,9 @@ SELECT
     t.description,
     t.input_schema,
     t.output_schema,
+    t.transport,
+    t.mcp_server_name,
+    t.mcp_tool_name,
     t.implementation_path,
     t.mock_mode_enabled,
     t.mock_response_key,
@@ -231,6 +234,9 @@ SELECT
     t.description,
     t.input_schema,
     t.output_schema,
+    t.transport,
+    t.mcp_server_name,
+    t.mcp_tool_name,
     t.implementation_path,
     t.mock_mode_enabled,
     t.mock_response_key,
@@ -242,6 +248,17 @@ JOIN tool t ON t.id = tvt.tool_id
 WHERE tvt.task_version_id = %(entity_version_id)s
   AND tvt.authorized = TRUE
 ORDER BY t.name;
+
+
+-- name: list_mcp_servers
+-- All registered MCP servers (governance UI, runtime startup).
+SELECT * FROM mcp_server WHERE active = TRUE ORDER BY name;
+
+
+-- name: get_mcp_server_by_name
+-- Fetch one MCP server by name (for runtime dispatch — hydrate the
+-- connection config referenced by tool.mcp_server_name).
+SELECT * FROM mcp_server WHERE name = %(mcp_server_name)s;
 
 
 -- name: get_task_champion

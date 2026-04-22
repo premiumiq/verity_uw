@@ -18,13 +18,25 @@ from verity.contracts.tool import ToolAuthorization  # noqa: F401
 
 
 class Tool(BaseModel):
-    """Tool registry row — the canonical definition of a callable tool."""
+    """Tool registry row — the canonical definition of a callable tool.
+
+    A tool is either dispatched as a registered Python callable
+    (transport='python_inprocess') or forwarded to an MCP server
+    (transport='mcp_stdio' / 'mcp_sse' / 'mcp_http', with mcp_server_name
+    pointing at an mcp_server row).
+    """
     id: UUID
     name: str
     display_name: str
     description: str
     input_schema: dict[str, Any]
     output_schema: dict[str, Any]
+
+    # Dispatch transport. Added in Phase 4a / FC-14.
+    transport: str = "python_inprocess"
+    mcp_server_name: Optional[str] = None
+    mcp_tool_name: Optional[str] = None
+
     implementation_path: str
     mock_mode_enabled: bool = True
     mock_response_key: Optional[str] = None
