@@ -277,8 +277,15 @@ class VerityAPI:
     ) -> dict:
         """Idempotent — if the app already exists, return it; else register.
 
+        Always returns the full application row (id, name, display_name,
+        description, created_at). The POST response itself only carries
+        `id` and `created_at` (from the SQL RETURNING clause), so after
+        a fresh register we re-fetch via GET so callers see a uniform
+        shape regardless of which branch ran.
+
         Default name is the VerityAPI's configured application
-        (`ds_workbench` unless overridden at construction)."""
+        (`ds_workbench` unless overridden at construction).
+        """
         name = name or self.application
         display_name = display_name or name.replace("_", " ").title()
         try:
@@ -286,7 +293,8 @@ class VerityAPI:
         except VerityAPIError as exc:
             if exc.status != 404:
                 raise
-            return self.register_application(name, display_name, description)
+            self.register_application(name, display_name, description)
+            return self.get_application(name)
 
     def unregister_application(self, name: Optional[str] = None) -> dict:
         name = name or self.application
