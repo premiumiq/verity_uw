@@ -24,7 +24,6 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any, AsyncGenerator, Callable, Optional
 from uuid import UUID
 
@@ -32,52 +31,21 @@ import anthropic
 
 logger = logging.getLogger(__name__)
 
+# Result types (ExecutionResult, ExecutionEvent, ExecutionEventType) live in
+# verity.contracts.decision as of Phase 1 of the Registry/Runtime split.
+# They are re-exported here unchanged so any existing `from verity.core.execution
+# import ExecutionResult` keeps working.
+from verity.contracts.decision import (  # noqa: F401
+    ExecutionEvent,
+    ExecutionEventType,
+    ExecutionResult,
+)
 from verity.core.decisions import Decisions
 from verity.core.mock_context import MockContext
 from verity.core.registry import Registry
 from verity.models.decision import DecisionLogCreate
 from verity.models.lifecycle import DeploymentChannel, EntityType, RunPurpose
 from verity.models.prompt import PromptAssignment
-
-
-# ── RESULT TYPES ──────────────────────────────────────────────
-
-@dataclass
-class ExecutionResult:
-    """Result of an agent, task, or tool execution."""
-    decision_log_id: UUID
-    entity_type: str          # "agent", "task", or "tool"
-    entity_name: str
-    version_label: str
-    output: dict[str, Any]
-    output_summary: str = ""
-    reasoning_text: str = ""
-    confidence_score: Optional[float] = None
-    risk_factors: Optional[dict[str, Any]] = None
-    tool_calls: list[dict[str, Any]] = field(default_factory=list)
-    input_tokens: int = 0
-    output_tokens: int = 0
-    duration_ms: int = 0
-    status: str = "complete"
-    error_message: Optional[str] = None
-
-
-class ExecutionEventType(str, Enum):
-    """Event types for streaming execution."""
-    STARTED = "started"
-    TOOL_CALL_START = "tool_call_start"
-    TOOL_CALL_RESULT = "tool_call_result"
-    TEXT_DELTA = "text_delta"
-    COMPLETE = "complete"
-    ERROR = "error"
-
-
-@dataclass
-class ExecutionEvent:
-    """An event emitted during streaming execution."""
-    event_type: ExecutionEventType
-    entity_name: str
-    data: dict[str, Any] = field(default_factory=dict)
 
 
 # ── EXECUTION ENGINE ──────────────────────────────────────────

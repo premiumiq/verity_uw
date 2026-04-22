@@ -1,113 +1,47 @@
-"""Lifecycle enums and approval models."""
+"""Lifecycle: governance-internal state machine + approval models.
+
+The shared enums (LifecycleState, DeploymentChannel, etc.) were moved to
+verity.contracts.enums as of Phase 1 of the Registry/Runtime split. They
+are re-exported here for backward compatibility — any existing code that
+did `from verity.models.lifecycle import EntityType` keeps working and
+resolves to the exact same class object.
+
+What stays here (governance-internal, not re-exported from contracts):
+- PromotionRequest — the lifecycle promotion request Pydantic model
+- ApprovalRecord  — the stored approval record read model
+- VALID_TRANSITIONS — the 7-state machine's transition table
+- STATE_TO_CHANNEL — mapping of lifecycle_state → default deployment channel
+"""
 
 from datetime import datetime
-from enum import Enum
 from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel
 
-
-class LifecycleState(str, Enum):
-    DRAFT = "draft"
-    CANDIDATE = "candidate"
-    STAGING = "staging"
-    SHADOW = "shadow"
-    CHALLENGER = "challenger"
-    CHAMPION = "champion"
-    DEPRECATED = "deprecated"
-
-
-class DeploymentChannel(str, Enum):
-    DEVELOPMENT = "development"
-    STAGING = "staging"
-    SHADOW = "shadow"
-    EVALUATION = "evaluation"
-    PRODUCTION = "production"
-
-
-class MaterialityTier(str, Enum):
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
+# Re-export enums from contracts for backward compatibility.
+# These imports make `from verity.models.lifecycle import EntityType` work.
+from verity.contracts.enums import (  # noqa: F401
+    ApiRole,
+    CapabilityType,
+    DeploymentChannel,
+    EntityType,
+    GovernanceTier,
+    GtAnnotatorType,
+    GtDatasetStatus,
+    GtQualityTier,
+    GtSourceType,
+    LifecycleState,
+    MaterialityTier,
+    MetricType,
+    RunPurpose,
+)
 
 
-class CapabilityType(str, Enum):
-    CLASSIFICATION = "classification"
-    EXTRACTION = "extraction"
-    GENERATION = "generation"
-    SUMMARISATION = "summarisation"
-    MATCHING = "matching"
-    VALIDATION = "validation"
+# ── GOVERNANCE-INTERNAL MACHINE STATE ─────────────────────────
 
-
-class EntityType(str, Enum):
-    AGENT = "agent"
-    TASK = "task"
-    PROMPT = "prompt"
-    PIPELINE = "pipeline"
-    TOOL = "tool"
-
-
-class GovernanceTier(str, Enum):
-    BEHAVIOURAL = "behavioural"
-    CONTEXTUAL = "contextual"
-    FORMATTING = "formatting"
-
-
-class ApiRole(str, Enum):
-    SYSTEM = "system"
-    USER = "user"
-    ASSISTANT_PREFILL = "assistant_prefill"
-
-
-class MetricType(str, Enum):
-    EXACT_MATCH = "exact_match"
-    SCHEMA_VALID = "schema_valid"
-    FIELD_ACCURACY = "field_accuracy"
-    CLASSIFICATION_F1 = "classification_f1"
-    SEMANTIC_SIMILARITY = "semantic_similarity"
-    HUMAN_RUBRIC = "human_rubric"
-
-
-class RunPurpose(str, Enum):
-    """Why an execution happened. Independent of channel and mock_mode."""
-    PRODUCTION = "production"       # Normal business execution
-    TEST = "test"                   # Test suite run
-    VALIDATION = "validation"       # Ground truth validation
-    AUDIT_RERUN = "audit_rerun"     # Historical reproduction
-
-
-class GtDatasetStatus(str, Enum):
-    """Ground truth dataset lifecycle status."""
-    COLLECTING = "collecting"
-    LABELING = "labeling"
-    ADJUDICATING = "adjudicating"
-    READY = "ready"
-    DEPRECATED = "deprecated"
-
-
-class GtQualityTier(str, Enum):
-    """Ground truth quality classification."""
-    SILVER = "silver"   # Single annotator, no independent review
-    GOLD = "gold"       # Multi-annotator with IAA check
-
-
-class GtSourceType(str, Enum):
-    """Ground truth record source type."""
-    DOCUMENT = "document"
-    SUBMISSION = "submission"
-    SYNTHETIC = "synthetic"
-
-
-class GtAnnotatorType(str, Enum):
-    """Ground truth annotator type."""
-    HUMAN_SME = "human_sme"
-    LLM_JUDGE = "llm_judge"
-    ADJUDICATOR = "adjudicator"
-
-
-# Valid lifecycle transitions per the 7-state model
+# Valid lifecycle transitions per the 7-state model.
+# This is governance-internal — the runtime never reads this.
 VALID_TRANSITIONS: dict[LifecycleState, list[LifecycleState]] = {
     LifecycleState.DRAFT: [LifecycleState.CANDIDATE],
     LifecycleState.CANDIDATE: [LifecycleState.STAGING, LifecycleState.CHAMPION, LifecycleState.DEPRECATED],
@@ -118,7 +52,8 @@ VALID_TRANSITIONS: dict[LifecycleState, list[LifecycleState]] = {
     LifecycleState.DEPRECATED: [],
 }
 
-# Channel mapping for each lifecycle state
+# Channel mapping for each lifecycle state — used by the governance plane
+# when promoting a version to set its deployment_channel correctly.
 STATE_TO_CHANNEL: dict[LifecycleState, DeploymentChannel] = {
     LifecycleState.DRAFT: DeploymentChannel.DEVELOPMENT,
     LifecycleState.CANDIDATE: DeploymentChannel.DEVELOPMENT,
@@ -131,6 +66,12 @@ STATE_TO_CHANNEL: dict[LifecycleState, DeploymentChannel] = {
 
 
 class PromotionRequest(BaseModel):
+    """Input to the governance plane's promote() method.
+
+    Carries the target state plus the evidence-review flags an approver
+    asserts at promotion time. The gate check combines these with the
+    version's stored test/validation flags to decide whether to proceed.
+    """
     target_state: LifecycleState
     approver_name: str
     approver_role: Optional[str] = None
@@ -145,6 +86,7 @@ class PromotionRequest(BaseModel):
 
 
 class ApprovalRecord(BaseModel):
+    """Stored approval record for a lifecycle promotion."""
     id: UUID
     entity_type: EntityType
     entity_version_id: UUID

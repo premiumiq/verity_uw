@@ -1,7 +1,16 @@
-"""Prompt and PromptVersion models."""
+"""Prompt and PromptVersion models.
+
+PromptAssignment was moved to verity.contracts.prompt as of Phase 1 of
+the Registry/Runtime split. It is re-exported here for backward
+compatibility.
+
+What stays here (governance-internal DB read shapes):
+- Prompt — the prompt header row
+- PromptVersion — a versioned prompt definition with content and lifecycle
+"""
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -13,8 +22,12 @@ from verity.models.lifecycle import (
     LifecycleState,
 )
 
+# Re-export boundary model from contracts for backward compatibility.
+from verity.contracts.prompt import PromptAssignment  # noqa: F401
+
 
 class Prompt(BaseModel):
+    """Prompt header — one row per named prompt (N versions reference it)."""
     id: UUID
     name: str
     display_name: Optional[str] = None
@@ -25,6 +38,7 @@ class Prompt(BaseModel):
 
 
 class PromptVersion(BaseModel):
+    """One versioned prompt: content + governance metadata + lifecycle state."""
     id: UUID
     prompt_id: UUID
     # 3-part versioning — consistent with agent_version and task_version
@@ -47,25 +61,6 @@ class PromptVersion(BaseModel):
     valid_to: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
-    # Joined fields
+    # Joined fields (populated by list/detail queries, not in the DB row)
     prompt_name: Optional[str] = None
     prompt_description: Optional[str] = None
-
-
-class PromptAssignment(BaseModel):
-    """A prompt version assigned to an agent_version or task_version."""
-    assignment_id: Optional[UUID] = None
-    prompt_version_id: UUID
-    prompt_name: str
-    prompt_description: Optional[str] = None
-    version_number: int = 0  # Legacy — kept for backward compat with get_entity_prompts query
-    prompt_version_number: Optional[int] = None
-    version_label: Optional[str] = None
-    content: str
-    template_variables: list[str] = []
-    api_role: ApiRole
-    governance_tier: GovernanceTier
-    execution_order: int = 1
-    is_required: bool = True
-    condition_logic: Optional[dict[str, Any]] = None
-    lifecycle_state: Optional[LifecycleState] = None

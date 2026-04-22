@@ -1,4 +1,15 @@
-"""Decision log and override models."""
+"""Decision log and override models.
+
+DecisionLogCreate was moved to verity.contracts.decision as of Phase 1 of
+the Registry/Runtime split. It is re-exported here for backward compatibility.
+
+What stays here (governance-internal DB read shapes):
+- DecisionLog — list-view row for the decisions page
+- DecisionLogDetail — full detail row (with I/O data, message history)
+- OverrideLogCreate — write input for record_override()
+- OverrideLog — stored override read row
+- AuditTrailEntry — one step in a pipeline run's audit trail
+"""
 
 from datetime import datetime
 from typing import Any, Optional
@@ -8,49 +19,8 @@ from pydantic import BaseModel
 
 from verity.models.lifecycle import DeploymentChannel, EntityType, RunPurpose
 
-
-class DecisionLogCreate(BaseModel):
-    """Input for logging a decision.
-
-    Business context is linked via execution_context_id, not direct
-    business keys. The consuming app registers a context with
-    context_ref="submission:SUB-001" and passes the execution_context_id.
-    Verity never knows what a "submission" is.
-    """
-    entity_type: EntityType
-    entity_version_id: UUID
-    prompt_version_ids: list[UUID] = []
-    inference_config_snapshot: dict[str, Any]
-    channel: DeploymentChannel = DeploymentChannel.PRODUCTION
-    mock_mode: bool = False
-    pipeline_run_id: Optional[UUID] = None
-    parent_decision_id: Optional[UUID] = None
-    decision_depth: int = 0
-    step_name: Optional[str] = None
-    input_summary: Optional[str] = None
-    input_json: Optional[dict[str, Any]] = None
-    output_json: Optional[dict[str, Any]] = None
-    output_summary: Optional[str] = None
-    reasoning_text: Optional[str] = None
-    # risk_factors is typed as Any because Claude returns a list of dicts
-    # like [{"factor": "...", "severity": "..."}], not a single dict.
-    # The value gets JSON-serialized into a JSONB column either way.
-    risk_factors: Optional[Any] = None
-    confidence_score: Optional[float] = None
-    low_confidence_flag: bool = False
-    model_used: Optional[str] = None
-    input_tokens: Optional[int] = None
-    output_tokens: Optional[int] = None
-    duration_ms: Optional[int] = None
-    tool_calls_made: Optional[list[dict[str, Any]]] = None
-    message_history: Optional[list[dict[str, Any]]] = None
-    application: str = "default"
-    run_purpose: RunPurpose = RunPurpose.PRODUCTION
-    reproduced_from_decision_id: Optional[UUID] = None
-    execution_context_id: Optional[UUID] = None
-    hitl_required: bool = False
-    status: str = "complete"
-    error_message: Optional[str] = None
+# Re-export boundary model from contracts for backward compatibility.
+from verity.contracts.decision import DecisionLogCreate  # noqa: F401
 
 
 class DecisionLog(BaseModel):
@@ -129,6 +99,7 @@ class OverrideLogCreate(BaseModel):
 
 
 class OverrideLog(BaseModel):
+    """Stored override read row."""
     id: UUID
     decision_log_id: UUID
     entity_type: EntityType

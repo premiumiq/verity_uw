@@ -1,46 +1,27 @@
-"""Inference configuration models."""
+"""Inference configuration models.
 
-from datetime import datetime
+InferenceConfig and InferenceConfigSnapshot were moved to
+verity.contracts.inference as of Phase 1 of the Registry/Runtime split.
+They are re-exported here for backward compatibility.
+
+What stays here (governance-internal):
+- InferenceConfigCreate — the write-path input used by register_inference_config().
+"""
+
 from typing import Any, Optional
-from uuid import UUID
 
 from pydantic import BaseModel
 
-
-class InferenceConfig(BaseModel):
-    id: UUID
-    name: str
-    description: str
-    intended_use: str
-    model_name: str
-    temperature: Optional[float] = None
-    max_tokens: Optional[int] = None
-    top_p: Optional[float] = None
-    top_k: Optional[int] = None
-    stop_sequences: Optional[list[str]] = None
-    extended_params: dict[str, Any] = {}
-    active: bool = True
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+# Re-export boundary models from contracts for backward compatibility.
+from verity.contracts.inference import InferenceConfig, InferenceConfigSnapshot  # noqa: F401
 
 
 class InferenceConfigCreate(BaseModel):
+    """Input to register_inference_config() — the create shape, no id/timestamps."""
     name: str
     description: str
     intended_use: str
     model_name: str = "claude-sonnet-4-20250514"
-    temperature: Optional[float] = None
-    max_tokens: Optional[int] = None
-    top_p: Optional[float] = None
-    top_k: Optional[int] = None
-    stop_sequences: Optional[list[str]] = None
-    extended_params: dict[str, Any] = {}
-
-
-class InferenceConfigSnapshot(BaseModel):
-    """Stored with every decision log — captures exact params at execution time."""
-    config_name: str
-    model_name: str
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
     top_p: Optional[float] = None

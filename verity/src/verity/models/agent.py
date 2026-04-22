@@ -1,4 +1,12 @@
-"""Agent and AgentVersion models."""
+"""Agent and AgentVersion models.
+
+AgentConfig was moved to verity.contracts.config as of Phase 1 of the
+Registry/Runtime split. It is re-exported here for backward compatibility.
+
+What stays here (governance-internal DB read shapes):
+- Agent — the agent header row
+- AgentVersion — a versioned agent with lifecycle state, channel, thresholds
+"""
 
 from datetime import datetime
 from typing import Any, Optional
@@ -6,13 +14,14 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from verity.models.inference_config import InferenceConfig, InferenceConfigSnapshot
-from verity.models.lifecycle import LifecycleState, MaterialityTier, DeploymentChannel
-from verity.models.prompt import PromptAssignment
-from verity.models.tool import ToolAuthorization
+from verity.models.lifecycle import DeploymentChannel, LifecycleState, MaterialityTier
+
+# Re-export boundary model from contracts for backward compatibility.
+from verity.contracts.config import AgentConfig  # noqa: F401
 
 
 class Agent(BaseModel):
+    """Agent header — one row per named agent (N versions reference it)."""
     id: UUID
     name: str
     display_name: str
@@ -31,6 +40,7 @@ class Agent(BaseModel):
 
 
 class AgentVersion(BaseModel):
+    """One versioned agent: inference config + lifecycle state + gate flags."""
     id: UUID
     agent_id: UUID
     major_version: int = 1
@@ -58,49 +68,3 @@ class AgentVersion(BaseModel):
     valid_to: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-
-
-class AgentConfig(BaseModel):
-    """Full runtime config returned by get_agent_config().
-
-    This is what the execution engine uses to invoke an agent.
-    Everything here comes from Verity — nothing hardcoded.
-    """
-    agent_id: UUID
-    agent_name: str
-    display_name: str
-    description: str
-    materiality_tier: MaterialityTier
-    purpose: str
-    domain: str
-
-    agent_version_id: UUID
-    version_label: str
-    lifecycle_state: LifecycleState
-
-    # Inference configuration
-    inference_config: InferenceConfig
-
-    # Prompts (system + user, ordered by execution_order)
-    prompts: list[PromptAssignment] = []
-
-    # Authorized tools
-    tools: list[ToolAuthorization] = []
-
-    # Authority thresholds (HITL triggers)
-    authority_thresholds: dict[str, Any] = {}
-    output_schema: Optional[dict[str, Any]] = None
-
-    def get_inference_snapshot(self) -> InferenceConfigSnapshot:
-        """Create a snapshot for decision logging."""
-        ic = self.inference_config
-        return InferenceConfigSnapshot(
-            config_name=ic.name,
-            model_name=ic.model_name,
-            temperature=ic.temperature,
-            max_tokens=ic.max_tokens,
-            top_p=ic.top_p,
-            top_k=ic.top_k,
-            stop_sequences=ic.stop_sequences,
-            extended_params=ic.extended_params,
-        )

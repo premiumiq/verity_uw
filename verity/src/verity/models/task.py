@@ -1,4 +1,12 @@
-"""Task and TaskVersion models."""
+"""Task and TaskVersion models.
+
+TaskConfig was moved to verity.contracts.config as of Phase 1 of the
+Registry/Runtime split. It is re-exported here for backward compatibility.
+
+What stays here (governance-internal DB read shapes):
+- Task — the task header row (with input/output schemas)
+- TaskVersion — a versioned task with lifecycle state and gate flags
+"""
 
 from datetime import datetime
 from typing import Any, Optional
@@ -6,18 +14,19 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from verity.models.inference_config import InferenceConfig, InferenceConfigSnapshot
 from verity.models.lifecycle import (
     CapabilityType,
     DeploymentChannel,
     LifecycleState,
     MaterialityTier,
 )
-from verity.models.prompt import PromptAssignment
-from verity.models.tool import ToolAuthorization
+
+# Re-export boundary model from contracts for backward compatibility.
+from verity.contracts.config import TaskConfig  # noqa: F401
 
 
 class Task(BaseModel):
+    """Task header — one row per named task (N versions reference it)."""
     id: UUID
     name: str
     display_name: str
@@ -39,6 +48,7 @@ class Task(BaseModel):
 
 
 class TaskVersion(BaseModel):
+    """One versioned task: inference config + lifecycle state + gate flags."""
     id: UUID
     task_id: UUID
     major_version: int = 1
@@ -63,49 +73,3 @@ class TaskVersion(BaseModel):
     valid_to: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-
-
-class TaskConfig(BaseModel):
-    """Full runtime config returned by get_task_config().
-
-    This is what the execution engine uses to invoke a task.
-    """
-    task_id: UUID
-    task_name: str
-    display_name: str
-    description: str
-    capability_type: CapabilityType
-    materiality_tier: MaterialityTier
-    purpose: str
-    domain: str
-
-    task_version_id: UUID
-    version_label: str
-    lifecycle_state: LifecycleState
-
-    # Inference configuration
-    inference_config: InferenceConfig
-
-    # Input/output schemas
-    task_input_schema: dict[str, Any]
-    task_output_schema: dict[str, Any]
-
-    # Prompts
-    prompts: list[PromptAssignment] = []
-
-    # Tools (tasks may have authorized tools)
-    tools: list[ToolAuthorization] = []
-
-    def get_inference_snapshot(self) -> InferenceConfigSnapshot:
-        """Create a snapshot for decision logging."""
-        ic = self.inference_config
-        return InferenceConfigSnapshot(
-            config_name=ic.name,
-            model_name=ic.model_name,
-            temperature=ic.temperature,
-            max_tokens=ic.max_tokens,
-            top_p=ic.top_p,
-            top_k=ic.top_k,
-            stop_sequences=ic.stop_sequences,
-            extended_params=ic.extended_params,
-        )
