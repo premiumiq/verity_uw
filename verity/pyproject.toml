@@ -40,8 +40,16 @@ dependencies = [
 # control over inference parameters (temperature, max_tokens, stop
 # sequences, thinking, etc.) and audit fidelity — the decision log's
 # inference_config_snapshot reflects what was actually applied.
+#
+# `mcp` is Anthropic's official Model Context Protocol Python package.
+# Verity's runtime uses it to dispatch tool calls to external MCP
+# servers (HubSpot, SharePoint, filesystem, etc.) — see FC-14 and
+# runtime/mcp_client.py. MCP-sourced tools are governed the same way
+# as in-process Python tools: registered in verity.tool, logged to
+# agent_decision_log.tool_calls_made per call.
 runtime = [
     "anthropic>=0.40,<1",
+    "mcp>=1.0,<2",
 ]
 
 # Developer tooling — tests, linters, type-checkers.
