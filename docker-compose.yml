@@ -182,6 +182,44 @@ services:
     # Runs the UW demo business app on port 8001
     command: ["uvicorn", "uw_demo.app.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
 
+  # ── DATA SCIENCE WORKBENCH ──────────────────────────────────
+  # JupyterLab against the Verity /api/v1/* REST surface. Notebooks
+  # demonstrate each Verity capability (registry, authoring, runtime,
+  # compliance, testing, validation, mcp, delegation) with markdown
+  # explainers plus rich visualizations (tables, charts, flow + relation
+  # diagrams, lineage graphs).
+  #
+  # Running from VSCode on the host is fully supported alongside this
+  # container: the ds_workbench/ tree is the single source of truth
+  # (bind-mounted here, editable directly by VSCode). See
+  # ds_workbench/README.md for the VSCode flow.
+  ds-workbench:
+    build:
+      context: ./ds_workbench
+      dockerfile: Dockerfile
+    container_name: ds_workbench
+    restart: unless-stopped
+    environment:
+      # Compose network DNS: the verity service resolves as `verity`.
+      # VSCode-on-host users export VERITY_API_URL=http://localhost:8000
+      # instead — utility/verity.py reads this env var at call time.
+      VERITY_API_URL: http://verity:8000
+      JUPYTER_TOKEN: dev
+    volumes:
+      - ./ds_workbench:/home/jovyan/work
+    ports:
+      - "8888:8888"
+    depends_on:
+      verity:
+        condition: service_healthy
+    # --NotebookApp.allow_origin='*' lets notebooks open from any host
+    # URL during dev; drop before any shared deployment.
+    command: >
+      start-notebook.sh
+      --NotebookApp.token=dev
+      --NotebookApp.allow_origin='*'
+      --NotebookApp.notebook_dir=/home/jovyan/work
+
 volumes:
   postgres_data:
   minio_data:

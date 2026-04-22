@@ -1,0 +1,25 @@
+# Data Science Workbench Python dependencies.
+# Installed at image-build time in ds_workbench/Dockerfile.
+# The base `jupyter/scipy-notebook` image already ships pandas, numpy,
+# matplotlib, scipy, scikit-learn — we only need to add what notebooks
+# use on top of that.
+
+# HTTP client (sync) — the whole workbench talks to Verity exclusively
+# over the /api/v1 REST surface. No in-process SDK import.
+httpx>=0.27,<1
+
+# Interactive charts — used by visualizations.py for bar/gantt/sankey.
+plotly>=5.20
+
+# Graph / diagram stacks.
+# - `graphviz` is the Python wrapper; the system `graphviz` binary is
+#   installed in the Dockerfile via apt-get (the wrapper shells out to
+#   `dot` / `neato`).
+# - `networkx` backs application_relationship_graph and
+#   version_lineage_graph.
+# - `ipycytoscape` renders interactive Cytoscape.js graphs inline in
+#   JupyterLab — modern JupyterLab >= 3 auto-discovers the extension
+#   from the pip install.
+graphviz>=0.20
+networkx>=3.0
+ipycytoscape>=1.3
