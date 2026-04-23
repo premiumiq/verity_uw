@@ -1,18 +1,21 @@
 <!--
-  HOME / DASHBOARD — Verity Admin
+  HOME / DASHBOARD — Verity Admin (decluttered)
 
-  Layout:
-  ┌─────────────────────────────────────────────────────────┐
-  │ ASSETS cards (with 30d deltas)                          │
-  │ Asset count chart (gray, clickable) | New Additions     │
-  ├─────────────── separator ───────────────────────────────┤
-  │ OBSERVABILITY cards (with 30d deltas, overrides in red) │
-  │ Pipeline Runs/Time + Top Pipelines (gray)               │
-  │ Decisions/Time (blue/dark blue) + Decisions by Entity   │
-  │ Overrides/Time (amber) + Overrides by Entity            │
-  ├─────────────── separator ───────────────────────────────┤
-  │ GOVERNANCE cards                                        │
-  └─────────────────────────────────────────────────────────┘
+  Layout (top-to-bottom):
+    1. Intro — 1–2 sentence description of Verity.
+    2. Application filter strip — one card per registered application.
+       Clicking a card toggles it in or out of the ?apps= query string;
+       the page reloads and every count card below is filtered to that
+       set (catalog via application_entity, activity via the decision /
+       execution_context predicate that matches the purge endpoint).
+    3. Catalog cards — pipelines, agents, tasks, prompts, inference
+       configs, tools, MCP servers.
+    4. Activity cards — decisions, pipeline runs, overrides, open
+       incidents.
+    5. Governance cards — promotions, test pass rate, entities in review.
+
+  No charts, no "new additions" widget, no 30d deltas — the old
+  dashboard had all of those and they all came out in the declutter.
 -->
 {% extends "base.html" %}
 {% block title %}Home — Verity{% endblock %}
@@ -20,399 +23,264 @@
 
 {% block content %}
 
-<!-- ── Card macro with 30-day delta ── -->
-{% macro card(label, value, delta, url, color='var(--verity-blue-deep)', delta_color='var(--verity-green)') %}
-<a href="{{ url }}" style="text-decoration: none; flex: 1; min-width: 80px;">
-    <div class="verity-card" style="padding: 10px 12px; cursor: pointer; transition: border-color 0.15s;"
-         onmouseover="this.style.borderColor='var(--verity-blue)'" onmouseout="this.style.borderColor='var(--verity-border)'">
-        <div style="display: flex; align-items: baseline; gap: 6px;">
-            <span style="font-size: 1.5rem; font-weight: 700; color: {{ color }};">{{ value }}</span>
-            {% if delta and delta > 0 %}<span style="font-size: 0.65rem; color: {{ delta_color }}; font-weight: 600;">+{{ delta }}</span>{% endif %}
-        </div>
-        <div style="font-size: 0.6rem; text-transform: uppercase; color: var(--verity-text-light); letter-spacing: 0.3px;">{{ label }}</div>
-    </div>
-</a>
-{% endmacro %}
-
-
-<!-- ══════════════════════════════════════════════════════════
-     SEGMENT 1: ASSETS
-     ══════════════════════════════════════════════════════════ -->
-<div style="margin-bottom: 4px; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1.5px; color: var(--verity-text-light); font-weight: 600;">Assets</div>
-<div style="display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap;">
-    {{ card('Applications', governance_stats.app_count or 0, deltas.new_apps, '/admin/applications') }}
-    {{ card('Pipelines', counts.pipeline_count, deltas.new_pipelines, '/admin/pipelines') }}
-    {{ card('Agents', counts.agent_count, deltas.new_agents, '/admin/agents') }}
-    {{ card('Tasks', counts.task_count, deltas.new_tasks, '/admin/tasks') }}
-    {{ card('Prompts', counts.prompt_count, deltas.new_prompts, '/admin/prompts') }}
-    {{ card('Configs', counts.config_count, 0, '/admin/configs') }}
-    {{ card('Tools', counts.tool_count, deltas.new_tools, '/admin/tools') }}
-</div>
-
-<!-- Asset count chart (left, gray, clickable) + New Additions (right, white) -->
-<div style="display: flex; gap: 16px; margin-bottom: 8px;">
-    <div style="flex: 1; max-width: 33%;">
-        <div class="chart-title">Asset Count by Type</div>
-        <div id="chart-asset-counts" style="height: 120px; width: 100%;"></div>
-    </div>
-    <div style="flex: 2;">
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
-            <span class="chart-title">New Additions (Last 30 Days)</span>
-            <span id="additions-filter-label" style="font-size: 0.65rem; color: var(--verity-blue-deep); font-weight: 600; display: none;">
-                — filtered by <span id="additions-filter-type"></span>
-                <a href="#" onclick="clearAdditionsFilter(); return false;" style="margin-left: 4px; font-size: 0.6rem;">✕ clear</a>
-            </span>
-        </div>
-        <div id="new-additions-container" style="display: flex; gap: 8px; flex-wrap: wrap;">
-            {% for item in recent_additions %}
-            <div class="addition-card" data-type="{{ item.entity_type }}"
-                 style="border: 1px solid var(--verity-border); border-radius: 6px; padding: 8px 12px; background: #fff; min-width: 140px; flex: 1; max-width: 220px;">
-                <div style="font-size: 0.75rem; font-weight: 600; color: var(--verity-text);">{{ item.display_name or item.entity_name }}</div>
-                <div style="display: flex; align-items: center; gap: 4px; margin-top: 2px;">
-                    <span class="verity-badge verity-badge-{{ item.entity_type }}" style="font-size: 0.55rem;">{{ item.entity_type }}</span>
-                    <span style="font-size: 0.6rem; color: var(--verity-text-light);">{{ item.created_at }}</span>
-                </div>
-            </div>
-            {% endfor %}
-            {% if not recent_additions %}
-            <div style="font-size: 0.75rem; color: var(--verity-text-light); padding: 8px;">No recent additions</div>
-            {% endif %}
-        </div>
-    </div>
-</div>
-
-<!-- ── Separator ── -->
-<div style="border-top: 2px solid var(--verity-border-light); margin: 20px 0;"></div>
-
-
-<!-- ══════════════════════════════════════════════════════════
-     SEGMENT 2: OBSERVABILITY
-     ══════════════════════════════════════════════════════════ -->
-<div style="margin-bottom: 4px; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1.5px; color: var(--verity-text-light); font-weight: 600;">Observability</div>
-<div style="display: flex; gap: 10px; margin-bottom: 16px;">
-    {{ card('Decisions', counts.total_decisions, deltas.new_decisions, '/admin/decisions') }}
-    {{ card('Pipeline Runs', governance_stats.total_pipeline_runs or 0, deltas.new_pipeline_runs, '/admin/pipeline-runs') }}
-    {{ card('Overrides', counts.total_overrides, deltas.new_overrides, '/admin/overrides', '#E3B447', '#E3B447') }}
-</div>
-
-<!-- Row 1: Pipeline Runs Over Time (left) + Top Pipelines (right) -->
-<div style="display: flex; gap: 16px; margin-bottom: 12px;">
-    <div style="flex: 1;">
-        <div class="chart-title">Pipeline Runs Over Time</div>
-        <div id="chart-pipeline-runs" style="height: 160px;"></div>
-    </div>
-    <div style="flex: 1;">
-        <div class="chart-title">Top Pipelines</div>
-        <div id="chart-top-pipelines" style="height: 160px;"></div>
-    </div>
-</div>
-
-<!-- Row 2: Decisions Over Time (left) + Decisions by Entity (right) -->
-<div style="display: flex; gap: 16px; margin-bottom: 12px;">
-    <div style="flex: 1;">
-        <div class="chart-title">Decisions Over Time</div>
-        <div id="chart-decisions-time" style="height: 160px;"></div>
-    </div>
-    <div style="flex: 1;">
-        <div class="chart-title">Decisions by Asset</div>
-        <div id="chart-decisions-entity" style="height: 160px;"></div>
-    </div>
-</div>
-
-<!-- Row 3: Overrides Over Time (left) + Overrides by Entity (right) -->
-<div style="display: flex; gap: 16px; margin-bottom: 8px;">
-    <div style="flex: 1;">
-        <div class="chart-title">Overrides Over Time</div>
-        <div id="chart-overrides-time" style="height: 160px;"></div>
-    </div>
-    <div style="flex: 1;">
-        <div class="chart-title">Top Overrides by Asset</div>
-        <div id="chart-overrides-entity" style="height: 160px;"></div>
-    </div>
-</div>
-
-<!-- ── Separator ── -->
-<div style="border-top: 2px solid var(--verity-border-light); margin: 20px 0;"></div>
-
-
-<!-- ══════════════════════════════════════════════════════════
-     SEGMENT 3: GOVERNANCE
-     ══════════════════════════════════════════════════════════ -->
-<div style="margin-bottom: 4px; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1.5px; color: var(--verity-text-light); font-weight: 600;">Governance</div>
-<div style="display: flex; gap: 10px; margin-bottom: 16px;">
-    <div class="verity-card" style="flex: 1; padding: 10px 12px; text-align: center;">
-        <div style="font-size: 1.5rem; font-weight: 700; color: var(--verity-blue-deep);">{{ governance_stats.total_approvals or 0 }}</div>
-        <div style="font-size: 0.6rem; text-transform: uppercase; color: var(--verity-text-light);">Promotions</div>
-    </div>
-    <div class="verity-card" style="flex: 1; padding: 10px 12px; text-align: center;">
-        <div style="font-size: 1.5rem; font-weight: 700; color: var(--verity-green);">
-            {% if governance_stats.tests_total %}{{ ((governance_stats.tests_passed / governance_stats.tests_total) * 100) | int }}%{% else %}—{% endif %}
-        </div>
-        <div style="font-size: 0.6rem; text-transform: uppercase; color: var(--verity-text-light);">Test Pass Rate</div>
-    </div>
-    <div class="verity-card" style="flex: 1; padding: 10px 12px; text-align: center;">
-        <div style="font-size: 1.5rem; font-weight: 700; color: var(--verity-blue-deep);">{{ governance_stats.entities_in_review or 0 }}</div>
-        <div style="font-size: 0.6rem; text-transform: uppercase; color: var(--verity-text-light);">In Review</div>
-    </div>
-    <div class="verity-card" style="flex: 1; padding: 10px 12px; text-align: center;">
-        <div style="font-size: 1.5rem; font-weight: 700; color: var(--verity-blue-deep);">{{ counts.open_incidents }}</div>
-        <div style="font-size: 0.6rem; text-transform: uppercase; color: var(--verity-text-light);">Open Incidents</div>
-    </div>
-</div>
-
-
-<!-- ══════════════════════════════════════════════════════════
-     ECHARTS
-     ══════════════════════════════════════════════════════════ -->
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
-<script>
-const S = { fontFamily: 'Poppins, sans-serif' };
-const T = { fontSize: 11, color: '#7F7F7F', fontWeight: 500, fontFamily: 'Poppins' };
-const A = { fontSize: 8, color: '#7F7F7F' };
-
-/* Time axis config — used by all "Over Time" charts.
-   Uses type:'time' so ECharts understands dates properly.
-   max = today's date, min = 30 days ago. Bars sit at the right
-   edge when data is recent, not centered in empty space. */
-const today = new Date();
-const thirtyDaysAgo = new Date(today);
-thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-const timeAxisConfig = {
-    type: 'time',
-    min: thirtyDaysAgo.toISOString().slice(0, 10),
-    max: today.toISOString().slice(0, 10),
-    axisLabel: { fontSize: 8, color: '#7F7F7F',
-        formatter: function(val) { return new Date(val).toISOString().slice(5, 10); }
-    },
-};
-
-/* ── Data ── */
-const decisionsByDate = {{ decisions_by_date | tojson }};
-const decisionsByEntity = {{ decisions_by_entity | tojson }};
-const pipelineRunsByDate = {{ pipeline_runs_by_date | tojson }};
-const topPipelines = {{ top_pipelines | tojson }};
-const overridesByDate = {{ overrides_by_date | tojson }};
-const overridesByEntity = {{ overrides_by_entity | tojson }};
-
-/* ── Helper: init chart with auto-resize ── */
-function mkChart(id) {
-    const c = echarts.init(document.getElementById(id));
-    window.addEventListener('resize', () => c.resize());
-    return c;
-}
-
-/* ── Asset Counts (gray, clickable → filters New Additions) ── */
-let assetChart = null;
-let activeAssetFilter = null;
-const assetTypeLabels = ['Pipelines', 'Agents', 'Tasks', 'Tools', 'Prompts', 'Configs'];
-const assetTypeKeys = ['pipeline', 'agent', 'task', 'tool', 'prompt', 'config'];
-const assetTypeVals = [{{ pipelines|length }}, {{ agents|length }}, {{ tasks|length }}, {{ tools|length }}, {{ prompts|length }}, {{ counts.config_count }}];
-const defaultBarColor = '#949494';
-const selectedBarColor = '#405A8A';
-
-function renderAssetChart() {
-    /* Color bars: highlight the selected one, gray for the rest */
-    const colors = assetTypeLabels.map((_, i) =>
-        (activeAssetFilter !== null && i === activeAssetFilter) ? selectedBarColor : defaultBarColor
-    );
-    assetChart.setOption({
-        textStyle: S,        grid: { left: 70, right: 25, top: 5, bottom: 5 },
-        xAxis: { type: 'value', show: false },
-        yAxis: { type: 'category', data: assetTypeLabels, axisLabel: { fontSize: 9, color: '#7F7F7F' },
-            axisLine: { show: false }, axisTick: { show: false } },
-        series: [{ type: 'bar', data: assetTypeVals.map((v, i) => ({
-                value: v, itemStyle: { color: colors[i], borderRadius: [0, 3, 3, 0] }
-            })), barWidth: 12,
-            label: { show: true, position: 'right', fontSize: 9, color: '#4D4D4D' } }],
-    });
-}
-
-function filterAdditions(typeKey, typeLabel) {
-    /* Show only addition cards matching this type, max 5 visible */
-    let visibleCount = 0;
-    document.querySelectorAll('.addition-card').forEach(card => {
-        const match = card.dataset.type === typeKey;
-        if (match && visibleCount < 5) {
-            card.style.display = '';
-            visibleCount++;
-        } else {
-            card.style.display = 'none';
-        }
-    });
-    document.getElementById('additions-filter-label').style.display = 'inline';
-    document.getElementById('additions-filter-type').textContent = typeLabel;
-}
-
-function clearAdditionsFilter() {
-    /* Show all cards, max 5 visible */
-    activeAssetFilter = null;
-    let visibleCount = 0;
-    document.querySelectorAll('.addition-card').forEach(card => {
-        if (visibleCount < 5) {
-            card.style.display = '';
-            visibleCount++;
-        } else {
-            card.style.display = 'none';
-        }
-    });
-    document.getElementById('additions-filter-label').style.display = 'none';
-    renderAssetChart();
-}
-
-/* On load: show max 5 addition cards */
-(function() {
-    let count = 0;
-    document.querySelectorAll('.addition-card').forEach(card => {
-        card.style.display = (count < 5) ? '' : 'none';
-        count++;
-    });
-})();
-
-(function() {
-    assetChart = mkChart('chart-asset-counts');
-    renderAssetChart();
-
-    /* Click bar → toggle filter on New Additions */
-    assetChart.on('click', function(p) {
-        if (activeAssetFilter === p.dataIndex) {
-            /* Clicking same bar again → clear filter */
-            clearAdditionsFilter();
-        } else {
-            activeAssetFilter = p.dataIndex;
-            filterAdditions(assetTypeKeys[p.dataIndex], assetTypeLabels[p.dataIndex]);
-            renderAssetChart();
-        }
-    });
-})();
-
-/* ── Pipeline Runs Over Time (gray, time axis) ── */
-(function() {
-    const c = mkChart('chart-pipeline-runs');
-    const data = pipelineRunsByDate.map(d => [d.run_date, d.run_count]);
-    c.setOption({
-        textStyle: S,
-        tooltip: { trigger: 'axis' },
-        grid: { left: 35, right: 10, top: 5, bottom: 25 },
-        xAxis: timeAxisConfig,
-        yAxis: { type: 'value', axisLabel: A, minInterval: 1 },
-        series: [{ type: 'bar', data: data, itemStyle: { color: '#949494', borderRadius: [3, 3, 0, 0] }, barWidth: 18 }],
-    });
-})();
-
-/* ── Top Pipelines (gray, horizontal bar) ── */
-(function() {
-    const c = mkChart('chart-top-pipelines');
-    const names = topPipelines.map(d => d.pipeline_name).reverse();
-    const vals = topPipelines.map(d => d.run_count).reverse();
-    c.setOption({
-        textStyle: S,
-        tooltip: { trigger: 'axis' },
-        grid: { left: 160, right: 20, top: 5, bottom: 10 },
-        xAxis: { type: 'value', axisLabel: A },
-        yAxis: { type: 'category', data: names, axisLabel: { fontSize: 9, color: '#4D4D4D', width: 150, overflow: 'truncate' },
-            axisLine: { show: false }, axisTick: { show: false } },
-        series: [{ type: 'bar', data: vals, itemStyle: { color: '#949494', borderRadius: [0, 3, 3, 0] }, barWidth: 14,
-            label: { show: true, position: 'right', fontSize: 9, color: '#4D4D4D' } }],
-    });
-})();
-
-/* ── Decisions Over Time (stacked by entity type, time axis) ── */
-(function() {
-    const c = mkChart('chart-decisions-time');
-    const dateMap = {};
-    decisionsByDate.forEach(d => {
-        if (!dateMap[d.decision_date]) dateMap[d.decision_date] = { agent: 0, task: 0 };
-        dateMap[d.decision_date][d.entity_type] = (dateMap[d.decision_date][d.entity_type] || 0) + d.count;
-    });
-    const dates = Object.keys(dateMap).sort();
-    c.setOption({
-        textStyle: S,
-        tooltip: { trigger: 'axis' },
-        legend: { data: ['Agent', 'Task'], top: 0, right: 0, textStyle: { fontSize: 9 } },
-        grid: { left: 35, right: 10, top: 10, bottom: 25 },
-        xAxis: timeAxisConfig,
-        yAxis: { type: 'value', axisLabel: A, minInterval: 1 },
-        series: [
-            { name: 'Agent', type: 'bar', stack: 't', data: dates.map(d => [d, dateMap[d].agent || 0]),
-              itemStyle: { color: '#8FAADC' }, barWidth: 18 },
-            { name: 'Task', type: 'bar', stack: 't', data: dates.map(d => [d, dateMap[d].task || 0]),
-              itemStyle: { color: '#405A8A' }, barWidth: 18 },
-        ],
-    });
-})();
-
-/* ── Decisions by Entity (horizontal bar, same color codes) ── */
-(function() {
-    const c = mkChart('chart-decisions-entity');
-    const ents = decisionsByEntity.map(d => d.entity_name).reverse();
-    const vals = decisionsByEntity.map(d => d.count).reverse();
-    const colors = decisionsByEntity.map(d => d.entity_type === 'agent' ? '#8FAADC' : '#405A8A').reverse();
-    c.setOption({
-        textStyle: S,
-        tooltip: { trigger: 'axis' },
-        legend: { data: ['Agent', 'Task'], top: 0, right: 0, textStyle: { fontSize: 9 } },
-        grid: { left: 150, right: 20, top: 10, bottom: 10 },
-        xAxis: { type: 'value', axisLabel: A },
-        yAxis: { type: 'category', data: ents, axisLabel: { fontSize: 9, color: '#4D4D4D', width: 140, overflow: 'truncate' },
-            axisLine: { show: false }, axisTick: { show: false } },
-        series: [{ type: 'bar', data: vals, itemStyle: { color: (p) => colors[p.dataIndex], borderRadius: [0, 3, 3, 0] },
-            barWidth: 14, label: { show: true, position: 'right', fontSize: 9, color: '#4D4D4D' } }],
-    });
-})();
-
-/* ── Overrides Over Time (amber=agent, dark amber=task) ── */
-(function() {
-    const c = mkChart('chart-overrides-time');
-    const dateMap = {};
-    overridesByDate.forEach(d => {
-        if (!dateMap[d.override_date]) dateMap[d.override_date] = { agent: 0, task: 0 };
-        dateMap[d.override_date][d.entity_type] = (dateMap[d.override_date][d.entity_type] || 0) + d.count;
-    });
-    const dates = Object.keys(dateMap).sort();
-    c.setOption({
-        textStyle: S,
-        tooltip: { trigger: 'axis' },
-        legend: { data: ['Agent', 'Task'], top: 0, right: 0, textStyle: { fontSize: 9 } },
-        grid: { left: 35, right: 10, top: 25, bottom: 25 },
-        xAxis: timeAxisConfig,
-        yAxis: { type: 'value', axisLabel: A, minInterval: 1 },
-        series: [
-            { name: 'Agent', type: 'bar', stack: 't', data: dates.map(d => [d, (dateMap[d] || {}).agent || 0]),
-              itemStyle: { color: '#E3B447' }, barWidth: 18 },
-            { name: 'Task', type: 'bar', stack: 't', data: dates.map(d => [d, (dateMap[d] || {}).task || 0]),
-              itemStyle: { color: '#816014' }, barWidth: 18 },
-        ],
-    });
-})();
-
-/* ── Overrides by Entity (amber color codes) ── */
-(function() {
-    const c = mkChart('chart-overrides-entity');
-    const ents = overridesByEntity.map(d => d.entity_name).reverse();
-    const vals = overridesByEntity.map(d => d.count).reverse();
-    const colors = overridesByEntity.map(d => d.entity_type === 'agent' ? '#E3B447' : '#816014').reverse();
-    c.setOption({
-        textStyle: S,
-        tooltip: { trigger: 'axis' },
-        grid: { left: 150, right: 20, top: 5, bottom: 10 },
-        xAxis: { type: 'value', axisLabel: A },
-        yAxis: { type: 'category', data: ents, axisLabel: { fontSize: 9, color: '#4D4D4D', width: 140, overflow: 'truncate' },
-            axisLine: { show: false }, axisTick: { show: false } },
-        series: [{ type: 'bar', data: vals, itemStyle: { color: (p) => colors[p.dataIndex], borderRadius: [0, 3, 3, 0] },
-            barWidth: 14, label: { show: true, position: 'right', fontSize: 9, color: '#4D4D4D' } }],
-    });
-})();
-</script>
-
+<!-- ── Inline styles scoped to the home page ────────────────────
+     Kept here (rather than verity.css) because they're home-only
+     and the admin CSS file is already large. -->
 <style>
-    /* Chart title — matches "NEW ADDITIONS (LAST 30 DAYS)" style exactly */
-    .chart-title {
-        font-size: 0.6rem;
+    .home-intro {
+        color: var(--verity-text);
+        font-size: 0.95rem;
+        line-height: 1.5;
+        max-width: 900px;
+        margin: 0 0 22px 0;
+    }
+    .home-section-label {
+        font-size: 0.75rem;
         text-transform: uppercase;
-        letter-spacing: 0.5px;
+        letter-spacing: 1.5px;
         color: var(--verity-text-light);
         font-weight: 600;
-        margin-bottom: 4px;
+        margin: 24px 0 10px 0;
+    }
+    .home-section-label:first-of-type { margin-top: 8px; }
+
+    /* Count-tile grid: auto-fits 160px minimum, grows to fill width. */
+    .home-card-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 14px;
+    }
+
+    /* Bigger count tile (was ~60px tall; this one is ~100px). */
+    .home-card {
+        background: var(--verity-bg);
+        border: 1px solid var(--verity-border);
+        border-radius: 8px;
+        padding: 18px 22px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        text-decoration: none;
+        color: inherit;
+        transition: border-color .15s, box-shadow .15s;
+    }
+    .home-card:hover {
+        border-color: var(--verity-blue);
+        box-shadow: 0 2px 8px rgba(43, 77, 138, 0.08);
+    }
+    .home-card .home-card-value {
+        font-size: 2.2rem;
+        font-weight: 700;
+        line-height: 1;
+        color: var(--verity-blue-deep);
+    }
+    .home-card .home-card-label {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: var(--verity-text-light);
+        font-weight: 600;
+    }
+    .home-card.amber .home-card-value { color: #C18A1A; }
+    .home-card.green .home-card-value { color: var(--verity-green); }
+
+    /* Application filter strip — similar tile but interactive. */
+    .app-card-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        gap: 12px;
+    }
+    .app-card {
+        background: var(--verity-bg);
+        border: 2px solid var(--verity-border);
+        border-radius: 8px;
+        padding: 14px 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        text-decoration: none;
+        color: inherit;
+        transition: all .15s;
+    }
+    .app-card:hover {
+        border-color: var(--verity-blue);
+    }
+    .app-card.selected {
+        /* Selected filter — strong blue outline + tinted fill. */
+        border-color: var(--verity-blue-deep);
+        background: var(--verity-blue-pale);
+    }
+    .app-card.clear-all {
+        border-style: dashed;
+        border-color: var(--verity-border);
+        color: var(--verity-text-light);
+        font-style: italic;
+    }
+    .app-card .app-title {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: var(--verity-text);
+    }
+    .app-card.selected .app-title { color: var(--verity-blue-deep); }
+    .app-card .app-sub {
+        font-size: 0.72rem;
+        color: var(--verity-text-light);
+        font-family: monospace;
+    }
+    .home-scope-banner {
+        background: var(--verity-blue-pale);
+        border-left: 3px solid var(--verity-blue-deep);
+        padding: 8px 14px;
+        margin-bottom: 14px;
+        color: var(--verity-blue-deep);
+        font-size: 0.85rem;
+        border-radius: 0 4px 4px 0;
     }
 </style>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     1. INTRO
+     ══════════════════════════════════════════════════════════ -->
+<p class="home-intro">
+    <strong>Verity</strong> is PremiumIQ's AI trust &amp; compliance platform.
+    It is the single source of truth for every AI component in your organization:
+    agents, tasks, prompts, tools, inference configs, and pipelines are governed
+    here through a 7-state lifecycle, and every execution writes an immutable
+    decision-log row for audit. Below is a live view of the registry plus the
+    activity each consuming application has generated.
+</p>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     2. APPLICATIONS — filter strip
+     ══════════════════════════════════════════════════════════ -->
+<div class="home-section-label">Applications</div>
+
+{%- macro app_card_href(name, current_selection) -%}
+{#- Clicking an app card toggles it into/out of the `apps` query
+   parameter. Keeps the filter state in the URL (shareable,
+   bookmarkable) with no JavaScript. -#}
+{%- set current = current_selection | list -%}
+{%- if name in current -%}
+    {%- set new_list = current | reject('equalto', name) | list -%}
+{%- else -%}
+    {%- set new_list = current + [name] -%}
+{%- endif -%}
+{%- if new_list -%}?apps={{ new_list | join(',') }}{%- else -%}/admin/{%- endif -%}
+{%- endmacro -%}
+
+<div class="app-card-grid">
+    {# The "Clear all" card is only shown when a filter is actually active. #}
+    {% if selected_app_names %}
+    <a href="/admin/" class="app-card clear-all" title="Clear filter and show global counts">
+        <span class="app-title">✕ Clear filter</span>
+        <span class="app-sub">showing {{ selected_app_names | length }} of {{ applications | length }}</span>
+    </a>
+    {% endif %}
+
+    {% for app in applications %}
+    {% set is_selected = app.name in selected_app_names %}
+    <a href="{{ app_card_href(app.name, selected_app_names) }}"
+       class="app-card {% if is_selected %}selected{% endif %}"
+       title="{{ 'Remove from filter' if is_selected else 'Add to filter' }}">
+        <span class="app-title">{{ app.display_name or app.name }}</span>
+        <span class="app-sub">{{ app.name }}</span>
+    </a>
+    {% endfor %}
+</div>
+
+{% if selected_app_names %}
+<div class="home-scope-banner" style="margin-top: 14px;">
+    Scope: counts below are filtered to
+    <strong>{{ selected_app_names | join(', ') }}</strong>.
+    Catalog counts come from the application_entity mapping; activity
+    counts match decisions by the application tag <em>or</em> via an
+    execution_context owned by one of these apps.
+    MCP servers and inference configs stay global (platform-wide infra).
+</div>
+{% endif %}
+
+
+<!-- ══════════════════════════════════════════════════════════
+     3. CATALOG
+     ══════════════════════════════════════════════════════════ -->
+<div class="home-section-label">Catalog</div>
+<div class="home-card-grid">
+    <a href="/admin/pipelines" class="home-card">
+        <span class="home-card-value">{{ counts.pipeline_count }}</span>
+        <span class="home-card-label">Pipelines</span>
+    </a>
+    <a href="/admin/agents" class="home-card">
+        <span class="home-card-value">{{ counts.agent_count }}</span>
+        <span class="home-card-label">Agents</span>
+    </a>
+    <a href="/admin/tasks" class="home-card">
+        <span class="home-card-value">{{ counts.task_count }}</span>
+        <span class="home-card-label">Tasks</span>
+    </a>
+    <a href="/admin/prompts" class="home-card">
+        <span class="home-card-value">{{ counts.prompt_count }}</span>
+        <span class="home-card-label">Prompts</span>
+    </a>
+    <a href="/admin/configs" class="home-card">
+        <span class="home-card-value">{{ counts.config_count }}</span>
+        <span class="home-card-label">Inference configs</span>
+    </a>
+    <a href="/admin/tools" class="home-card">
+        <span class="home-card-value">{{ counts.tool_count }}</span>
+        <span class="home-card-label">Tools</span>
+    </a>
+    <a href="/admin/mcp-servers" class="home-card">
+        <span class="home-card-value">{{ counts.mcp_server_count }}</span>
+        <span class="home-card-label">MCP servers</span>
+    </a>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     4. ACTIVITY
+     ══════════════════════════════════════════════════════════ -->
+<div class="home-section-label">Activity</div>
+<div class="home-card-grid">
+    <a href="/admin/decisions" class="home-card">
+        <span class="home-card-value">{{ counts.total_decisions }}</span>
+        <span class="home-card-label">Decisions</span>
+    </a>
+    <a href="/admin/pipeline-runs" class="home-card">
+        <span class="home-card-value">{{ total_pipeline_runs }}</span>
+        <span class="home-card-label">Pipeline runs</span>
+    </a>
+    <a href="/admin/overrides" class="home-card amber">
+        <span class="home-card-value">{{ counts.total_overrides }}</span>
+        <span class="home-card-label">Overrides</span>
+    </a>
+    <a href="/admin/incidents" class="home-card amber">
+        <span class="home-card-value">{{ counts.open_incidents }}</span>
+        <span class="home-card-label">Open incidents</span>
+    </a>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     5. GOVERNANCE
+     ══════════════════════════════════════════════════════════ -->
+<div class="home-section-label">Governance <span style="color: var(--verity-text-light); font-weight: 400; text-transform: none; letter-spacing: 0;">(platform-wide — not scoped by application)</span></div>
+<div class="home-card-grid">
+    <a href="/admin/lifecycle" class="home-card">
+        <span class="home-card-value">{{ governance_stats.total_approvals or 0 }}</span>
+        <span class="home-card-label">Promotions</span>
+    </a>
+    <a href="/admin/testing" class="home-card green">
+        <span class="home-card-value">
+            {% if governance_stats.tests_total %}{{ ((governance_stats.tests_passed / governance_stats.tests_total) * 100) | int }}%{% else %}—{% endif %}
+        </span>
+        <span class="home-card-label">Test pass rate</span>
+    </a>
+    <a href="/admin/model-inventory" class="home-card">
+        <span class="home-card-value">{{ governance_stats.entities_in_review or 0 }}</span>
+        <span class="home-card-label">Entities in review</span>
+    </a>
+</div>
+
 {% endblock %}

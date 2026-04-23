@@ -114,56 +114,62 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
 
     @router.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request):
+        """Decluttered home dashboard.
+
+        Structure (top-to-bottom):
+            1. Brief intro to Verity.
+            2. Application cards — each toggles itself in/out of the
+               page-level filter via the `?apps=` query string. When the
+               filter is non-empty, the count cards below show scoped
+               counts (catalog via application_entity mapping, activity
+               via the decision/execution_context predicate).
+            3. Catalog cards.
+            4. Activity cards.
+            5. Governance cards.
+
+        All charts and 30d-delta widgets were removed in the declutter —
+        dashboard_decisions_by_* / overrides_by_* / pipeline_runs_by_date
+        / top_pipelines / recent_additions / 30d_deltas / asset_relationships
+        are gone from the reporting SQL too.
+        """
         await verity.ensure_connected()
 
-        # Card counts + deltas
-        counts = await verity.dashboard_counts()
-        governance_stats = await verity.db.fetch_one("dashboard_governance_stats") or {}
-        deltas = await verity.db.fetch_one("dashboard_30d_deltas") or {}
+        # ── Parse ?apps=a,b,c into the set the user has toggled on ──
+        raw = (request.query_params.get("apps") or "").strip()
+        selected_names = [s for s in (x.strip() for x in raw.split(",")) if s]
 
-        # Registry data for slicers
-        agents = await verity.list_agents()
-        tasks = await verity.list_tasks()
-        tools = await verity.list_tools()
-        prompts = await verity.list_prompts()
-        pipelines = await verity.list_pipelines()
         applications = await verity.list_applications()
+        apps_by_name = {a["name"]: a for a in applications}
+        # Drop any name in the URL that doesn't match a real app — keeps
+        # the filter robust against stale links or typos.
+        selected_names = [n for n in selected_names if n in apps_by_name]
+        selected_ids = [apps_by_name[n]["id"] for n in selected_names]
 
-        # Chart data — convert dates to strings for JSON serialization
-        def _date_str(rows, date_field):
-            return [{**r, date_field: str(r[date_field])} for r in rows]
+        # Scoped or unscoped counts depending on the filter.
+        counts = await verity.reporting.dashboard_counts(
+            app_ids=selected_ids or None,
+            app_names=selected_names or None,
+        )
+        governance_stats = await verity.db.fetch_one("dashboard_governance_stats") or {}
 
-        decisions_by_date = _date_str(await verity.db.fetch_all("dashboard_decisions_by_date"), "decision_date")
-        decisions_by_entity = await verity.db.fetch_all("dashboard_decisions_by_entity")
-        decisions_by_type = await verity.db.fetch_all("dashboard_decisions_by_type")
-        pipeline_runs_by_date = _date_str(await verity.db.fetch_all("dashboard_pipeline_runs_by_date"), "run_date")
-        top_pipelines = await verity.db.fetch_all("dashboard_top_pipelines")
-        overrides_by_date = _date_str(await verity.db.fetch_all("dashboard_overrides_by_date"), "override_date")
-        overrides_by_entity = await verity.db.fetch_all("dashboard_overrides_by_entity")
-
-        # Recent additions
-        recent_additions_raw = await verity.db.fetch_all("dashboard_recent_additions")
-        recent_additions = [{**r, "created_at": str(r["created_at"])[:10]} for r in recent_additions_raw]
+        # Pipeline-run total — scoped when apps are selected, otherwise
+        # just reuse the unscoped number already in governance_stats.
+        if selected_ids:
+            pr_row = await verity.db.fetch_one(
+                "dashboard_pipeline_runs_scoped",
+                {"app_ids": [str(i) for i in selected_ids], "app_names": selected_names},
+            ) or {}
+            total_pipeline_runs = pr_row.get("total_pipeline_runs") or 0
+        else:
+            total_pipeline_runs = governance_stats.get("total_pipeline_runs") or 0
 
         return _render(templates, request, "dashboard.html",
             active_page="home",
             counts=counts,
             governance_stats=governance_stats,
-            deltas=deltas,
-            agents=agents,
-            tasks=tasks,
-            tools=tools,
-            prompts=prompts,
-            pipelines=pipelines,
+            total_pipeline_runs=total_pipeline_runs,
             applications=applications,
-            decisions_by_date=decisions_by_date,
-            decisions_by_entity=decisions_by_entity,
-            decisions_by_type=decisions_by_type,
-            pipeline_runs_by_date=pipeline_runs_by_date,
-            top_pipelines=top_pipelines,
-            overrides_by_date=overrides_by_date,
-            overrides_by_entity=overrides_by_entity,
-            recent_additions=recent_additions,
+            selected_app_names=selected_names,
         )
 
     # ── AGENTS ────────────────────────────────────────────────

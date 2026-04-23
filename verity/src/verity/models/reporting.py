@@ -81,6 +81,7 @@ class DashboardCounts(BaseModel):
     config_count: int = 0
     tool_count: int = 0
     pipeline_count: int = 0
+    mcp_server_count: int = 0
     total_decisions: int = 0
     total_overrides: int = 0
     open_incidents: int = 0
