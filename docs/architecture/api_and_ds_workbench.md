@@ -1,6 +1,9 @@
 # Verity REST API and Data Science Workbench
 
-**Status:** Design approved 2026-04-22 — implementation in progress.
+**Status:** Delivered 2026-04-22. All twelve planned steps landed across ten commits ([b8c58c8](../../../../commit/b8c58c8) → [88432e2](../../../../commit/88432e2) for the API; plus [ec3354c](../../../../commit/ec3354c) for the Docker service, [7e35b84](../../../../commit/7e35b84) for workbench utilities, and [8b1bd8d](../../../../commit/8b1bd8d) for starter notebooks).
+
+The **[As-delivered summary](#as-delivered-summary)** at the end of this document captures the final API surface, workbench structure, and known limitations.
+
 **Companion working copy:** `.claude/plans/where-are-you-stuck-swirling-kurzweil.md` (planning artifact, may be overwritten in future plan sessions). **This file is the canonical project reference.**
 
 ---
@@ -410,3 +413,179 @@ Every capability notebook follows the same four sections:
 7. **Draft immutability guard:** PATCH on a non-draft version returns 409 Conflict with the current lifecycle_state in the error body.
 8. **Cleanup notebook:** `GET /api/v1/applications` no longer lists `ds_workbench`; `SELECT COUNT(*) FROM agent_decision_log WHERE application='ds_workbench'` returns 0.
 9. **VSCode round-trip:** any notebook opened in VSCode, executed with a local `.venv`, produces the same visualizations as the Docker kernel.
+
+---
+
+## As-delivered summary
+
+What actually shipped, captured live from the running system on 2026-04-22. The design sections above remain the "intent" reference; this section is the "reality" reference.
+
+### 8. Delivered API surface
+
+**78 operations across 54 paths and 8 tags.** Live Swagger UI at `http://localhost:8000/docs`; machine-readable spec at `http://localhost:8000/openapi.json`.
+
+#### applications (10)
+
+| Method | Path |
+|---|---|
+| GET | `/api/v1/applications` |
+| POST | `/api/v1/applications` |
+| GET | `/api/v1/applications/{name}` |
+| DELETE | `/api/v1/applications/{name}` |
+| GET | `/api/v1/applications/{name}/activity` |
+| DELETE | `/api/v1/applications/{name}/activity` |
+| GET | `/api/v1/applications/{name}/entities` |
+| POST | `/api/v1/applications/{name}/entities` |
+| DELETE | `/api/v1/applications/{name}/entities/{entity_type}/{entity_id}` |
+| POST | `/api/v1/execution-contexts` |
+
+#### authoring (24)
+
+| Method | Path |
+|---|---|
+| POST | `/api/v1/agents` |
+| POST | `/api/v1/agents/{name}/versions` |
+| POST | `/api/v1/agents/{name}/versions/{version_id}/prompts` |
+| POST | `/api/v1/agents/{name}/versions/{version_id}/tools` |
+| POST | `/api/v1/agents/{name}/versions/{version_id}/delegations` |
+| POST | `/api/v1/tasks` |
+| POST | `/api/v1/tasks/{name}/versions` |
+| POST | `/api/v1/tasks/{name}/versions/{version_id}/prompts` |
+| POST | `/api/v1/tasks/{name}/versions/{version_id}/tools` |
+| POST | `/api/v1/prompts` |
+| POST | `/api/v1/prompts/{name}/versions` |
+| POST | `/api/v1/pipelines` |
+| POST | `/api/v1/pipelines/{name}/versions` |
+| POST | `/api/v1/tools` |
+| POST | `/api/v1/inference-configs` |
+| POST | `/api/v1/mcp-servers` |
+| POST | `/api/v1/ground-truth/datasets` |
+| POST | `/api/v1/ground-truth/datasets/{dataset_id}/records` |
+| POST | `/api/v1/ground-truth/records/{record_id}/annotations` |
+| POST | `/api/v1/validation-runs` |
+| POST | `/api/v1/model-cards` |
+| POST | `/api/v1/metric-thresholds` |
+| POST | `/api/v1/test-suites` |
+| POST | `/api/v1/test-suites/{suite_id}/cases` |
+
+#### draft-edit (17)
+
+| Method | Path |
+|---|---|
+| PATCH | `/api/v1/agents/{name}/versions/{version_id}` |
+| DELETE | `/api/v1/agents/{name}/versions/{version_id}` |
+| PUT | `/api/v1/agents/{name}/versions/{version_id}/prompts` |
+| PUT | `/api/v1/agents/{name}/versions/{version_id}/tools` |
+| PUT | `/api/v1/agents/{name}/versions/{version_id}/delegations` |
+| POST | `/api/v1/agents/{name}/versions/{source_version_id}/clone` |
+| PATCH | `/api/v1/tasks/{name}/versions/{version_id}` |
+| DELETE | `/api/v1/tasks/{name}/versions/{version_id}` |
+| PUT | `/api/v1/tasks/{name}/versions/{version_id}/prompts` |
+| PUT | `/api/v1/tasks/{name}/versions/{version_id}/tools` |
+| POST | `/api/v1/tasks/{name}/versions/{source_version_id}/clone` |
+| PATCH | `/api/v1/prompts/{name}/versions/{version_id}` |
+| DELETE | `/api/v1/prompts/{name}/versions/{version_id}` |
+| POST | `/api/v1/prompts/{name}/versions/{source_version_id}/clone` |
+| PATCH | `/api/v1/pipelines/{name}/versions/{version_id}` |
+| DELETE | `/api/v1/pipelines/{name}/versions/{version_id}` |
+| POST | `/api/v1/pipelines/{name}/versions/{source_version_id}/clone` |
+
+#### registry (13)
+
+| Method | Path |
+|---|---|
+| GET | `/api/v1/agents` |
+| GET | `/api/v1/agents/{name}/config` |
+| GET | `/api/v1/agents/{name}/versions` |
+| GET | `/api/v1/tasks` |
+| GET | `/api/v1/tasks/{name}/config` |
+| GET | `/api/v1/tasks/{name}/versions` |
+| GET | `/api/v1/prompts` |
+| GET | `/api/v1/prompts/{name}/versions` |
+| GET | `/api/v1/pipelines` |
+| GET | `/api/v1/pipelines/{name}/versions` |
+| GET | `/api/v1/tools` |
+| GET | `/api/v1/inference-configs` |
+| GET | `/api/v1/mcp-servers` |
+
+#### lifecycle (3)
+
+| Method | Path |
+|---|---|
+| POST | `/api/v1/lifecycle/promote` |
+| POST | `/api/v1/lifecycle/rollback` |
+| GET | `/api/v1/lifecycle/approvals` |
+
+#### decisions (5)
+
+| Method | Path |
+|---|---|
+| GET | `/api/v1/decisions` |
+| GET | `/api/v1/decisions/{decision_id}` |
+| GET | `/api/v1/audit-trail/context/{execution_context_id}` |
+| GET | `/api/v1/audit-trail/run/{pipeline_run_id}` |
+| POST | `/api/v1/overrides` |
+
+#### runtime (3)
+
+| Method | Path |
+|---|---|
+| POST | `/api/v1/runtime/agents/{name}/run` |
+| POST | `/api/v1/runtime/tasks/{name}/run` |
+| POST | `/api/v1/runtime/pipelines/{name}/run` |
+
+#### reporting (3)
+
+| Method | Path |
+|---|---|
+| GET | `/api/v1/reporting/dashboard-counts` |
+| GET | `/api/v1/reporting/agents` |
+| GET | `/api/v1/reporting/tasks` |
+
+### 9. Delivered workbench
+
+| Path | Role |
+|---|---|
+| [ds_workbench/Dockerfile](../../../ds_workbench/Dockerfile) | Image = `jupyter/scipy-notebook` + system `graphviz` + `ds_workbench/requirements.txt` (httpx, plotly, graphviz, networkx, ipycytoscape) |
+| [ds_workbench/utility/verity.py](../../../ds_workbench/utility/verity.py) | `VerityAPI` sync HTTP client; 70 logical endpoints in `ENDPOINTS`; convenience wrappers for the ~15 highest-traffic operations; `VerityAPIError` carries status + detail |
+| [ds_workbench/utility/html.py](../../../ds_workbench/utility/html.py) | Six Verity-UI-styled building blocks: `inject_style`, `badge`, `kv`, `render_list`, `render_detail`, `render_cards`. Inline stylesheet (no CDN) ported from `verity.css`. |
+| [ds_workbench/utility/visualizations.py](../../../ds_workbench/utility/visualizations.py) | Plotly charts + Graphviz diagrams: timeline, decision tree, agent composition, version lineage, application relationships, lifecycle heatmap |
+| [ds_workbench/00_setup.ipynb](../../../ds_workbench/00_setup.ipynb) | Idempotent registration of `ds_workbench`; renders catalog and resolved agent config |
+| [ds_workbench/99_cleanup.ipynb](../../../ds_workbench/99_cleanup.ipynb) | Three-step cleanup: preview → purge → unregister |
+| [ds_workbench/notebooks/runtime/01_run_agent.ipynb](../../../ds_workbench/notebooks/runtime/01_run_agent.ipynb) | Real LLM call through `POST /runtime/agents/{name}/run`; renders `ExecutionResult` + persisted `DecisionLog` |
+| [ds_workbench/notebooks/compliance/01_decision_log_walkthrough.ipynb](../../../ds_workbench/notebooks/compliance/01_decision_log_walkthrough.ipynb) | List / detail / audit-trail / Graphviz decision tree |
+| [ds_workbench/notebooks/authoring/01_register_simple_agent.ipynb](../../../ds_workbench/notebooks/authoring/01_register_simple_agent.ipynb) | Full register-from-scratch flow (6 POSTs) + idempotent cleanup |
+| [ds_workbench/notebooks/authoring/02_clone_and_edit_draft.ipynb](../../../ds_workbench/notebooks/authoring/02_clone_and_edit_draft.ipynb) | Clone champion → PATCH draft → lineage graph → 409 guard → cleanup |
+| [ds_workbench/_build_notebooks.py](../../../ds_workbench/_build_notebooks.py) | Regenerates every `.ipynb` from Python code. Hand-editing the JSON is not recommended. |
+
+All six notebooks were executed end-to-end against the live API: **0 errors / 40 code cells total**.
+
+### 10. Known limitations and next steps
+
+**Decision-attribution gap.** Decisions triggered through the REST `/runtime/*` endpoints are tagged with `application='default'` (the Verity server process's client identity), not with the caller's application name. The `DELETE /api/v1/applications/{name}/activity` endpoint matches decisions by the `application` VARCHAR column, so workbench-initiated runs are **not** caught by the activity purge. Documented in `99_cleanup.ipynb`. Two follow-ups would close the gap:
+1. Add an `application` override field to the runtime request bodies and thread it through to the SDK's decision writer.
+2. Broaden the purge SQL to also delete decisions linked via `execution_context.application_id` (not just by `application` name match).
+
+**No auth.** The API binds to the docker network and localhost only. Before any shared deployment, an auth layer (bearer or per-app API keys) must be added.
+
+**Notebook coverage is starter-set.** Six notebooks shipped. The per-component folders under `notebooks/` have placeholders for more — in particular `lifecycle/`, `testing/`, `validation/`, `mcp/`, `delegation/`, and additional `registry/`, `runtime/`, `compliance/` scenarios. Add them by extending `_build_notebooks.py` and running the generator.
+
+**The `_build_notebooks.py` script is a dev tool, not a runtime dependency.** Shipping it in the repo keeps notebook maintenance a one-command operation. If the script grows too large, it can be split by component folder (one builder module per `notebooks/<tag>/`).
+
+### 11. Running the delivered stack
+
+Three commands:
+
+```bash
+# Bring everything up (postgres, minio, edms, verity, uw-demo, ds-workbench).
+docker compose up -d
+
+# Open the admin UI and the workbench side by side.
+open http://localhost:8000/admin      # Verity admin UI
+open http://localhost:8888?token=dev  # JupyterLab — run 00_setup.ipynb first
+
+# From VSCode on the host (alternative to Docker JupyterLab):
+export VERITY_API_URL=http://localhost:8000
+pip install -r ds_workbench/requirements.txt
+# then open any .ipynb under ds_workbench/ in VSCode's Jupyter extension.
+```
