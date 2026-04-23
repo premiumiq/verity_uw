@@ -166,12 +166,20 @@ class TestRunner:
         expected = case["expected_output"] if isinstance(case["expected_output"], dict) else json.loads(case["expected_output"])
         metric_type = case.get("metric_type", "exact_match")
 
-        # Load tool mocks from test_case_mock table
+        # Load mocks from test_case_mock. Kinds:
+        #   'tool'   — per-tool canned responses (agent testing)
+        #   'source' — per-source payloads that skip the connector fetch
+        #             when a Task's declared source matches (task testing)
+        # Target mocks ship with Phase 4 of the sources/targets plan.
         tool_mock_rows = await self.testing.db.fetch_all(
             "list_test_case_mocks", {"test_case_id": str(case_id)}
         )
+        source_mock_rows = await self.testing.db.fetch_all(
+            "list_test_case_mocks_by_kind",
+            {"test_case_id": str(case_id), "mock_kind": "source"},
+        )
 
-        # Build MockContext from tool mocks
+        # Build MockContext from loaded mocks
         mock = None
         tool_responses = {}
         for row in tool_mock_rows:
@@ -186,6 +194,10 @@ class TestRunner:
                     tool_responses[name] = [existing, response]
             else:
                 tool_responses[name] = response
+
+        source_responses: dict = {}
+        for row in source_mock_rows:
+            source_responses[row["mock_key"]] = row["mock_response"]
 
         if mock_llm:
             # Cheap mode: route through FixtureEngine with the expected output
@@ -204,11 +216,18 @@ class TestRunner:
             mock = None
         else:
             # Real-LLM test: Claude is called; registered tool mocks shape
-            # the inputs it sees. This is the meaningful test mode — it
-            # measures whether the current agent/task version produces
-            # outputs matching expected given controlled tool data.
+            # agent inputs, source mocks replace Task connector fetches.
+            # This is the meaningful test mode — it measures whether the
+            # current agent/task version produces outputs matching expected
+            # given controlled tool/source data.
             engine = self.engine
-            mock = MockContext(tool_responses=tool_responses) if tool_responses else None
+            if tool_responses or source_responses:
+                mock = MockContext(
+                    tool_responses=tool_responses or None,
+                    source_responses=source_responses or None,
+                )
+            else:
+                mock = None
 
         # Execute the entity
         try:

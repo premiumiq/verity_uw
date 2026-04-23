@@ -250,6 +250,50 @@ WHERE tvt.task_version_id = %(entity_version_id)s
 ORDER BY t.name;
 
 
+-- ── TASK VERSION DATA SOURCES / TARGETS ──────────────────────
+-- Loaded by the execution engine before prompt build to resolve declared
+-- inputs, and after the structured output is returned to fire declared
+-- outputs. connector_name is denormalised into the read shape so the
+-- engine can look up the provider by name without a second query.
+
+-- name: list_task_version_sources
+SELECT
+    tvs.id,
+    tvs.task_version_id,
+    tvs.input_field_name,
+    tvs.connector_id,
+    dc.name AS connector_name,
+    tvs.fetch_method,
+    tvs.maps_to_template_var,
+    tvs.required,
+    tvs.execution_order,
+    tvs.description,
+    tvs.created_at
+FROM task_version_source tvs
+JOIN data_connector dc ON dc.id = tvs.connector_id
+WHERE tvs.task_version_id = %(task_version_id)s
+ORDER BY tvs.execution_order, tvs.input_field_name;
+
+
+-- name: list_task_version_targets
+SELECT
+    tvt.id,
+    tvt.task_version_id,
+    tvt.output_field_name,
+    tvt.connector_id,
+    dc.name AS connector_name,
+    tvt.write_method,
+    tvt.target_container,
+    tvt.required,
+    tvt.execution_order,
+    tvt.description,
+    tvt.created_at
+FROM task_version_target tvt
+JOIN data_connector dc ON dc.id = tvt.connector_id
+WHERE tvt.task_version_id = %(task_version_id)s
+ORDER BY tvt.execution_order, tvt.output_field_name;
+
+
 -- name: list_mcp_servers
 -- All registered MCP servers (governance UI, runtime startup).
 SELECT * FROM mcp_server WHERE active = TRUE ORDER BY name;

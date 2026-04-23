@@ -69,6 +69,12 @@ class DecisionLogCreate(BaseModel):
     status: str = "complete"
     error_message: Optional[str] = None
 
+    # Declarative I/O audit trail. Populated when the entity's declared
+    # sources/targets are resolved or fired during execution. Each entry
+    # is a small dict; see schema.sql for the per-entry shape.
+    source_resolutions: Optional[list[dict[str, Any]]] = None
+    target_writes: Optional[list[dict[str, Any]]] = None
+
 
 # ── RUNTIME EXECUTION RESULT ──────────────────────────────────
 # Kept as @dataclass (not BaseModel) for Phase 1 — matches the current

@@ -43,11 +43,12 @@ Add `create_session()` and `continue_session(session_id, new_message)` to `Verit
 
 ---
 
-## FC-3: Agent Hooks (Pre/Post Middleware)
+## FC-3: Agent Hooks (Pre/Post Middleware) — **DEFERRED INDEFINITELY** (2026-04-23)
 
-**Gap:** No way to inject logic before or after agent execution (input validation, output transformation, rate limiting, cost tracking).
+**Original gap:** No way to inject logic before or after agent execution
+(input validation, output transformation, rate limiting, cost tracking).
 
-**Design:** Add hook registration to `ExecutionEngine`:
+**Original design:** Add hook registration to `ExecutionEngine`:
 ```python
 engine.register_hook("pre_execution", validate_input)
 engine.register_hook("post_execution", track_cost)
@@ -55,9 +56,51 @@ engine.register_hook("pre_tool_call", check_rate_limit)
 engine.register_hook("post_tool_call", log_tool_metrics)
 ```
 
-Hooks are async callables. Pre-hooks can modify context or abort execution. Post-hooks can transform output or trigger side effects.
+### Decision: DEFERRED INDEFINITELY
 
-**Priority:** Medium — useful for production observability and policy enforcement.
+Pre/post middleware hooks are **not planned** for Verity. Re-evaluate
+only if, after the declarative primitives below land, concrete unmet
+needs emerge that genuinely require imperative code injection into the
+execution path.
+
+### Rationale
+
+Every concrete use case the original hook proposal called out is already
+addressed (or will be) by a **declarative** governance primitive. In a
+metamodel-driven system, declarative primitives are preferred over
+imperative hooks because they are:
+
+- **Versioned and auditable** — stored in the governance schema, not in
+  startup Python code. Changes leave a trail.
+- **Enforceable at admit time** — configuration is validated when the
+  entity/pipeline is registered, not when it runs.
+- **Inspectable in the UI** — a governance reviewer can see what will
+  happen. Imperative hooks are opaque until they fire.
+- **Stable across deployments** — hooks registered in-process differ
+  silently between environments; DB-backed primitives don't.
+
+| Hook use case from the original FC-3 | Declarative primitive covering it |
+|---|---|
+| Input validation | Task/Agent `input_schema` (JSON Schema enforced at admit + runtime) |
+| Output transformation | Task `output_schema`; Agent `submit_output` forced structured output |
+| Rate limiting | Quota system (already shipped — `quota`, `quota_check` tables) |
+| Cost tracking | Envelope `telemetry` block (see [verity_execution_architecture.md](verity_execution_architecture.md)) |
+| Cost pre-check / budget enforcement | Quota system |
+| Pre-tool-call authorization | Tool `requires_confirmation`, `data_classification_max`, `is_write_operation` on the tool registry row |
+| Post-tool-call metrics | `agent_decision_log.tool_calls_made` + structured logging with correlation IDs |
+| Side effects after execution | Task **targets** (declarative writes to connectors — see [task_data_sources_targets.md](task_data_sources_targets.md)) |
+| Cross-cutting policy ("for every HIGH materiality agent, do X") | Better expressed as a governance rule keyed by `materiality_tier`, not a hook |
+
+**The only thing hooks would uniquely add** — ad-hoc imperative code
+injection — is exactly the thing a governance-driven system should push
+back against. An imperative hook registered at startup sits outside the
+metamodel: it is not versioned with the entity it affects, not visible
+to governance reviewers, not validated at admit time, and not portable
+across SDK/API/web deployments of the same Verity package.
+
+If a future need arises that genuinely cannot be expressed declaratively,
+revisit this with a concrete example — do not pre-build an escape valve
+before knowing what it is for.
 
 ---
 

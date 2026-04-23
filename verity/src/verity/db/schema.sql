@@ -545,6 +545,80 @@ CREATE TABLE task_version_tool (
 );
 
 
+-- ── DATA CONNECTORS ──────────────────────────────────────────
+-- A registered integration that Tasks can read from (sources) or write to
+-- (targets). One row per integration (e.g. "edms"). Verity stores the name
+-- and non-secret tuning config; secrets (API keys, auth tokens) live in env
+-- vars read by the provider at startup. Providers are registered in
+-- verity.runtime.connectors by the consuming app — Verity itself does not
+-- import EDMS or any specific integration.
+
+CREATE TABLE data_connector (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name            VARCHAR(100) NOT NULL UNIQUE,    -- "edms"
+    connector_type  VARCHAR(50)  NOT NULL,           -- "edms" (only type in v1)
+    display_name    VARCHAR(200) NOT NULL,
+    description     TEXT,
+    config          JSONB NOT NULL DEFAULT '{}',     -- non-secret tuning only
+    owner_name      VARCHAR(200),
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+
+-- ── TASK VERSION DATA SOURCES ────────────────────────────────
+-- Declarative inputs: "if the caller passes `input_field_name`, resolve it
+-- via `connector_id.fetch_method(ref)` and bind the payload to the prompt
+-- template variable `maps_to_template_var`." Resolution is eager — all
+-- required sources fire before prompt build. A source failure is a hard
+-- failure (SourceResolutionError). required=False only means the caller
+-- may omit the ref; if a ref is provided, it must resolve.
+
+CREATE TABLE task_version_source (
+    id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    task_version_id         UUID NOT NULL REFERENCES task_version(id) ON DELETE CASCADE,
+    input_field_name        VARCHAR(100) NOT NULL,   -- key in caller's input_data dict
+    connector_id            UUID NOT NULL REFERENCES data_connector(id),
+    fetch_method            VARCHAR(100) NOT NULL,   -- e.g. "get_document_text"
+    maps_to_template_var    VARCHAR(100) NOT NULL,   -- e.g. "document_text"
+    required                BOOLEAN NOT NULL DEFAULT TRUE,
+    execution_order         INTEGER NOT NULL DEFAULT 1,
+    description             TEXT,
+    created_at              TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_tvs_field UNIQUE (task_version_id, input_field_name),
+    CONSTRAINT uq_tvs_var   UNIQUE (task_version_id, maps_to_template_var)
+);
+
+CREATE INDEX idx_tvs_task_version ON task_version_source(task_version_id);
+
+
+-- ── TASK VERSION DATA TARGETS ────────────────────────────────
+-- Declarative outputs: "take `output_field_name` from the Task's structured
+-- output and write it via `connector_id.write_method(container, payload)`."
+-- Writes are channel-gated (champion only by default) AND runtime-gated via
+-- the execution engine's write_mode parameter:
+--   "auto"     — channel decides (champion=write, else log-only). Default.
+--   "log_only" — forced dry run regardless of channel.
+--   "write"    — forced write; caller must have authority.
+-- Validation/test runs never write; the intended write is recorded in the
+-- decision log instead.
+
+CREATE TABLE task_version_target (
+    id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    task_version_id         UUID NOT NULL REFERENCES task_version(id) ON DELETE CASCADE,
+    output_field_name       VARCHAR(100) NOT NULL,   -- key in Task's output dict
+    connector_id            UUID NOT NULL REFERENCES data_connector(id),
+    write_method            VARCHAR(100) NOT NULL,   -- e.g. "create_document"
+    target_container        VARCHAR(200),            -- optional collection/folder
+    required                BOOLEAN NOT NULL DEFAULT FALSE,
+    execution_order         INTEGER NOT NULL DEFAULT 1,
+    description             TEXT,
+    created_at              TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_tvt_out UNIQUE (task_version_id, output_field_name)
+);
+
+CREATE INDEX idx_tvtgt_task_version ON task_version_target(task_version_id);
+
+
 -- ── AGENT VERSION ↔ AGENT DELEGATION JUNCTION ────────────────
 -- First-class registry of "agent A can delegate to agent B" relationships.
 -- Independent of agent_version_tool (which grants the capability to use
@@ -718,14 +792,24 @@ CREATE TABLE test_case (
 CREATE INDEX idx_tc_suite ON test_case(suite_id);
 
 
--- Per-tool mock data for test cases. Each row mocks one tool call.
--- At execution time, the test runner loads all mocks for a case and builds
--- a MockContext with tool_responses. Claude is called for real — only tools
--- are mocked. This tests whether the agent REASONS correctly given known inputs.
+-- Per-call mock data for test cases. Each row mocks one interaction.
+-- mock_kind discriminates three shapes:
+--   'tool'   — Agent tool mock (mock_key = tool_name). Claude is called
+--              for real; the named tool returns mock_response instead of
+--              making a real call.
+--   'source' — Task data-source mock (mock_key = input_field_name on
+--              task_version_source). The connector fetch is skipped and
+--              mock_response is bound to the mapped template variable.
+--   'target' — Task data-target expectation (mock_key = output_field_name
+--              on task_version_target). The connector write is skipped;
+--              the intended write is recorded in the decision log.
+-- call_order supports multi-call scenarios for 'tool' (unused for source/target).
 CREATE TABLE test_case_mock (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     test_case_id    UUID NOT NULL REFERENCES test_case(id) ON DELETE CASCADE,
-    tool_name       VARCHAR(200) NOT NULL,
+    mock_kind       VARCHAR(20) NOT NULL DEFAULT 'tool'
+                    CHECK (mock_kind IN ('tool', 'source', 'target')),
+    mock_key        VARCHAR(200) NOT NULL,
     call_order      INTEGER DEFAULT 1,
     mock_response   JSONB NOT NULL,
     description     TEXT,
@@ -733,6 +817,8 @@ CREATE TABLE test_case_mock (
 );
 
 CREATE INDEX idx_tcm_case ON test_case_mock(test_case_id);
+-- idx_tcm_kind created in the idempotent additions section below (after
+-- mock_kind column is guaranteed to exist on previously-created tables).
 
 
 CREATE TABLE test_execution_log (
@@ -857,14 +943,19 @@ CREATE INDEX idx_gtr_dataset ON ground_truth_record(dataset_id);
 CREATE INDEX idx_gtr_tags    ON ground_truth_record USING GIN(tags);
 
 
--- Per-tool mock data for ground truth records. Same pattern as test_case_mock.
--- Provides the scenario data that the annotation was labeled against.
--- For agent validation: mocks get_submission_context, get_loss_history, etc.
--- so Claude reasons against the exact data the SME saw when labeling.
+-- Per-call mock data for ground truth records. Same shape as test_case_mock;
+-- see that comment for mock_kind semantics.
+-- Provides the scenario data the annotation was labeled against — for agent
+-- validation, this mocks get_submission_context / get_loss_history so Claude
+-- reasons against the exact data the SME saw. For task validation with
+-- declared sources, kind='source' mocks let a record override the connector
+-- fetch (e.g. test the Task against a stored payload instead of EDMS).
 CREATE TABLE ground_truth_record_mock (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     record_id       UUID NOT NULL REFERENCES ground_truth_record(id) ON DELETE CASCADE,
-    tool_name       VARCHAR(200) NOT NULL,
+    mock_kind       VARCHAR(20) NOT NULL DEFAULT 'tool'
+                    CHECK (mock_kind IN ('tool', 'source', 'target')),
+    mock_key        VARCHAR(200) NOT NULL,
     call_order      INTEGER DEFAULT 1,
     mock_response   JSONB NOT NULL,
     description     TEXT,
@@ -872,6 +963,8 @@ CREATE TABLE ground_truth_record_mock (
 );
 
 CREATE INDEX idx_gtrm_record ON ground_truth_record_mock(record_id);
+-- idx_gtrm_kind created in the idempotent additions section below (after
+-- mock_kind column is guaranteed to exist on previously-created tables).
 
 
 -- One annotator's answer for one record. Multiple annotations per record
@@ -1161,6 +1254,24 @@ CREATE TABLE agent_decision_log (
     -- Decision logging level used for this entry + what was redacted
     decision_log_detail     VARCHAR(20) DEFAULT 'standard',
     redaction_applied       JSONB,          -- null if nothing redacted
+
+    -- Declarative I/O audit trail for Task sources and targets. One entry
+    -- per declared source resolved (or intentionally skipped) during this
+    -- execution; same shape for target writes. Null when the entity did
+    -- not declare any sources/targets (common for agents and for tasks
+    -- without declared I/O). Per-entry shape (source_resolutions):
+    --   {
+    --     "input_field":   "document_ref",
+    --     "template_var":  "document_text",
+    --     "connector":     "edms",
+    --     "method":        "get_document_text",
+    --     "ref_summary":   "doc-abc-123",   -- truncated ref for audit
+    --     "status":        "resolved" | "skipped_no_ref" | "failed",
+    --     "mocked":        true | false,
+    --     "payload_size":  14523             -- bytes/chars; -1 = unmeasurable
+    --   }
+    source_resolutions      JSONB,
+    target_writes           JSONB,
 
     created_at              TIMESTAMP DEFAULT NOW()
 );
@@ -1477,6 +1588,69 @@ ALTER TABLE pipeline_version ADD COLUMN IF NOT EXISTS cloned_from_version_id UUI
 -- catalog. Kept alongside the existing `model_name` VARCHAR column for
 -- transition; seed script backfills this FK from the text column.
 ALTER TABLE inference_config ADD COLUMN IF NOT EXISTS model_id UUID REFERENCES model(id);
+
+-- Mock tables: add the discriminator column and the generalized mock_key
+-- column on existing deployments. New deployments already have these from
+-- the CREATE TABLE above — the IF NOT EXISTS guards make this a no-op.
+-- The column rename tool_name → mock_key is expressed as an ADD + DO block
+-- that copies values across and drops the old column, so existing rows
+-- are preserved. Safe to re-run: the DO block is a no-op once mock_key
+-- is the only column.
+ALTER TABLE test_case_mock
+    ADD COLUMN IF NOT EXISTS mock_kind VARCHAR(20) NOT NULL DEFAULT 'tool';
+ALTER TABLE test_case_mock
+    ADD COLUMN IF NOT EXISTS mock_key VARCHAR(200);
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_name = 'test_case_mock' AND column_name = 'tool_name') THEN
+        UPDATE test_case_mock SET mock_key = tool_name WHERE mock_key IS NULL;
+        ALTER TABLE test_case_mock DROP COLUMN tool_name;
+    END IF;
+END $$;
+ALTER TABLE test_case_mock ALTER COLUMN mock_key SET NOT NULL;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.constraint_column_usage
+                   WHERE table_name = 'test_case_mock' AND constraint_name = 'test_case_mock_mock_kind_check') THEN
+        ALTER TABLE test_case_mock
+            ADD CONSTRAINT test_case_mock_mock_kind_check
+            CHECK (mock_kind IN ('tool', 'source', 'target'));
+    END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_tcm_kind ON test_case_mock(test_case_id, mock_kind);
+
+ALTER TABLE ground_truth_record_mock
+    ADD COLUMN IF NOT EXISTS mock_kind VARCHAR(20) NOT NULL DEFAULT 'tool';
+ALTER TABLE ground_truth_record_mock
+    ADD COLUMN IF NOT EXISTS mock_key VARCHAR(200);
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_name = 'ground_truth_record_mock' AND column_name = 'tool_name') THEN
+        UPDATE ground_truth_record_mock SET mock_key = tool_name WHERE mock_key IS NULL;
+        ALTER TABLE ground_truth_record_mock DROP COLUMN tool_name;
+    END IF;
+END $$;
+ALTER TABLE ground_truth_record_mock ALTER COLUMN mock_key SET NOT NULL;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.constraint_column_usage
+                   WHERE table_name = 'ground_truth_record_mock' AND constraint_name = 'ground_truth_record_mock_mock_kind_check') THEN
+        ALTER TABLE ground_truth_record_mock
+            ADD CONSTRAINT ground_truth_record_mock_mock_kind_check
+            CHECK (mock_kind IN ('tool', 'source', 'target'));
+    END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_gtrm_kind ON ground_truth_record_mock(record_id, mock_kind);
+
+-- Task sources/targets audit columns on agent_decision_log. Present in
+-- the CREATE TABLE above for new deployments; ADD COLUMN IF NOT EXISTS
+-- for existing deployments.
+ALTER TABLE agent_decision_log
+    ADD COLUMN IF NOT EXISTS source_resolutions JSONB;
+ALTER TABLE agent_decision_log
+    ADD COLUMN IF NOT EXISTS target_writes      JSONB;
 
 
 -- ============================================================

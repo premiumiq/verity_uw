@@ -86,6 +86,16 @@ from uw_demo.app.tools.edms_tools import list_documents, get_document_text
 verity.register_tool_implementation("list_documents", list_documents)
 verity.register_tool_implementation("get_document_text", get_document_text)
 
+# ── EDMS DATA CONNECTOR (Task declarative sources) ───────────
+# Register the EdmsProvider under the connector name "edms" so Tasks
+# that declare `connector=edms` can resolve their sources at runtime.
+# Verity stores the connector name and non-secret tuning config in its
+# data_connector table (seeded via register_all.py); the in-process
+# provider binding below is what the execution engine actually calls.
+from verity.runtime.connectors import register_provider
+from uw_demo.app.edms_provider import EdmsProvider
+register_provider("edms", EdmsProvider(base_url=settings.EDMS_URL))
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

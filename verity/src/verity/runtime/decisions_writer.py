@@ -74,6 +74,8 @@ class DecisionsWriter:
             "hitl_required": decision.hitl_required,
             "status": decision.status,
             "error_message": decision.error_message,
+            "source_resolutions": json.dumps(decision.source_resolutions) if decision.source_resolutions else None,
+            "target_writes": json.dumps(decision.target_writes) if decision.target_writes else None,
         }
         result = await self.db.execute_returning("log_decision", params)
         return {"decision_log_id": result["id"], "created_at": result["created_at"]}

@@ -73,6 +73,8 @@ class DecisionLogDetail(DecisionLog):
     hitl_completed: bool = False
     error_message: Optional[str] = None
     redaction_applied: Optional[dict[str, Any]] = None
+    source_resolutions: Optional[list[dict[str, Any]]] = None
+    target_writes: Optional[list[dict[str, Any]]] = None
 
     # Joined names
     agent_name: Optional[str] = None

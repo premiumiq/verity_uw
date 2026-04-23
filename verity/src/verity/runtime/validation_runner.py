@@ -303,9 +303,17 @@ class ValidationRunner:
         input_data = record["input_data"] if isinstance(record["input_data"], dict) else json.loads(record["input_data"])
         expected = record["expected_output"] if isinstance(record["expected_output"], dict) else json.loads(record["expected_output"])
 
-        # Load tool mocks from ground_truth_record_mock table
+        # Load mocks from ground_truth_record_mock. Kinds:
+        #   'tool'   — per-tool canned responses (agent validation)
+        #   'source' — per-source payloads that skip the connector fetch
+        #             when a Task's declared source matches (task validation)
+        # Target mocks ship with Phase 4 of the sources/targets plan.
         tool_mock_rows = await self.db.fetch_all(
             "list_ground_truth_record_mocks", {"record_id": str(record_id)}
+        )
+        source_mock_rows = await self.db.fetch_all(
+            "list_ground_truth_record_mocks_by_kind",
+            {"record_id": str(record_id), "mock_kind": "source"},
         )
 
         tool_responses = {}
@@ -320,6 +328,16 @@ class ValidationRunner:
                     tool_responses[name] = [existing, response]
             else:
                 tool_responses[name] = response
+
+        source_responses: dict[str, Any] = {}
+        for row in source_mock_rows:
+            key = row["mock_key"]
+            raw = row["mock_response"]
+            # source payloads are stored as JSONB. For text-bearing sources
+            # (document_text, etc.), the seed stores the string under a
+            # wrapper; unwrap when the payload is a single-key dict with
+            # the mapped field. Otherwise, use the stored value as-is.
+            source_responses[key] = raw
 
         # Pick engine based on mock_llm. See test_runner for the same pattern
         # and rationale.
@@ -336,9 +354,17 @@ class ValidationRunner:
             )
             mock = None
         else:
-            # Real validation: Claude is called; tool mocks shape the inputs.
+            # Real validation: Claude is called; tool mocks shape the agent's
+            # inputs; source mocks replace Task connector fetches with the
+            # stored payload. If neither is populated, mock=None.
             engine = self.engine
-            mock = MockContext(tool_responses=tool_responses) if tool_responses else None
+            if tool_responses or source_responses:
+                mock = MockContext(
+                    tool_responses=tool_responses or None,
+                    source_responses=source_responses or None,
+                )
+            else:
+                mock = None
 
         # Execute
         try:

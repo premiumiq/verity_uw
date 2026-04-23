@@ -181,10 +181,24 @@ class Database:
     async def execute_returning(
         self, query_name: str, params: dict[str, Any] | None = None
     ) -> dict[str, Any] | None:
-        """Execute a named query with RETURNING clause, return the first row."""
+        """Execute a named query with RETURNING clause, return the first row.
+
+        If the query executes successfully but produced no result set (e.g.
+        a plain DELETE/UPDATE without RETURNING), raise a clear error
+        pointing at the mistake. Without this guard, psycopg surfaces a
+        generic "the last operation didn't produce records" whose cause is
+        hard to trace back to the calling site.
+        """
         sql = self._get_sql(query_name)
         async with self._pool.connection() as conn:
             cursor = await conn.execute(sql, params or {})
+            if cursor.description is None:
+                raise ValueError(
+                    f"Query '{query_name}' produced no result set — it does "
+                    f"not have a RETURNING clause. Use execute() instead of "
+                    f"execute_returning() for this query, or add RETURNING "
+                    f"to the SQL."
+                )
             row = await cursor.fetchone()
             return dict(row) if row else None
 

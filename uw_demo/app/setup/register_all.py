@@ -69,6 +69,15 @@ async def main():
         print("Step 1b: Registering MCP servers...")
         await seed_mcp_servers(verity)
 
+        # ── Data connectors ───────────────────────────────────
+        # Register the EDMS connector row. task_version_source rows
+        # reference this by connector_id, so it must exist before task
+        # versions declare their sources below. The in-process provider
+        # binding happens in uw_demo/app/main.py at app startup; this
+        # step only creates the governance row.
+        print("Registering data connectors...")
+        await seed_data_connectors(verity)
+
         # ── STEP 2: Tools ─────────────────────────────────────
         print("Step 2: Registering tools...")
         tools = await seed_tools(verity)
@@ -83,6 +92,14 @@ async def main():
         print("Step 4: Registering entity versions...")
         agent_versions = await seed_agent_versions(verity, agents, configs)
         task_versions = await seed_task_versions(verity, tasks, configs)
+
+        # ── Task version data sources ─────────────────────────
+        # Declare which task versions pull inputs from which connectors.
+        # Example: document_classifier's {{document_text}} can come from
+        # EDMS when the caller passes a document_ref. Declared optional —
+        # callers can still pass document_text directly.
+        print("Declaring task version data sources...")
+        await seed_task_version_sources(verity, task_versions)
 
         # ── STEP 5-6: Prompt Versions + Assignments ───────────
         print("Step 5-6: Registering prompt versions and assignments...")
@@ -346,6 +363,47 @@ async def seed_mcp_servers(verity: Verity) -> dict:
         r = await verity.registry.register_mcp_server(**s)
         result[s["name"]] = r["id"]
     print(f"  + {len(result)} MCP servers registered")
+    return result
+
+
+# ══════════════════════════════════════════════════════════════
+# DATA CONNECTORS
+# Register the integrations Tasks can declare sources/targets against.
+# One row per connector name. The matching in-process provider (e.g.
+# EdmsProvider) is registered at app startup in uw_demo/app/main.py.
+# ══════════════════════════════════════════════════════════════
+
+async def seed_data_connectors(verity: Verity) -> dict:
+    """Register UW's data connectors. Returns {name: id}.
+
+    Called during initial seed. Idempotent via upsert_data_connector so
+    re-running the seed is safe. Secrets (API keys, auth tokens) are NOT
+    stored here — providers read them from env vars at startup.
+    """
+    import json as _json
+    connectors = [
+        {
+            "name": "edms",
+            "connector_type": "edms",
+            "display_name": "EDMS — Enterprise Document Management",
+            "description": (
+                "HTTP integration with the EDMS service. Provides "
+                "document text, metadata, and lineage for Tasks that "
+                "declare document sources. Base URL comes from EDMS_URL "
+                "env var on the consuming app's process."
+            ),
+            "config": {},   # non-secret tuning only; empty for now
+            "owner_name": "Platform Team",
+        },
+    ]
+    result = {}
+    for c in connectors:
+        row = await verity.db.execute_returning("upsert_data_connector", {
+            **c,
+            "config": _json.dumps(c["config"]),
+        })
+        result[c["name"]] = row["id"]
+        print(f"  + data connector: {c['name']}")
     return result
 
 
@@ -899,6 +957,48 @@ async def seed_task_versions(verity: Verity, tasks: dict, configs: dict) -> dict
     print(f"  + field_extractor v1.0.0 (draft)")
 
     return versions
+
+
+async def seed_task_version_sources(verity: Verity, task_versions: dict) -> None:
+    """Declare data sources on task versions.
+
+    A source says: "when the caller passes `input_field_name` in
+    input_data, resolve it via the named connector and bind the result
+    to the prompt template variable `maps_to_template_var`."
+
+    Declared required=False — UW's production flow still passes
+    `document_text` directly, which bypasses source resolution. Validation
+    runs (and any caller that prefers to pass an EDMS ref) get the fetch
+    for free.
+    """
+    edms = await verity.db.fetch_one("get_data_connector_by_name", {"name": "edms"})
+    if not edms:
+        print("  ! edms data connector not registered; skipping source declarations")
+        return
+    edms_id = edms["id"]
+
+    # Every registered task version (both 0.9.0 and 1.0.0) gets the same
+    # declaration so a promotion/rollback doesn't lose the source contract.
+    declarations = [
+        ("document_classifier", "0.9.0"),
+        ("document_classifier", "1.0.0"),
+        ("field_extractor",      "1.0.0"),
+    ]
+    for task_name, version in declarations:
+        tv_id = task_versions.get((task_name, version))
+        if not tv_id:
+            continue
+        await verity.db.execute_returning("insert_task_version_source", {
+            "task_version_id": str(tv_id),
+            "input_field_name": "document_ref",
+            "connector_id": str(edms_id),
+            "fetch_method": "get_document_text",
+            "maps_to_template_var": "document_text",
+            "required": False,
+            "execution_order": 1,
+            "description": "When caller passes document_ref (an EDMS document id), fetch the extracted text and bind it to {{document_text}}.",
+        })
+        print(f"  + source declared: {task_name} {version} (document_ref → document_text via edms)")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1704,16 +1804,14 @@ async def seed_ground_truth_records(verity, gt_datasets, tasks, agents, edms_doc
             source_container = "submissions"
             source_key = edms_id  # EDMS document UUID
 
-            # Input data references the EDMS document ID when available
-            if filepath.suffix == ".txt":
-                content = filepath.read_text(errors="replace")[:5000]
-                input_data = {"document_text": content, "document_filename": filepath.name}
-                if edms_id:
-                    input_data["edms_document_id"] = edms_id
-            else:
-                input_data = {"document_filename": filepath.name, "document_type_hint": "pdf"}
-                if edms_id:
-                    input_data["edms_document_id"] = edms_id
+            # Input data carries only the EDMS document reference. At
+            # validation time, the classifier's declared source resolves
+            # this ref to the extracted text via the edms connector and
+            # binds it to the prompt's {{document_text}} variable.
+            input_data = {
+                "document_ref": edms_id,
+                "document_filename": filepath.name,
+            }
 
             record = await verity.registry.register_ground_truth_record(
                 dataset_id=str(gt_cls_id), record_index=record_idx,

@@ -158,6 +158,43 @@ VALUES (%(task_version_id)s, %(tool_id)s, %(authorized)s, %(notes)s)
 RETURNING id;
 
 
+-- ── TASK VERSION DATA SOURCES / TARGETS ──────────────────────
+-- Declared I/O for a TaskVersion. See schema.sql comments on
+-- task_version_source / task_version_target for semantics.
+
+-- name: insert_task_version_source
+INSERT INTO task_version_source (
+    task_version_id, input_field_name, connector_id, fetch_method,
+    maps_to_template_var, required, execution_order, description
+)
+VALUES (
+    %(task_version_id)s, %(input_field_name)s, %(connector_id)s, %(fetch_method)s,
+    %(maps_to_template_var)s, %(required)s, %(execution_order)s, %(description)s
+)
+RETURNING id, created_at;
+
+
+-- name: insert_task_version_target
+INSERT INTO task_version_target (
+    task_version_id, output_field_name, connector_id, write_method,
+    target_container, required, execution_order, description
+)
+VALUES (
+    %(task_version_id)s, %(output_field_name)s, %(connector_id)s, %(write_method)s,
+    %(target_container)s, %(required)s, %(execution_order)s, %(description)s
+)
+RETURNING id, created_at;
+
+
+-- name: delete_task_version_sources
+-- Convenience: clear all sources for a task version (re-registration path).
+DELETE FROM task_version_source WHERE task_version_id = %(task_version_id)s;
+
+
+-- name: delete_task_version_targets
+DELETE FROM task_version_target WHERE task_version_id = %(task_version_id)s;
+
+
 -- name: insert_agent_version_delegation
 -- Record that a parent agent version is authorized to delegate to a
 -- specific child agent (either by name, champion-tracking, or by a

@@ -961,7 +961,22 @@ class ExecutionEngine:
         start_ms = _now_ms()
         invocation_started_at = datetime.now(timezone.utc)
         config = await self.registry.get_task_config(task_name)
-        system_prompt, user_messages = _assemble_prompts(config.prompts, input_data)
+
+        # ── SOURCE RESOLUTION ──────────────────────────────────────────
+        # Before prompt assembly, resolve any declared data sources for
+        # this TaskVersion. Each source maps a caller-supplied reference
+        # (e.g. input_data["document_ref"]) to a template variable
+        # (e.g. {{document_text}}) via a registered connector. Mocks are
+        # checked first, then the connector fetch is invoked. Resolution
+        # is eager; failures are hard failures. See
+        # verity.runtime.connectors for the provider contract.
+        template_context, source_resolutions = await self._resolve_task_sources(
+            task_version_id=config.task_version_id,
+            task_name=task_name,
+            input_data=input_data,
+            mock=mock,
+        )
+        system_prompt, user_messages = _assemble_prompts(config.prompts, template_context)
 
         try:
             # Build messages — tasks are single-turn structured output via Claude.
@@ -1024,6 +1039,7 @@ class ExecutionEngine:
                 status="complete",
                 execution_context_id=execution_context_id,
                 application=application,
+                source_resolutions=source_resolutions or None,
             )
 
             # Single-turn task — one API call, so per_turn_metadata is
@@ -1074,6 +1090,11 @@ class ExecutionEngine:
                 status="failed", error_message=str(e),
                 execution_context_id=execution_context_id,
                 application=application,
+                source_resolutions=(
+                    getattr(e, "partial_resolutions", None)
+                    or locals().get("source_resolutions")
+                    or None
+                ),
             )
             return ExecutionResult(
                 decision_log_id=log_result["decision_log_id"],
@@ -1082,6 +1103,188 @@ class ExecutionEngine:
                 output={}, duration_ms=duration_ms,
                 status="failed", error_message=str(e),
             )
+
+    # ══════════════════════════════════════════════════════════
+    # TASK SOURCE RESOLUTION (pre-prompt, declarative I/O for Tasks)
+    # ══════════════════════════════════════════════════════════
+
+    async def _resolve_task_sources(
+        self,
+        task_version_id: UUID,
+        task_name: str,
+        input_data: dict[str, Any],
+        mock: Optional[MockContext],
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Resolve declared data sources for a TaskVersion.
+
+        Walks every row in task_version_source for this version, in
+        execution_order. For each source:
+          1. Pull the caller-supplied reference from input_data under
+             the declared input_field_name.
+          2. If a source mock is registered for this field, bind its
+             payload to the mapped template variable and skip the
+             connector.
+          3. Otherwise, look up the registered provider for the source's
+             connector and call provider.fetch(method, ref). Bind the
+             returned payload to the mapped template variable.
+
+        Returns (template_context, resolutions) where:
+          - template_context is input_data with resolved template vars
+            merged in (caller-supplied vars stay as-is).
+          - resolutions is a list of dicts describing what happened for
+            each source — feeds the decision log and the envelope's
+            telemetry.sources_resolved.
+
+        Raises:
+          - SourceResolutionError: a required source's ref was missing
+            or its connector fetch raised.
+          - ConnectorNotRegistered: the TaskVersion names a connector
+            that no provider has been registered for.
+
+        Tasks with zero declared sources (the default today) short-circuit
+        to (input_data, []) with no DB calls or logging noise.
+        """
+        # Fast path: avoid the DB round-trip when no sources are declared.
+        # Source rows are loaded per-call here — a per-version cache
+        # alongside TaskConfig resolution would trim the query on hot
+        # paths, but the current per-call read is simpler and not a
+        # measurable cost for UW's traffic.
+        source_rows = await self.registry.db.fetch_all(
+            "list_task_version_sources",
+            {"task_version_id": str(task_version_id)},
+        )
+        if not source_rows:
+            return dict(input_data), []
+
+        # Local imports avoid any top-level dependency reshuffle; these
+        # modules may not be imported in every Verity deployment profile.
+        from verity.runtime.connectors import (
+            get_provider,
+            ConnectorNotRegistered,
+            SourceResolutionError,
+        )
+
+        template_context = dict(input_data)
+        resolutions: list[dict[str, Any]] = []
+
+        for row in source_rows:
+            input_field = row["input_field_name"]
+            template_var = row["maps_to_template_var"]
+            connector_name = row["connector_name"]
+            fetch_method = row["fetch_method"]
+            required = row["required"]
+
+            ref = input_data.get(input_field)
+            if ref is None:
+                if required:
+                    resolutions.append({
+                        "input_field": input_field,
+                        "template_var": template_var,
+                        "connector": connector_name,
+                        "method": fetch_method,
+                        "status": "failed",
+                        "mocked": False,
+                        "failure_reason": "missing_ref",
+                    })
+                    raise SourceResolutionError(
+                        f"Task '{task_name}' declares required source "
+                        f"'{input_field}' (→ {{{{{template_var}}}}}) but the "
+                        f"caller did not provide a value under that key.",
+                        partial_resolutions=resolutions,
+                    )
+                # Optional source with no ref — skip silently, record for audit.
+                resolutions.append({
+                    "input_field": input_field,
+                    "template_var": template_var,
+                    "connector": connector_name,
+                    "method": fetch_method,
+                    "status": "skipped_no_ref",
+                    "mocked": False,
+                })
+                continue
+
+            # Source mock takes precedence over the real connector.
+            is_mocked, mock_payload = (False, None)
+            if mock is not None:
+                is_mocked, mock_payload = mock.get_source_response(input_field)
+
+            if is_mocked:
+                template_context[template_var] = mock_payload
+                size = _payload_size(mock_payload)
+                resolutions.append({
+                    "input_field": input_field,
+                    "template_var": template_var,
+                    "connector": connector_name,
+                    "method": fetch_method,
+                    "ref_summary": _ref_summary(ref),
+                    "status": "resolved",
+                    "mocked": True,
+                    "payload_size": size,
+                })
+                logger.info(
+                    "source_resolved task=%s field=%s connector=%s method=%s mocked=True size=%s",
+                    task_name, input_field, connector_name, fetch_method, size,
+                )
+                continue
+
+            # Real connector fetch. Any provider-side error is surfaced as
+            # SourceResolutionError so the Task fails cleanly and the
+            # decision log records the failure reason. We record a
+            # "failed" resolution entry on the list before re-raising so
+            # partial audit trail is preserved even when resolution blows
+            # up mid-stream — the caller stashes self._partial_resolutions
+            # into the decision log's source_resolutions column.
+            try:
+                provider = get_provider(connector_name)
+                payload = await provider.fetch(fetch_method, ref)
+            except ConnectorNotRegistered:
+                resolutions.append({
+                    "input_field": input_field,
+                    "template_var": template_var,
+                    "connector": connector_name,
+                    "method": fetch_method,
+                    "ref_summary": _ref_summary(ref),
+                    "status": "failed",
+                    "mocked": False,
+                    "failure_reason": "connector_not_registered",
+                })
+                raise
+            except Exception as exc:  # connector-level failure
+                resolutions.append({
+                    "input_field": input_field,
+                    "template_var": template_var,
+                    "connector": connector_name,
+                    "method": fetch_method,
+                    "ref_summary": _ref_summary(ref),
+                    "status": "failed",
+                    "mocked": False,
+                    "failure_reason": str(exc)[:200],
+                })
+                raise SourceResolutionError(
+                    f"Task '{task_name}' failed to resolve source "
+                    f"'{input_field}' via {connector_name}.{fetch_method}"
+                    f"(ref={_ref_summary(ref)!r}): {exc}",
+                    partial_resolutions=resolutions,
+                ) from exc
+
+            template_context[template_var] = payload
+            size = _payload_size(payload)
+            resolutions.append({
+                "input_field": input_field,
+                "template_var": template_var,
+                "connector": connector_name,
+                "method": fetch_method,
+                "ref_summary": _ref_summary(ref),
+                "status": "resolved",
+                "mocked": False,
+                "payload_size": size,
+            })
+            logger.info(
+                "source_resolved task=%s field=%s connector=%s method=%s mocked=False size=%s",
+                task_name, input_field, connector_name, fetch_method, size,
+            )
+
+        return template_context, resolutions
 
     # ══════════════════════════════════════════════════════════
     # TOOL EXECUTION (standalone, no LLM — for pipeline steps)
@@ -1300,6 +1503,11 @@ class ExecutionEngine:
         # identity. None → fall back to self.application (the SDK-client
         # identity the engine was constructed with).
         application: Optional[str] = None,
+        # Declarative I/O audit trail — source resolutions and target
+        # writes produced during this execution. Persisted as JSONB on
+        # agent_decision_log for later querying and replay.
+        source_resolutions: Optional[list[dict]] = None,
+        target_writes: Optional[list[dict]] = None,
     ) -> dict:
         """Create a decision log entry with full snapshot.
 
@@ -1351,6 +1559,8 @@ class ExecutionEngine:
             application=application or self.application,
             status=status,
             error_message=error_message,
+            source_resolutions=source_resolutions,
+            target_writes=target_writes,
         ))
 
 
@@ -1561,6 +1771,40 @@ def _is_valid_json_schema(properties: dict) -> bool:
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _payload_size(payload: Any) -> int:
+    """Approximate size of a resolved source payload (bytes or characters).
+
+    Used for decision log / telemetry. Cheap approximation — for strings
+    returns character count; for bytes returns byte count; for anything
+    else falls back to the length of its JSON representation.
+    """
+    if payload is None:
+        return 0
+    if isinstance(payload, (bytes, bytearray, memoryview)):
+        return len(payload)
+    if isinstance(payload, str):
+        return len(payload)
+    try:
+        return len(json.dumps(payload, default=str))
+    except (TypeError, ValueError):
+        return -1  # unmeasurable — recorded as such in the audit trail
+
+
+def _ref_summary(ref: Any) -> str:
+    """Compact string rep of a source reference for logs and audit rows.
+
+    Refs are typically short strings (doc ids, URIs), but can be dicts
+    (composite refs). Truncate to keep decision logs readable.
+    """
+    if isinstance(ref, str):
+        return ref if len(ref) <= 120 else ref[:117] + "..."
+    try:
+        s = json.dumps(ref, default=str)
+    except (TypeError, ValueError):
+        s = str(ref)
+    return s if len(s) <= 120 else s[:117] + "..."
 
 
 def _mcp_error(

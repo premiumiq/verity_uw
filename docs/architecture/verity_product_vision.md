@@ -707,6 +707,8 @@ Status legend: **Shipped** = in production and exercised by the UW demo; **Parti
 5. **Schema-first.** The database schema is the source of truth, built complete from day one.
 6. **Governance and Runtime are separable.** Today they share a process; tomorrow Governance can run as a sidecar to an external orchestrator - the Governance Contract is the boundary.
 7. **Shared services are independent.** EDMS, MDM, enrichment each own their database and APIs.
+8. **Declarative over imperative.** Verity's governance primitives (schemas, sources/targets, quotas, thresholds, mock kinds) are stored in the metamodel and validated at admit time. Imperative extension mechanisms — e.g. pre/post execution hooks (FC-3) — are deliberately NOT offered; they would sit outside the metamodel, unversioned and invisible to governance reviewers. See [future_capabilities.md § FC-3](future_capabilities.md) for the full rationale.
+9. **Orchestration lives in the application, not Verity.** Verity executes one unit of work at a time (Task, Agent, or Pipeline) and returns a canonical envelope. Triggers, chaining, waits, and retries across units are the consuming app's responsibility. See [verity_execution_architecture.md](verity_execution_architecture.md) for the full Task/Agent/Pipeline contracts and envelope spec.
 
 ---
 

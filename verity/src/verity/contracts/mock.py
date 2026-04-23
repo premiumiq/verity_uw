@@ -19,6 +19,14 @@ What MockContext covers today:
   - mock_all_tools   — when True, ALL tools return their DB-registered
                        `mock_responses` entry (one per tool). Specific
                        entries in `tool_responses` still override.
+  - source_responses — per-source canned payloads, keyed by the Task's
+                       declared `input_field_name`. When a Task has a
+                       declared source whose input_field_name matches,
+                       the connector fetch is skipped and this payload
+                       is bound to the mapped template variable.
+  - target_blocks    — set of output_field_names whose declared target
+                       writes should be skipped (log-only). Used by test
+                       and validation runners to prevent side effects.
   - sub_agent_mocks  — per-sub-agent MockContexts (for FC-1 sub-agent
                        delegation when that ships).
 
@@ -79,6 +87,21 @@ class MockContext:
     # Individual entries in tool_responses override this.
     mock_all_tools: bool = False
 
+    # ── TASK SOURCE MOCK ──────────────────────────────────────
+    # Per-source canned payloads. Key = input_field_name declared on
+    # task_version_source. When the execution engine is resolving a
+    # Task's declared sources, it checks this dict first — if the
+    # input_field_name is present, the payload is bound to the mapped
+    # template variable and the connector fetch is skipped entirely.
+    source_responses: Optional[dict[str, Any]] = None
+
+    # ── TASK TARGET BLOCK ─────────────────────────────────────
+    # Set of output_field_names whose declared target writes should be
+    # suppressed (logged but not executed). Used by test/validation
+    # runners to prevent real writes during non-production execution.
+    # When None, the channel/write_mode gate alone controls writes.
+    target_blocks: Optional[set[str]] = None
+
     # ── SUB-AGENT MOCK (FC-1 groundwork) ──────────────────────
     # Per-sub-agent MockContexts. Key = agent name.
     # When an agent delegates to a sub-agent, the sub-agent's
@@ -111,6 +134,24 @@ class MockContext:
             return None  # Exhausted mock responses for this tool
 
         return response
+
+    def get_source_response(self, input_field_name: str) -> tuple[bool, Any]:
+        """Check for a source mock for the given input field name.
+
+        Returns a (is_mocked, payload) tuple — the boolean is needed to
+        distinguish "no mock registered" from "mock registered with value None".
+        Callers that get is_mocked=True should skip the connector fetch and
+        use the payload verbatim.
+        """
+        if self.source_responses is None or input_field_name not in self.source_responses:
+            return (False, None)
+        return (True, self.source_responses[input_field_name])
+
+    def is_target_blocked(self, output_field_name: str) -> bool:
+        """True if the declared target write for this output field should be suppressed."""
+        if self.target_blocks is None:
+            return False
+        return output_field_name in self.target_blocks
 
     def get_sub_agent_mock(self, agent_name: str) -> Optional["MockContext"]:
         """Get the MockContext for a sub-agent invocation."""

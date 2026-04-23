@@ -318,19 +318,30 @@ ORDER BY entity_type, entity_name, created_at DESC;
 
 
 -- ============================================================
--- TEST CASE MOCKS (per-tool mock data for test cases)
+-- TEST CASE MOCKS
+-- The table backs three kinds of mocks (discriminated by mock_kind):
+--   'tool'   — Agent tool mocks
+--   'source' — Task data-source mocks (skip connector fetch)
+--   'target' — Task data-target expectations (skip connector write)
+--
+-- The original tool-only queries below stay kind-filtered for backward
+-- compat and alias mock_key AS tool_name so existing consumers keep
+-- reading row["tool_name"]. New kind-aware queries follow.
 -- ============================================================
 
 -- name: list_test_case_mocks
-SELECT tcm.*
+-- Backward-compatible: tool mocks only, aliased as tool_name.
+SELECT tcm.id, tcm.test_case_id, tcm.mock_key AS tool_name,
+       tcm.call_order, tcm.mock_response, tcm.description, tcm.created_at
 FROM test_case_mock tcm
-WHERE tcm.test_case_id = %(test_case_id)s
-ORDER BY tcm.tool_name, tcm.call_order;
+WHERE tcm.test_case_id = %(test_case_id)s AND tcm.mock_kind = 'tool'
+ORDER BY tcm.mock_key, tcm.call_order;
 
 
 -- name: insert_test_case_mock
-INSERT INTO test_case_mock (test_case_id, tool_name, call_order, mock_response, description)
-VALUES (%(test_case_id)s, %(tool_name)s, %(call_order)s, %(mock_response)s, %(description)s)
+-- Backward-compatible: tool_name param maps to mock_key with mock_kind='tool'.
+INSERT INTO test_case_mock (test_case_id, mock_kind, mock_key, call_order, mock_response, description)
+VALUES (%(test_case_id)s, 'tool', %(tool_name)s, %(call_order)s, %(mock_response)s, %(description)s)
 RETURNING id, created_at;
 
 
@@ -342,20 +353,48 @@ DELETE FROM test_case_mock WHERE id = %(mock_id)s RETURNING id;
 DELETE FROM test_case_mock WHERE test_case_id = %(test_case_id)s;
 
 
+-- name: list_test_case_mocks_by_kind
+-- Kind-aware listing. Use 'tool' | 'source' | 'target'.
+SELECT tcm.id, tcm.test_case_id, tcm.mock_kind, tcm.mock_key,
+       tcm.call_order, tcm.mock_response, tcm.description, tcm.created_at
+FROM test_case_mock tcm
+WHERE tcm.test_case_id = %(test_case_id)s AND tcm.mock_kind = %(mock_kind)s
+ORDER BY tcm.mock_key, tcm.call_order;
+
+
+-- name: list_test_case_mocks_all
+-- All mocks for a case, regardless of kind.
+SELECT tcm.id, tcm.test_case_id, tcm.mock_kind, tcm.mock_key,
+       tcm.call_order, tcm.mock_response, tcm.description, tcm.created_at
+FROM test_case_mock tcm
+WHERE tcm.test_case_id = %(test_case_id)s
+ORDER BY tcm.mock_kind, tcm.mock_key, tcm.call_order;
+
+
+-- name: insert_test_case_mock_kinded
+-- Kind-aware insert. Caller supplies mock_kind and mock_key explicitly.
+INSERT INTO test_case_mock (test_case_id, mock_kind, mock_key, call_order, mock_response, description)
+VALUES (%(test_case_id)s, %(mock_kind)s, %(mock_key)s, %(call_order)s, %(mock_response)s, %(description)s)
+RETURNING id, created_at;
+
+
 -- ============================================================
--- GROUND TRUTH RECORD MOCKS (per-tool scenario data for GT records)
+-- GROUND TRUTH RECORD MOCKS (same three-kind shape as test_case_mock)
 -- ============================================================
 
 -- name: list_ground_truth_record_mocks
-SELECT gtrm.*
+-- Backward-compatible: tool mocks only, aliased as tool_name.
+SELECT gtrm.id, gtrm.record_id, gtrm.mock_key AS tool_name,
+       gtrm.call_order, gtrm.mock_response, gtrm.description, gtrm.created_at
 FROM ground_truth_record_mock gtrm
-WHERE gtrm.record_id = %(record_id)s
-ORDER BY gtrm.tool_name, gtrm.call_order;
+WHERE gtrm.record_id = %(record_id)s AND gtrm.mock_kind = 'tool'
+ORDER BY gtrm.mock_key, gtrm.call_order;
 
 
 -- name: insert_ground_truth_record_mock
-INSERT INTO ground_truth_record_mock (record_id, tool_name, call_order, mock_response, description)
-VALUES (%(record_id)s, %(tool_name)s, %(call_order)s, %(mock_response)s, %(description)s)
+-- Backward-compatible: tool_name param maps to mock_key with mock_kind='tool'.
+INSERT INTO ground_truth_record_mock (record_id, mock_kind, mock_key, call_order, mock_response, description)
+VALUES (%(record_id)s, 'tool', %(tool_name)s, %(call_order)s, %(mock_response)s, %(description)s)
 RETURNING id, created_at;
 
 
@@ -365,3 +404,25 @@ DELETE FROM ground_truth_record_mock WHERE id = %(mock_id)s RETURNING id;
 
 -- name: delete_all_ground_truth_record_mocks
 DELETE FROM ground_truth_record_mock WHERE record_id = %(record_id)s;
+
+
+-- name: list_ground_truth_record_mocks_by_kind
+SELECT gtrm.id, gtrm.record_id, gtrm.mock_kind, gtrm.mock_key,
+       gtrm.call_order, gtrm.mock_response, gtrm.description, gtrm.created_at
+FROM ground_truth_record_mock gtrm
+WHERE gtrm.record_id = %(record_id)s AND gtrm.mock_kind = %(mock_kind)s
+ORDER BY gtrm.mock_key, gtrm.call_order;
+
+
+-- name: list_ground_truth_record_mocks_all
+SELECT gtrm.id, gtrm.record_id, gtrm.mock_kind, gtrm.mock_key,
+       gtrm.call_order, gtrm.mock_response, gtrm.description, gtrm.created_at
+FROM ground_truth_record_mock gtrm
+WHERE gtrm.record_id = %(record_id)s
+ORDER BY gtrm.mock_kind, gtrm.mock_key, gtrm.call_order;
+
+
+-- name: insert_ground_truth_record_mock_kinded
+INSERT INTO ground_truth_record_mock (record_id, mock_kind, mock_key, call_order, mock_response, description)
+VALUES (%(record_id)s, %(mock_kind)s, %(mock_key)s, %(call_order)s, %(mock_response)s, %(description)s)
+RETURNING id, created_at;
