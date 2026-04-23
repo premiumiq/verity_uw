@@ -13,6 +13,7 @@ from verity.db.connection import Database
 from verity.governance.decisions import DecisionsReader
 from verity.governance.lifecycle import Lifecycle
 from verity.governance.models import Models
+from verity.governance.quotas import Quotas
 from verity.governance.registry import Registry
 from verity.governance.reporting import Reporting
 from verity.governance.testing_meta import Testing
@@ -39,6 +40,7 @@ class GovernanceCoordinator:
         self.reporting = Reporting(db)
         self.testing = Testing(db)
         self.models = Models(db)
+        self.quotas = Quotas(db)
 
 
 __all__ = ["GovernanceCoordinator"]

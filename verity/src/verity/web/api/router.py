@@ -22,6 +22,7 @@ from verity.web.api.decisions import build_decisions_router
 from verity.web.api.draft_edit import build_draft_edit_router
 from verity.web.api.lifecycle import build_lifecycle_router
 from verity.web.api.models import build_models_router
+from verity.web.api.quotas import build_quotas_router
 from verity.web.api.registry import build_registry_router
 from verity.web.api.reporting import build_reporting_router
 from verity.web.api.runtime import build_runtime_router
@@ -63,6 +64,9 @@ def build_api_router(verity) -> APIRouter:
     # Usage & spend — aggregations over the model invocation log +
     # point-in-time price view.
     router.include_router(build_usage_router(verity))
+
+    # Quotas — per-scope budget caps, checker, and breach records.
+    router.include_router(build_quotas_router(verity))
 
     # Applications — multi-tenant anchor, entity mappings, activity +
     # purge for the cleanup-notebook flow, and execution-context creation.

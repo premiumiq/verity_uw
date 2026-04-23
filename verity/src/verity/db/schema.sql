@@ -1508,3 +1508,58 @@ CREATE TABLE IF NOT EXISTS pipeline_run (
 CREATE INDEX IF NOT EXISTS idx_pr_started     ON pipeline_run(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pr_status      ON pipeline_run(status);
 CREATE INDEX IF NOT EXISTS idx_pr_application ON pipeline_run(application);
+
+
+-- ============================================================
+-- QUOTAS — soft budget caps per scope
+-- ============================================================
+-- A quota pairs a scope (application / agent / task / model) with a
+-- period (daily / weekly / monthly) and a budget in USD. When the
+-- checker runs (manually via /admin/quotas or POST /api/v1/quotas/check,
+-- or on a cron), it computes the spend in the current period for
+-- that scope and records a quota_check row. If spend crosses the
+-- alert threshold (default 80% of budget), alert_fired is set on
+-- that check.
+--
+-- V1 is SOFT quotas only — the engine does NOT refuse calls at
+-- budget. Enforcement (hard_stop) is a column here for later, but
+-- no write-side code reads it yet. Intentionally self-contained:
+-- quota breaches do NOT create rows in the `incident` table because
+-- the entity_type enum (agent/task/prompt/pipeline/tool) doesn't
+-- fit application/model scopes; the admin UI reads quota_check
+-- directly for active breach counts.
+
+CREATE TABLE IF NOT EXISTS quota (
+    id                   UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    scope_type           VARCHAR(20) NOT NULL CHECK (scope_type IN ('application','agent','task','model')),
+    scope_id             UUID,                             -- polymorphic; not a hard FK because the target table varies
+    scope_name           VARCHAR(200) NOT NULL,            -- denormalized for display
+    period               VARCHAR(20) NOT NULL CHECK (period IN ('daily','weekly','monthly')),
+    budget_usd           NUMERIC(14,4) NOT NULL,
+    alert_threshold_pct  INTEGER NOT NULL DEFAULT 80 CHECK (alert_threshold_pct BETWEEN 1 AND 200),
+    hard_stop            BOOLEAN NOT NULL DEFAULT FALSE,   -- reserved; V1 ignores it
+    enabled              BOOLEAN NOT NULL DEFAULT TRUE,
+    notes                TEXT,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_quota_scope   ON quota(scope_type, scope_id);
+CREATE INDEX IF NOT EXISTS idx_quota_enabled ON quota(enabled);
+
+
+CREATE TABLE IF NOT EXISTS quota_check (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    quota_id        UUID NOT NULL REFERENCES quota(id) ON DELETE CASCADE,
+    checked_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    period_start    TIMESTAMPTZ NOT NULL,
+    period_end      TIMESTAMPTZ NOT NULL,
+    spend_usd       NUMERIC(14,4) NOT NULL,
+    budget_usd      NUMERIC(14,4) NOT NULL,
+    spend_pct       INTEGER NOT NULL,
+    alert_fired     BOOLEAN NOT NULL DEFAULT FALSE,
+    alert_level     VARCHAR(20),                           -- 'warning' (>= alert_threshold_pct) | 'breach' (>= 100%)
+    resolved_at     TIMESTAMPTZ,                           -- set when a later check shows spend below threshold
+    note            TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_qc_quota_checked ON quota_check(quota_id, checked_at DESC);
+CREATE INDEX IF NOT EXISTS idx_qc_active        ON quota_check(alert_fired, resolved_at);

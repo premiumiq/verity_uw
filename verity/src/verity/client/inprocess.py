@@ -125,6 +125,7 @@ class Verity:
         self.reporting = self._gov.reporting
         self.testing = self._gov.testing
         self.models = self._gov.models
+        self.quotas = self._gov.quotas
         self.execution = self._rt.execution
         self.pipeline_executor = self._rt.pipeline_executor
         self.test_runner = self._rt.test_runner
