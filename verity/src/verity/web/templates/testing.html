@@ -10,16 +10,13 @@
 
 {% block content %}
 
-<div class="verity-card" style="margin-bottom: 20px;">
-    <div class="verity-card-header">About Testing</div>
-    <div class="verity-card-footer">
-        Test suites validate that AI entities meet accuracy requirements before promotion.
-        Each suite contains test cases — small, focused inputs with expected outputs.
-        Running a suite executes each case against an entity version and compares outputs
-        using the specified metric (classification F1, field accuracy, exact match, or schema validation).
-        Tests are fast, cheap, and run frequently — they gate <strong>candidate → staging</strong> promotion.
-    </div>
-</div>
+<p class="verity-page-description">
+    Test suites validate that AI entities meet accuracy requirements before promotion.
+    Each suite contains test cases — small, focused inputs with expected outputs.
+    Running a suite executes each case against an entity version and compares outputs
+    using the specified metric (classification F1, field accuracy, exact match, or schema validation).
+    Tests are fast, cheap, and run frequently — they gate <strong>candidate → staging</strong> promotion.
+</p>
 
 <table class="verity-table">
     <thead>

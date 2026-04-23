@@ -10,19 +10,16 @@
 
 {% block content %}
 
-<div class="verity-card" style="margin-bottom: 20px;">
-    <div class="verity-card-header">About Ground Truth</div>
-    <div class="verity-card-footer">
-        Ground truth datasets contain production-representative data labeled by subject matter experts (SMEs).
-        Each record has an input (a document, a submission context) and an authoritative annotation (the correct answer).
-        The validation runner executes an entity version against every record and compares outputs to annotations,
-        computing aggregate metrics (F1, precision, recall, Cohen's kappa). Ground truth validation gates
-        <strong>staging → champion</strong> promotion.
-        <br><br>
-        <strong>Silver tier:</strong> Single annotator — one SME labels each record. Suitable for medium-materiality tasks.<br>
-        <strong>Gold tier:</strong> Multi-annotator with inter-annotator agreement (IAA) check. Disagreements adjudicated by senior SME. Required for high-materiality agents.
-    </div>
-</div>
+<p class="verity-page-description">
+    Ground truth datasets contain production-representative data labeled by subject matter experts (SMEs).
+    Each record has an input (a document, a submission context) and an authoritative annotation (the correct answer).
+    The validation runner executes an entity version against every record and compares outputs to annotations,
+    computing aggregate metrics (F1, precision, recall, Cohen's kappa). Ground truth validation gates
+    <strong>staging → champion</strong> promotion.
+    <br><br>
+    <strong>Silver tier:</strong> Single annotator — one SME labels each record. Suitable for medium-materiality tasks.<br>
+    <strong>Gold tier:</strong> Multi-annotator with inter-annotator agreement (IAA) check. Disagreements adjudicated by senior SME. Required for high-materiality agents.
+</p>
 
 <table class="verity-table">
     <thead>

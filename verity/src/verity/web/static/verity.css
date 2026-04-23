@@ -470,12 +470,23 @@ a:hover {
     margin-top: 8px;
 }
 
-/* Page description paragraph shown above tables on registry pages */
+/* Boxed page intro shown above tables on every admin page. Same
+   card styling as .verity-card so the description sits in a subtle
+   bordered container; used to be an unboxed <p> with only a text
+   colour, but wrapping in the box gives uniform framing across
+   Home, Quotas, Incidents, Testing, Ground Truth, and all registry
+   pages.
+*/
 .verity-page-description {
+    display: block;
+    background: var(--verity-bg);
+    border: 1px solid var(--verity-border);
+    border-radius: 6px;
+    padding: 14px 16px;
     font-size: 0.82rem;
     color: var(--verity-text-light);
     line-height: 1.5;
-    margin: 0 0 16px 0;
+    margin: 0 0 20px 0;
     max-width: 100%;
 }
 

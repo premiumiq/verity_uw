@@ -137,25 +137,27 @@
                 <span class="verity-nav-icon">⟁</span> Incidents
             </a>
 
-            <!-- Platform -->
-            <div class="verity-nav-section" style="margin-top: 10px;">Platform</div>
-            <a href="/admin/settings" class="verity-nav-link {% if active_page == 'settings' %}active{% endif %}">
-                <span class="verity-nav-icon">⚙</span> Settings
-            </a>
-
         </div><!-- end sidebar-nav -->
 
-        <!-- Sidebar footer — link to UW business app + version info -->
-        <div style="padding: 12px 16px; border-top: 1px solid rgba(255,255,255,0.15);">
-            <a href="http://localhost:8001/"
-               style="color: rgba(255,255,255,0.6); font-size: 0.75rem; text-decoration: none;"
+        <!-- Sidebar footer — compact gear + user icons above the
+             version tag. Icons only (no labels) to keep chrome out
+             of the vertical space: gear → /admin/settings, user
+             silhouette → account (placeholder href until there is
+             a real accounts flow). -->
+        <div style="padding: 10px 16px 8px; border-top: 1px solid rgba(255,255,255,0.15);
+                    display: flex; align-items: center; gap: 14px;">
+            <a href="/admin/settings" title="Settings"
+               style="color: rgba(255,255,255,0.6); font-size: 1rem; text-decoration: none; line-height: 1;"
                onmouseover="this.style.color='#8FAADC'"
-               onmouseout="this.style.color='rgba(255,255,255,0.6)'">
-                UW Demo →
-            </a>
-            <div style="font-size: 0.6rem; color: rgba(255,255,255,0.3); margin-top: 4px;">
-                Verity v0.1.0
-            </div>
+               onmouseout="this.style.color='rgba(255,255,255,0.6)'">⚙</a>
+            <a href="#" title="Account"
+               style="color: rgba(255,255,255,0.6); font-size: 1rem; text-decoration: none; line-height: 1;"
+               onmouseover="this.style.color='#8FAADC'"
+               onmouseout="this.style.color='rgba(255,255,255,0.6)'">👤</a>
+        </div>
+        <div style="padding: 0 16px 10px; font-size: 0.6rem;
+                    color: rgba(255,255,255,0.3);">
+            Verity v0.1.0
         </div>
 
     </nav><!-- end sidebar -->
