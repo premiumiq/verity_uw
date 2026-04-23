@@ -97,6 +97,19 @@ class PipelineExecutor:
         logger.info("Pipeline run starting: %s (run_id=%s, steps=%s, mock=%s)",
                      pipeline_name, str(pipeline_run_id)[:8], step_names, mock is not None)
 
+        # Attribution: same fallback chain as the decision-log writer —
+        # explicit `application=` kwarg (from a REST runtime caller,
+        # e.g. the DS Workbench) wins; otherwise fall back to the
+        # engine's SDK-client identity (e.g. 'uw_demo' when the UW
+        # process constructed Verity with application='uw_demo').
+        # Using the literal 'default' as a last resort only catches
+        # the edge case of an engine built without one.
+        resolved_application = (
+            application
+            or getattr(self.engine, "application", None)
+            or "default"
+        )
+
         # ── Write `pipeline_run` row with status='running'.
         # Without this, the /admin/pipeline-runs page had no way to
         # know a run was in flight — it always showed "complete" as
@@ -110,7 +123,7 @@ class PipelineExecutor:
                 {
                     "id": str(pipeline_run_id),
                     "pipeline_name": pipeline_name,
-                    "application": application or "default",
+                    "application": resolved_application,
                     "started_at": started_at,
                     "step_count": len(steps),
                     "execution_context_id": (
