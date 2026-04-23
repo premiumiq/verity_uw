@@ -27,9 +27,23 @@ def _parse_window(
     to_raw: Optional[str],
 ) -> tuple[datetime, datetime]:
     """Parse the from/to query pair into a (from_ts, to_ts) datetime
-    tuple. Defaults: last 7 days, ending now. Raises 400 on malformed
-    input. Date-only inputs ('2026-04-23') are promoted to UTC midnight.
+    tuple for the SQL `started_at >= from_ts AND started_at < to_ts`
+    window. Defaults: last 7 days, ending now. Raises 400 on malformed
+    input.
+
+    Date-only inputs (YYYY-MM-DD) are treated as INCLUSIVE bounds:
+      - from: midnight of the given date (i.e. include all of that day)
+      - to:   midnight of the NEXT day (i.e. include all of the stated
+              end date). Without the next-day shift, `to=2026-04-22`
+              would exclude every invocation that happened during
+              April 22 itself — the opposite of what a date picker
+              caller intends.
+    ISO 8601 strings that already include a time component are taken
+    literally (no shift).
     """
+    def _is_date_only(raw: str) -> bool:
+        return "T" not in raw and " " not in raw
+
     def _parse_one(raw: str, kind: str) -> datetime:
         try:
             dt = datetime.fromisoformat(raw)
@@ -45,6 +59,11 @@ def _parse_window(
     now = datetime.now(timezone.utc)
     from_ts = _parse_one(from_raw, "from") if from_raw else (now - timedelta(days=7))
     to_ts   = _parse_one(to_raw,   "to")   if to_raw   else now
+
+    # Inclusive end-of-day shift when `to` is a bare date.
+    if to_raw and _is_date_only(to_raw):
+        to_ts = to_ts + timedelta(days=1)
+
     if from_ts >= to_ts:
         raise HTTPException(
             status_code=400, detail="`from` must be earlier than `to`",

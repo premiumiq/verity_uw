@@ -476,7 +476,7 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
 
         await verity.ensure_connected()
 
-        # Parse window (default: last 7 days). Same helper logic as the
+        # Parse window (default: last 7 days). Same logic as the
         # /api/v1/usage/* endpoints; kept inline here so the template
         # stays route-local.
         now = datetime.now(timezone.utc)
@@ -489,6 +489,18 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             from_ts = from_ts.replace(tzinfo=timezone.utc)
         if to_ts.tzinfo is None:
             to_ts = to_ts.replace(tzinfo=timezone.utc)
+
+        # Preserve what the user typed (for the form input value + the
+        # chart's axis max); shift the SQL upper bound to end-of-day
+        # when the user entered a date with no time. Otherwise
+        # `to=2026-04-22` would map to midnight exactly and the
+        # SQL's `started_at < to_ts` would EXCLUDE everything that
+        # happened during that day — counterintuitive for a date
+        # picker that says "through April 22".
+        to_display = to_ts.date().isoformat()
+        if to and "T" not in to and " " not in to:
+            to_ts = to_ts + timedelta(days=1)
+        from_display = from_ts.date().isoformat()
 
         # Parse apps filter, same pattern as the home dashboard.
         raw_apps = (apps or "").strip()
@@ -526,8 +538,12 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
 
         return _render(templates, request, "usage.html",
             active_page="usage",
-            from_ts=from_ts.date().isoformat(),
-            to_ts=to_ts.date().isoformat(),
+            # `from_ts` / `to_ts` are the user-facing dates (what the
+            # date-picker inputs show, what the chart axis uses). The
+            # actual SQL window was shifted by one day on the `to`
+            # side to make the date inclusive — see the comment above.
+            from_ts=from_display,
+            to_ts=to_display,
             applications=applications,
             selected_app_names=selected_app_names,
             totals=totals,
