@@ -181,19 +181,25 @@ WHERE v.started_at >= %(from_ts)s
 
 
 -- name: usage_by_model
+-- Left-joins to the model catalog so the admin UI can show the
+-- human-friendly display name (e.g. "Claude Sonnet 4") while keeping
+-- the machine model_id as a subtitle. LEFT JOIN so a deregistered
+-- model still appears in historical windows.
 SELECT
     v.provider,
     v.model_name,
+    m.display_name                          AS model_display_name,
     COUNT(*)                                AS invocation_count,
     COALESCE(SUM(v.input_tokens),  0)       AS input_tokens,
     COALESCE(SUM(v.output_tokens), 0)       AS output_tokens,
     COALESCE(SUM(v.total_cost_usd), 0)      AS total_cost_usd
 FROM v_model_invocation_cost v
 JOIN agent_decision_log adl ON adl.id = v.decision_log_id
+LEFT JOIN model m ON m.provider = v.provider AND m.model_id = v.model_name
 WHERE v.started_at >= %(from_ts)s
   AND v.started_at <  %(to_ts)s
   AND (cardinality(%(app_names)s::text[]) = 0 OR adl.application = ANY(%(app_names)s::text[]))
-GROUP BY v.provider, v.model_name
+GROUP BY v.provider, v.model_name, m.display_name
 ORDER BY total_cost_usd DESC;
 
 
@@ -242,18 +248,24 @@ ORDER BY total_cost_usd DESC;
 -- name: usage_by_application
 -- Uses the decision's `application` VARCHAR column — matches the
 -- attribution model used everywhere else (decisions, purge, etc).
+-- LEFT JOIN to the application table so the admin UI can show the
+-- human-friendly display_name while keeping the machine name as
+-- a subtitle. Rows whose application VARCHAR doesn't match any
+-- registered application still appear (e.g. legacy 'default').
 SELECT
     COALESCE(adl.application, '(none)')    AS application,
+    a.display_name                          AS application_display_name,
     COUNT(*)                                AS invocation_count,
     COALESCE(SUM(v.input_tokens),  0)       AS input_tokens,
     COALESCE(SUM(v.output_tokens), 0)       AS output_tokens,
     COALESCE(SUM(v.total_cost_usd), 0)      AS total_cost_usd
 FROM v_model_invocation_cost v
 JOIN agent_decision_log adl ON adl.id = v.decision_log_id
+LEFT JOIN application a ON a.name = adl.application
 WHERE v.started_at >= %(from_ts)s
   AND v.started_at <  %(to_ts)s
   AND (cardinality(%(app_names)s::text[]) = 0 OR adl.application = ANY(%(app_names)s::text[]))
-GROUP BY adl.application
+GROUP BY adl.application, a.display_name
 ORDER BY total_cost_usd DESC;
 
 

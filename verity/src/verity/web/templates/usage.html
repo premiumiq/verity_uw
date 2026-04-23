@@ -211,7 +211,10 @@
         {% for r in by_model %}
         <tr>
             <td><span class="verity-badge" style="background: #e8f0fe; color: #1967d2;">{{ r.provider }}</span></td>
-            <td style="font-family: monospace; font-size: 0.8rem;">{{ r.model_name }}</td>
+            <td>
+                <span style="font-weight: 500;">{{ r.model_display_name or r.model_name }}</span>
+                <div style="font-size: 0.65rem; color: var(--verity-text-light); font-family: monospace;">{{ r.model_name }}</div>
+            </td>
             <td class="num">{{ '{:,}'.format(r.invocation_count) }}</td>
             <td class="num">{{ '{:,}'.format(r.input_tokens) }}</td>
             <td class="num">{{ '{:,}'.format(r.output_tokens) }}</td>
@@ -236,7 +239,10 @@
     <tbody>
         {% for r in by_application %}
         <tr>
-            <td style="font-weight: 500;">{{ r.application }}</td>
+            <td>
+                <span style="font-weight: 500;">{{ r.application_display_name or r.application }}</span>
+                <div style="font-size: 0.65rem; color: var(--verity-text-light); font-family: monospace;">{{ r.application }}</div>
+            </td>
             <td class="num">{{ '{:,}'.format(r.invocation_count) }}</td>
             <td class="num">{{ '{:,}'.format(r.input_tokens) }}</td>
             <td class="num">{{ '{:,}'.format(r.output_tokens) }}</td>
@@ -319,30 +325,70 @@
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <script>
 (function() {
+    // Daily rollup rows from the route — `bucket` is the ISO date at
+    // UTC midnight, `total_cost_usd` is a float, `invocation_count` int.
     const data = {{ over_time | tojson }};
-    const dates = data.map(d => d.bucket.slice(0, 10));   // YYYY-MM-DD
-    const cost  = data.map(d => parseFloat(d.total_cost_usd));
-    const invos = data.map(d => d.invocation_count);
+
+    // type:'time' axis — feed it [dateString, value] pairs so points
+    // land on their real date regardless of how many rows the DB
+    // returned. Missing days render as gaps (correct behaviour — we
+    // don't pretend there was zero activity on a day we never heard
+    // about).
+    const costSeries  = data.map(d => [d.bucket, parseFloat(d.total_cost_usd)]);
+    const countSeries = data.map(d => [d.bucket, d.invocation_count]);
+
+    // Explicit axis range = the user's FROM/TO window. Single data
+    // points no longer center-float on the axis.
+    const axisMin = {{ from_ts | tojson }};
+    const axisMax = {{ to_ts   | tojson }};
 
     const c = echarts.init(document.getElementById('chart-over-time'));
     window.addEventListener('resize', () => c.resize());
     c.setOption({
         textStyle: { fontFamily: 'Poppins, sans-serif' },
         tooltip: { trigger: 'axis' },
-        legend: { data: ['Cost (USD)', 'Invocations'], top: 0, right: 10, textStyle: { fontSize: 9 } },
-        grid: { left: 55, right: 55, top: 30, bottom: 25 },
-        xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 9, color: '#7F7F7F' } },
+        // Vertical legend docked to the right of the plot area — it
+        // used to float top-right and overlap the right y-axis's name
+        // and labels on narrow single-point charts.
+        legend: {
+            data: ['Cost (USD)', 'Invocations'],
+            orient: 'vertical',
+            right: 8, top: 'middle',
+            textStyle: { fontSize: 10 },
+            itemGap: 10,
+        },
+        // `right: 130` reserves the strip for the legend; `left: 70`
+        // and the inline-name y-axes sit comfortably on the left.
+        grid: { left: 70, right: 130, top: 20, bottom: 32 },
+        xAxis: {
+            type: 'time',
+            min: axisMin,
+            max: axisMax,
+            axisLabel: {
+                fontSize: 9, color: '#7F7F7F',
+                formatter: function(val) {
+                    const d = new Date(val);
+                    return d.toISOString().slice(5, 10);  // MM-DD
+                },
+            },
+        },
         yAxis: [
-            { type: 'value', name: 'Cost', axisLabel: { fontSize: 9, color: '#7F7F7F',
-              formatter: function(v) { return '$' + v.toFixed(4); } } },
-            { type: 'value', name: 'Count', axisLabel: { fontSize: 9, color: '#7F7F7F' } },
+            { type: 'value', name: 'Cost',
+              nameTextStyle: { fontSize: 9, color: '#7F7F7F', padding: [0, 0, 0, 20] },
+              axisLabel: { fontSize: 9, color: '#7F7F7F',
+                  formatter: function(v) { return '$' + v.toFixed(4); } } },
+            { type: 'value', name: 'Count',
+              nameTextStyle: { fontSize: 9, color: '#7F7F7F', padding: [0, 20, 0, 0] },
+              axisLabel: { fontSize: 9, color: '#7F7F7F' },
+              minInterval: 1 },
         ],
         series: [
-            { name: 'Cost (USD)', type: 'bar', data: cost,
+            { name: 'Cost (USD)', type: 'bar', data: costSeries,
               itemStyle: { color: '#405A8A', borderRadius: [3, 3, 0, 0] },
-              barWidth: 18 },
-            { name: 'Invocations', type: 'line', yAxisIndex: 1, data: invos,
-              itemStyle: { color: '#E3B447' }, lineStyle: { width: 1.5 } },
+              barMaxWidth: 24 },
+            { name: 'Invocations', type: 'line', yAxisIndex: 1, data: countSeries,
+              itemStyle: { color: '#E3B447' }, lineStyle: { width: 1.5 },
+              symbolSize: 6 },
         ],
     });
 })();
