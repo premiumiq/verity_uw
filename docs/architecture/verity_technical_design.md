@@ -8,46 +8,83 @@ This document describes the internal architecture of the Verity AI governance pl
 
 ## System Overview
 
+The Verity package is split into two planes. **Governance** owns the registry, lifecycle, decision-log reader, reporting, testing metadata, model management, and quotas. **Runtime** owns agent / task / tool execution, pipeline execution, the decision-log writer, MCP client, and mock / fixture backends. A thin `Coordinator` wires the two together. The business app consumes both via the `Verity` facade in `client/inprocess.py`.
+
 ```
-+-----------------------------------------------------------------------+
-|                          Verity Package                                |
-|                     (verity/src/verity/)                               |
-|                                                                       |
-|  +------------------+     +------------------+     +----------------+ |
-|  | core/            |     | models/          |     | db/            | |
-|  |                  |     |                  |     |                | |
-|  | client.py    <---+---->| agent.py         |     | connection.py  | |
-|  | execution.py     |     | task.py          |     | schema.sql     | |
-|  | registry.py      |     | prompt.py        |     | migrate.py     | |
-|  | lifecycle.py     |     | tool.py          |     | queries/       | |
-|  | decisions.py     |     | decision.py      |     |   registry.sql | |
-|  | pipeline_exec.py |     | lifecycle.py     |     |   decisions.sql| |
-|  | mock_context.py  |     | inference_config |     |   lifecycle.sql| |
-|  | testing.py       |     | pipeline.py      |     |   reporting.sql| |
-|  | reporting.py     |     | testing.py       |     |   testing.sql  | |
-|  +--------+---------+     | reporting.py     |     +-------+--------+ |
-|           |                | application.py   |             |          |
-|           |                +------------------+             |          |
-|           |                                                 |          |
-|  +--------+-------------------------------------------------+--------+|
-|  | web/                                                              | |
-|  |  app.py          - FastAPI sub-app factory                        | |
-|  |  routes.py       - 26 HTML routes                                 | |
-|  |  templates/      - 21 Jinja2 templates                            | |
-|  |  static/         - verity.css                                     | |
-|  +-------------------------------------------------------------------+|
-+-----------------------------------------------------------------------+
++----------------------------------------------------------------------------+
+|                              Verity Package                                 |
+|                         (verity/src/verity/)                                |
+|                                                                            |
+|  +-----------------------+   +-----------------------+                     |
+|  | governance/           |   | runtime/              |                     |
+|  |                       |   |                       |                     |
+|  | registry.py           |   | engine.py             |---> Claude API      |
+|  | lifecycle.py          |   | pipeline.py           |                     |
+|  | decisions.py (reader) |   | decisions_writer.py   |                     |
+|  | reporting.py          |   | mcp_client.py         |                     |
+|  | testing_meta.py       |   | connectors.py         |                     |
+|  | models.py             |   | mock_context.py       |                     |
+|  | quotas.py             |   | fixture_backend.py    |                     |
+|  | coordinator.py  <-----+---+ test_runner.py        |                     |
+|  +----------+------------+   | validation_runner.py  |                     |
+|             |                | metrics.py            |                     |
+|             |                | runtime.py            |                     |
+|             |                +-----------+-----------+                     |
+|             |                            |                                 |
+|  +----------+----------------------------+-----------+                     |
+|  | client/inprocess.py  -- Verity facade (SDK entry) |                     |
+|  +----------+----------------------------------------+                     |
+|             |                                                              |
+|  +----------+--------+   +------------------+   +----------------+         |
+|  | contracts/        |   | models/          |   | db/            |         |
+|  | decision.py       |   | agent.py         |   | connection.py  |         |
+|  | pipeline.py       |   | task.py          |   | schema.sql     |         |
+|  | inference.py      |   | prompt.py        |   | migrate.py     |         |
+|  | prompt.py         |   | decision.py      |   | queries/       |         |
+|  | tool.py           |   | lifecycle.py     |   |   registry.sql |         |
+|  | testing.py        |   | inference_config |   |   registration.sql      |
+|  | config.py         |   | pipeline.py      |   |   decisions.sql|         |
+|  | enums.py          |   | testing.py       |   |   lifecycle.sql|         |
+|  | mock.py           |   | reporting.py     |   |   reporting.sql|         |
+|  +-------------------+   | application.py   |   |   testing.sql  |         |
+|                          | model.py         |   |   models.sql   |         |
+|                          | quota.py         |   |   quotas.sql   |         |
+|                          | pipeline_run.py  |   |   runtime.sql  |         |
+|                          +------------------+   +----------------+         |
+|                                                                            |
+|  +----------------------------------------------------------------------+ |
+|  | web/                                                                 | |
+|  |  app.py          - FastAPI sub-app factory                          | |
+|  |  routes.py       - HTML (admin UI) routes                           | |
+|  |  templates/      - Jinja2 templates                                 | |
+|  |  static/         - verity.css                                       | |
+|  |  middleware.py   - CorrelationMiddleware                             | |
+|  |  api/            - REST API (/api/v1/*)                              | |
+|  |      router.py                                                      | |
+|  |      registry.py / runtime.py / authoring.py / draft_edit.py        | |
+|  |      lifecycle.py / applications.py / decisions.py / reporting.py   | |
+|  |      models.py / usage.py / quotas.py / schemas.py                  | |
+|  +----------------------------------------------------------------------+ |
++----------------------------------------------------------------------------+
 ```
+
+**Plane responsibilities (the "Governance Contract"):**
+- Governance *owns* the data of record (registry, decisions, approvals, validation evidence) and *enforces* the rules (lifecycle gates, tool authorization, quota definitions).
+- Runtime *executes* governed configurations and *writes* decisions back through the contract. It depends on Governance for what to run; Governance depends on Runtime for nothing.
 
 ---
 
-## 1. Core Layer (`verity/src/verity/core/`)
+## 1. Governance & Runtime Layers
 
-### 1.1 Client (`client.py`)
+There is no `verity/src/verity/core/` directory. It was split into two planes early in the project: `verity/src/verity/governance/` (the system of record) and `verity/src/verity/runtime/` (the execution surface). Both are wired through the `Verity` facade in `client/inprocess.py`.
+
+### 1.1 Client (`client/inprocess.py`)
 
 The main entry point for all SDK operations. Every business application instantiates one `Verity` client.
 
 ```python
+from verity import Verity
+
 verity = Verity(
     database_url="postgresql://...",
     anthropic_api_key="sk-...",
@@ -56,7 +93,7 @@ verity = Verity(
 await verity.connect()
 ```
 
-**What it does:** Facade over all core modules. Holds shared instances of Database, Registry, Lifecycle, Decisions, ExecutionEngine, PipelineExecutor, Reporting, and Testing. All public methods delegate to these modules.
+**What it does:** Facade over Governance and Runtime. Holds shared instances of the `Database`, the Governance `Coordinator` (which in turn owns Registry / Lifecycle / DecisionsReader / Reporting / TestingMeta / Models / Quotas), and the `Runtime` (which owns ExecutionEngine / PipelineExecutor / DecisionsWriter / TestRunner / ValidationRunner / MCPClient).
 
 **Module initialization (in constructor):**
 
@@ -64,30 +101,38 @@ await verity.connect()
 Verity.__init__()
     |
     +-- self.db = Database(database_url)
-    +-- self.registry = Registry(self.db)
-    +-- self.lifecycle = Lifecycle(self.db)
-    +-- self.decisions = Decisions(self.db)
-    +-- self.reporting = Reporting(self.db)
-    +-- self.testing = Testing(self.db)
-    +-- self.execution = ExecutionEngine(
-    |       registry=self.registry,
-    |       decisions=self.decisions,
+    +-- self.governance = Coordinator(self.db)
+    |       +-- self.registry           = Registry(self.db)
+    |       +-- self.lifecycle          = Lifecycle(self.db)
+    |       +-- self.decisions (reader) = DecisionsReader(self.db)
+    |       +-- self.reporting          = Reporting(self.db)
+    |       +-- self.testing            = TestingMeta(self.db)
+    |       +-- self.models             = Models(self.db)
+    |       +-- self.quotas             = Quotas(self.db)
+    +-- self.runtime = Runtime(
+    |       governance=self.governance,
     |       anthropic_api_key=api_key,
-    |       application=application
+    |       application=application,
     |   )
-    +-- self.pipeline_executor = PipelineExecutor(
-            registry=self.registry,
-            execution_engine=self.execution
-        )
+    |       +-- self.execution          = ExecutionEngine(...)
+    |       +-- self.pipeline_executor  = PipelineExecutor(...)
+    |       +-- self.decisions_writer   = DecisionsWriter(self.db)
+    |       +-- self.test_runner        = TestRunner(...)
+    |       +-- self.validation_runner  = ValidationRunner(...)
+    |       +-- self.mcp_client         = MCPClient(...)
+    +-- Top-level attributes re-exported for ergonomic access:
+            verity.registry, verity.lifecycle, verity.decisions,
+            verity.reporting, verity.testing, verity.models, verity.quotas,
+            verity.execution, verity.pipeline_executor
 ```
 
-**Key dependency flow:** ExecutionEngine depends on Registry (to resolve configs) and Decisions (to log results). PipelineExecutor depends on Registry (to load pipeline definitions) and ExecutionEngine (to run individual steps).
+**Key dependency flow:** Runtime depends on Governance (to resolve configs, read authorizations, write decisions). Governance has no dependency on Runtime — that is the whole point of the split and the reason the Governance-as-sidecar topology is possible without rewriting the core.
 
-**Public method count:** ~50 methods across registry, execution, lifecycle, decisions, reporting, applications.
+**Public surface:** ~100 methods across the sub-facades (registry, lifecycle, execution, pipeline_executor, decisions, reporting, testing, models, quotas, applications). The REST API at `/api/v1/*` is a thin JSON wrapper over this facade.
 
 ---
 
-### 1.2 Execution Engine (`execution.py`)
+### 1.2 Execution Engine (`runtime/engine.py`)
 
 The runtime that invokes Claude and tools. Three execution modes: agent (multi-turn), task (single-turn), tool (no LLM).
 
@@ -228,7 +273,7 @@ else:
 
 ---
 
-### 1.3 Registry (`registry.py`)
+### 1.3 Registry (`governance/registry.py`)
 
 The source of truth for all AI asset definitions. Handles registration (write) and config resolution (read).
 
@@ -281,7 +326,7 @@ This populates the `template_variables TEXT[]` column automatically. The caller 
 
 ---
 
-### 1.4 Lifecycle (`lifecycle.py`)
+### 1.4 Lifecycle (`governance/lifecycle.py`)
 
 Manages the 7-state promotion workflow.
 
@@ -350,7 +395,9 @@ _set_champion(entity_type, current_version, new_version_id)
 
 ---
 
-### 1.5 Decisions (`decisions.py`)
+### 1.5 Decisions — Reader (`governance/decisions.py`) and Writer (`runtime/decisions_writer.py`)
+
+The decisions capability is split across the two planes by design. The **reader** (Governance) serves list, detail, audit-trail, and override queries — no writes. The **writer** (Runtime) is the single code path that produces `agent_decision_log` rows; every agent / task / tool invocation must route through it. Pipeline-run rows and model-invocation-log rows are also written here.
 
 Audit trail management. Every AI invocation produces an immutable record.
 
@@ -391,7 +438,7 @@ Both return `[AuditTrailEntry]` with: entity name, version, capability type, cha
 
 ---
 
-### 1.6 Pipeline Executor (`pipeline_executor.py`)
+### 1.6 Pipeline Executor (`runtime/pipeline.py`)
 
 Orchestrates multi-step pipelines with dependency resolution.
 
@@ -441,7 +488,7 @@ This means Step 3 (triage) can see the outputs of Step 1 (classify) and Step 2 (
 
 ---
 
-### 1.7 Mock Context (`mock_context.py`)
+### 1.7 Mock Context (`runtime/mock_context.py`, `runtime/fixture_backend.py`)
 
 Two independent mocking dimensions for testing.
 
@@ -505,19 +552,76 @@ Reconstructs a MockContext from a stored decision's `message_history` and `tool_
 
 ---
 
-### 1.8 Testing (`testing.py`)
+### 1.8 Testing metadata (`governance/testing_meta.py`)
 
-SQL wrappers for test suite management. **No test execution logic yet** - that's the planned TestRunner (Phase 5).
+Testing is split across planes: Governance (`testing_meta.py`) owns **metadata reads** (list suites, list cases, list validation runs, list ground truth datasets/records/annotations). Runtime (`test_runner.py`, `validation_runner.py`) owns **execution** (see §14).
 
-**Methods:** list_test_suites, list_test_cases, log_test_result, list_test_results, get_latest_validation, list_model_cards.
+**Methods:** list_test_suites, list_test_cases, log_test_result, list_test_results, get_latest_validation, list_model_cards, list_metric_thresholds, list_field_extraction_configs, list_ground_truth_datasets, list_ground_truth_records, list_ground_truth_annotations, list_validation_runs, list_validation_record_results.
 
 ---
 
-### 1.9 Reporting (`reporting.py`)
+### 1.9 Reporting (`governance/reporting.py`)
 
 Dashboard and model inventory queries.
 
-**Methods:** dashboard_counts (9 entity counts), model_inventory_agents, model_inventory_tasks, override_analysis (grouped by reason_code over N days).
+**Methods:** dashboard_counts (asset + decision + override + pipeline + cost tiles), model_inventory_agents, model_inventory_tasks, override_analysis (grouped by reason_code over N days).
+
+---
+
+### 1.10 Models (`governance/models.py`)
+
+Foundation-model registry and usage accounting.
+
+**Tables owned:** `model`, `model_price` (SCD-2), `model_invocation_log`, `v_model_invocation_cost` (view).
+
+**Methods:**
+- `register_model(name, display_name, provider, context_window, ...)` — registers a model row
+- `register_model_price(model_id, input_price_per_1m, output_price_per_1m, cache_read_price, cache_create_price, effective_from)` — appends an SCD-2 price row, closes the prior price
+- `list_models()`, `get_model(name)`, `list_model_prices(model_id)`
+- `log_invocation(model_id, decision_log_id, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, duration_ms, ...)` — called by `decisions_writer` on every Anthropic call
+- `usage_by_time_bucket(from_ts, to_ts, bucket, application_ids?)` — drives the cost-over-time chart
+- `usage_by_model(from_ts, to_ts, application_ids?)`, `usage_by_application(from_ts, to_ts)` — breakdowns for the Usage & Spend dashboard
+
+**Cost computation.** Every `model_invocation_log` row stores raw token counts. Cost is **never** stored on the row — it is joined through `v_model_invocation_cost`, which `LEFT JOIN`s the price that was effective at the invocation timestamp. Price edits therefore cannot retroactively alter historical cost; they only affect invocations from `effective_from` forward.
+
+---
+
+### 1.11 Quotas (`governance/quotas.py`)
+
+Soft-governance layer over model usage.
+
+**Tables owned:** `quota`, `quota_check`.
+
+**Methods:**
+- `register_quota(name, scope_type, scope_id, metric, limit_value, period, ...)` — scope_type ∈ {application, model, entity}; metric ∈ {spend_usd, invocation_count}; period ∈ {day, week, month}
+- `list_quotas()`, `get_quota(id)`, `deactivate_quota(id)`
+- `run_check(quota_id)` — computes current consumption over the rolling window, writes a `quota_check` row, returns `{consumption, limit, status: ok | warning | breach}`
+- `run_all_checks()` — iterates all active quotas; used by the on-demand button in the UI and by the (future) scheduler
+- `list_active_breaches()` — feeds the Incidents page
+
+**Enforcement model.** V1 is *soft*: no blocking at invocation time. Breaches appear on Incidents and drive operational triage. Hard enforcement at `DecisionsWriter.log_invocation` time is on the roadmap.
+
+---
+
+### 1.12 MCP Client (`runtime/mcp_client.py`)
+
+Bridge that surfaces tools served by external Model Context Protocol servers as normal, governed Verity tools.
+
+**Flow.**
+1. An `mcp_server` row is registered in Governance (URL, auth, description, lifecycle).
+2. A `tool` row can be registered with `implementation_path = "mcp://<server_name>/<tool_name>"`.
+3. At runtime, when the engine resolves a tool authorization and the tool is MCP-served, it delegates to `MCPClient.call_tool(server_name, tool_name, input)`.
+4. The MCP call result is wrapped in the same `{input, output}` shape as function-pointer tools, so `tool_calls_made` in the decision log is uniform.
+
+Governance (tool authorization, data classification, write-op flag) applies identically to MCP tools — Verity enforces before the MCP call is issued.
+
+---
+
+### 1.13 Coordinator (`governance/coordinator.py`)
+
+Thin composition root for the governance plane. Instantiates the registry / lifecycle / decisions_reader / reporting / testing_meta / models / quotas facades against a shared `Database`, and exposes them as attributes. It is the single dependency the Runtime needs in order to honour the Governance Contract.
+
+In the in-process topology (current), `Verity.__init__` constructs the `Coordinator` and passes it to the `Runtime`. In the sidecar topology (future), the `Coordinator` sits behind the REST API and the Runtime — wherever it executes — talks to it over HTTP.
 
 ---
 
@@ -547,32 +651,34 @@ class Database:
 
 ### 2.2 Schema (`db/schema.sql`)
 
-**33 tables** across 6 functional groups:
+**~45 tables + 1 view** across 8 functional groups. All `*_version` tables (agent_version, task_version, prompt_version, pipeline_version) carry a `cloned_from_version_id UUID NULL` column so lineage is traceable when a draft is produced by the clone-and-edit workflow.
 
-#### Asset Registry (12 tables)
+#### Asset Registry (14 tables)
 
 | Table | Purpose | Key Columns |
 |-------|---------|-------------|
 | inference_config | Named LLM parameter sets | name, model_name, temperature, max_tokens |
 | agent | Agent header (one per agent) | name, materiality_tier, current_champion_version_id |
-| agent_version | Agent versions with lifecycle | lifecycle_state, channel, inference_config_id, valid_from/to |
+| agent_version | Agent versions with lifecycle | lifecycle_state, channel, inference_config_id, valid_from/to, cloned_from_version_id, decision_log_detail |
 | task | Task header | name, capability_type, materiality_tier |
-| task_version | Task versions | lifecycle_state, channel, output_schema |
+| task_version | Task versions | lifecycle_state, channel, output_schema, cloned_from_version_id, decision_log_detail |
 | prompt | Prompt header | name, governance_tier |
-| prompt_version | Prompt content versions | content, template_variables[], api_role |
+| prompt_version | Prompt content versions | content, template_variables[], api_role, cloned_from_version_id |
 | entity_prompt_assignment | Links prompts to agent/task versions | entity_type, entity_version_id, execution_order, condition_logic |
-| tool | Tool definitions | name, input_schema, output_schema, mock_mode_enabled |
+| tool | Tool definitions | name, input_schema, output_schema, mock_mode_enabled, implementation_path |
 | agent_version_tool | Tool authorization for agents | agent_version_id, tool_id |
 | task_version_tool | Tool authorization for tasks | task_version_id, tool_id |
-| pipeline / pipeline_version | Pipeline definitions | steps JSONB, lifecycle_state |
+| agent_version_delegation | Authorizes parent→child sub-agent delegation | parent_agent_version_id, child_agent_name |
+| pipeline / pipeline_version | Pipeline definitions | steps JSONB, lifecycle_state, cloned_from_version_id |
+| mcp_server | Registered Model Context Protocol servers | name, url, auth_mode, lifecycle_state |
 
 #### Multi-App & Context (3 tables)
 
 | Table | Purpose |
 |-------|---------|
-| application | Registered consuming apps (uw_demo, ai_ops, model_validation, compliance_audit) |
+| application | Registered consuming apps (uw_demo, ai_ops, model_validation, compliance_audit, ds_workbench) |
 | application_entity | Maps entities to applications |
-| execution_context | Business operation context (context_ref, context_type, metadata JSONB) |
+| execution_context | Business operation context (context_ref, context_type, metadata JSONB, application_id) |
 
 #### Testing & Validation (9 tables)
 
@@ -588,41 +694,63 @@ class Database:
 | validation_record_result | Per-record predictions for drill-down |
 | metric_threshold | Pass/fail thresholds per entity (with optional field_name for extraction) |
 
-#### Decisions & Audit (3 tables)
+#### Decisions & Audit (4 tables)
 
 | Table | Purpose |
 |-------|---------|
-| agent_decision_log | Every AI invocation (31 columns including full snapshots) |
+| agent_decision_log | Every AI invocation (~35 columns: full snapshots + pipeline_run_id + parent_decision_id + decision_depth + step_name + application + decision_log_detail + redaction_applied + hitl_required + reproduced_from_decision_id) |
 | override_log | Human overrides of AI decisions |
 | approval_record | Lifecycle promotion approvals with evidence review flags |
+| pipeline_run | Pipeline-level run lifecycle (status: running / complete / partial / failed, steps_complete, steps_total, started_at / ended_at, application, execution_context_id) |
 
-#### Quality & Monitoring (4 tables)
+#### Model Management (3 tables + 1 view)
+
+| Table / View | Purpose |
+|--------------|---------|
+| model | Foundation-model registry (provider, display_name, context_window, default_limits) |
+| model_price | SCD-2 price history per model (input / output / cache-read / cache-create per-1M-token rates, effective_from / effective_to) |
+| model_invocation_log | One row per LLM call (model_id, decision_log_id, token counts incl. cache, duration_ms, created_at) |
+| v_model_invocation_cost | View that joins `model_invocation_log` to `model_price` by timestamp so cost is always point-in-time — drives Usage & Spend |
+
+#### Quotas & Incidents (3 tables)
+
+| Table | Purpose |
+|-------|---------|
+| quota | Active quota definitions (scope_type / scope_id, metric, limit_value, period, active) |
+| quota_check | History of check runs (quota_id, observed_value, status, checked_at) |
+| incident | Incident tracking with rollback records — Incidents page unifies this with active `quota` breaches |
+
+#### Quality & Monitoring (3 tables)
 
 | Table | Purpose |
 |-------|---------|
 | evaluation_run | Shadow/challenger production monitoring |
 | model_card | Per-version documentation |
 | field_extraction_config | Per-field tolerance for extraction validation |
-| incident | Incident tracking with rollback records |
 
 #### Infrastructure (2 tables)
 
 | Table | Purpose |
 |-------|---------|
 | description_similarity_log | pgvector similarity checks between entity descriptions |
+| platform_settings | Key-value Verity-wide configuration read at runtime |
 
 ### 2.3 Named Queries (`db/queries/`)
 
-**6 SQL files, 117 named queries total.**
+**10 SQL files.** All SQL lives here; nothing is constructed via string concatenation in Python.
 
-| File | Count | Purpose |
-|------|-------|---------|
-| registry.sql | ~40 | Config resolution, entity listing, cross-references |
-| registration.sql | ~35 | INSERT operations for all entity types |
-| decisions.sql | ~15 | Decision logging, audit trails, overrides, pipeline runs |
-| lifecycle.sql | ~12 | State updates, champion setting, deprecation |
-| reporting.sql | ~10 | Dashboard aggregations, model inventory |
-| testing.sql | ~5 | Test suite/case queries, validation runs |
+| File | Purpose |
+|------|---------|
+| registry.sql | Config resolution (current / date-pinned / version-pinned), entity listing, cross-references, agent / task / prompt config assembly |
+| registration.sql | INSERT operations for all entity types (headers, versions, associations, MCP servers) |
+| authoring.sql | Draft-only updates (PATCH / PUT semantics), clone-a-version into new draft, replace prompt-assignments / tool-authorizations / delegations, draft DELETE |
+| lifecycle.sql | State transitions, champion setting + SCD-2 valid_from/to, deprecation, approval records, rollback |
+| decisions.sql | Decision logging, list / detail / audit-trail queries, overrides, pipeline_run lifecycle writes (start / complete / fail), application activity + purge |
+| testing.sql | Test suites + cases, ground truth datasets / records / annotations, validation runs + per-record results, metric thresholds |
+| reporting.sql | Dashboard aggregations, model inventory, override analysis |
+| models.sql | Model registry CRUD, SCD-2 price history, invocation logging, usage aggregations for cost-over-time / by-model / by-application |
+| quotas.sql | Quota CRUD, quota_check history, consumption rollups, active-breach listing |
+| connectors.sql | MCP server registration + resolution queries used by `runtime/mcp_client.py` |
 
 ### 2.4 Enumerations
 
@@ -701,15 +829,16 @@ app.mount("/admin", verity_web)
 
 ### 4.2 Routes (`routes.py`)
 
-**26 routes** serving HTML pages via Jinja2 templates.
+Admin UI HTML routes served via Jinja2. Grouped to match the sidebar.
 
 | Route Group | Routes | Purpose |
 |-------------|--------|---------|
-| Dashboard | `/` | Landing page with 7 charts, KPIs, recent additions |
-| Registry | `/agents`, `/agents/{name}`, `/tasks`, `/tasks/{name}`, `/prompts`, `/prompts/{name}`, `/configs`, `/configs/{name}`, `/tools`, `/tools/{name}`, `/pipelines`, `/pipelines/{name}`, `/applications`, `/applications/{name}` | Browse and detail pages for all entity types |
-| Observability | `/decisions`, `/decisions/{id}`, `/pipeline-runs`, `/overrides` | Decision log, pipeline runs, human overrides |
-| Governance | `/model-inventory`, `/audit-trail/run/{id}`, `/audit-trail/context/{id}` | Model inventory report, audit trail views |
-| Placeholders | `/lifecycle`, `/test-results`, `/ground-truth` | In development |
+| Home | `/` | Dashboard with asset counts, decision + override + pipeline charts, current-month cost tile |
+| Registry | `/applications`, `/pipelines`, `/agents`, `/tasks`, `/prompts`, `/configs`, `/tools`, `/mcp-servers`, `/models` and detail pages | Browse and detail pages for all entity types |
+| Observability | `/pipeline-runs`, `/decisions`, `/overrides`, `/usage`, `/quotas` | Decision log, pipeline run lifecycle, overrides, Usage & Spend, quota status |
+| Governance | `/model-inventory`, `/lifecycle`, `/testing`, `/ground-truth`, `/validation-runs`, `/incidents` | Inventory, lifecycle overview, test suites, ground truth datasets, validation runs, incidents (incidents + active quota breaches) |
+| Audit | `/audit-trail/run/{id}`, `/audit-trail/context/{id}` | Pipeline-run and context-scoped audit trails |
+| Settings | `/settings` | Platform settings (`platform_settings` table) |
 
 ### 4.3 Template Rendering
 
@@ -733,6 +862,32 @@ _load_entity_apps()      # Maps (entity_type, entity_id) -> "App Display Name"
 _load_agent_summaries()  # Maps agent_id -> {prompt_names: "P1, P2", tool_names: "T1, T2"}
 _load_task_summaries()   # Maps task_id -> {prompt_names: "P1, P2"}
 ```
+
+### 4.5 REST API (`web/api/`)
+
+Mounted on the same FastAPI app at `/api/v1/*`. JSON-only; thin wrappers over the SDK facade (`client/inprocess.py`).
+
+**Sub-routers** (in `web/api/router.py`):
+
+| Module | Surface |
+|--------|---------|
+| `registry.py` | `GET /agents`, `/tasks`, `/prompts`, `/pipelines`, `/inference-configs`, `/tools`, `/mcp-servers`; per-entity `/{name}/config` (resolved) and `/{name}/versions` |
+| `runtime.py` | `POST /runtime/agents/{name}/run`, `/tasks/{name}/run`, `/pipelines/{name}/run` |
+| `authoring.py` | `POST` for all `register_*` headers, versions, and associations (prompts / tools / delegations / MCP servers / ground truth / validation runs / model cards / thresholds / test suites) |
+| `draft_edit.py` | `PATCH / PUT / DELETE` on draft versions only (draft-guard enforced in SQL); `POST /{name}/versions/{source_id}/clone` for clone-and-edit |
+| `lifecycle.py` | `POST /lifecycle/promote`, `/lifecycle/rollback`, `GET /lifecycle/approvals` |
+| `applications.py` | `POST/GET/DELETE /applications`, `/applications/{name}/entities` + map/unmap, `/activity` read + purge (env-flag guarded) |
+| `models.py` | Model + price CRUD |
+| `usage.py` | Usage & spend aggregations (time buckets, by-model, by-application) |
+| `quotas.py` | Quota CRUD + `run_check` + `run_all_checks` |
+| `decisions.py` | Decisions list / detail / audit-trail / overrides |
+| `reporting.py` | Dashboard counts, inventory |
+
+**Swagger UI:** `/api/v1/docs`. **OpenAPI JSON:** `/api/v1/openapi.json`.
+
+**Pydantic boundary:** Every method returning a BaseModel is serialized with `.model_dump(mode="json")` inside a single helper. Request bodies use request-specific Pydantic models in `web/api/schemas.py` that mirror the SDK method signatures.
+
+**Middleware:** `CorrelationMiddleware` (in `web/middleware.py`) attaches a correlation ID to every request for structured logging and trace inheritance — this applies to both the admin UI and the REST API.
 
 ---
 
@@ -793,27 +948,26 @@ Once promoted beyond draft, these bindings cannot change. A modification require
 
 ## 6. What Is Not Built Yet
 
-| Feature | Status | Reference |
-|---------|--------|-----------|
-| Test Runner (execute test suites) | Planned Phase 5 | fc11_lifecycle_testing_validation.md |
-| Validation Runner (ground truth validation) | Planned Phase 6 | fc11_lifecycle_testing_validation.md |
-| Metrics Engine (F1, precision, recall, kappa) | Planned Phase 4 | fc11_lifecycle_testing_validation.md |
-| Lifecycle Management UI | Placeholder route exists | FC-11 |
-| Test Status UI | Placeholder route exists | FC-11 |
-| Ground Truth UI | Placeholder route exists | FC-11 |
-| Sub-agent delegation | Schema supports (parent_decision_id) | FC-1 |
-| Session continuity | Not started | FC-2 |
-| Execution hooks (pre/post) | Not started | FC-3 |
-| Retry/fallback | Not started | FC-4 |
-| Vision/image input | Not started | FC-5 |
-| Batch API | Not started | FC-6 |
-| Response caching | Not started | FC-7 |
-| Version-pinned execution | Partially (registry supports it, execution uses it) | FC-8 |
-| Composition immutability enforcement | Application-level only, no DB triggers | FC-12 |
-| Tool versioning | Not started | FC-13 |
-| Verity REST API | Not started (SDK only) | Phase 3b |
-| Pipeline run persistence table | Not started | Pipeline rethink pending |
-| Description similarity computation | Schema ready, pgvector columns present but NULL | Deferred |
+The items below are what remains open. Everything not listed here is shipped.
+
+| Feature | Status |
+|---------|--------|
+| Verity Agents (drift detection, lifecycle initiation, HITL-gated validation agents) | Designed; no code yet |
+| REST API authentication | Open — the API binds unauthenticated to the Docker network / localhost |
+| Hard quota enforcement at invocation time | Soft enforcement only (breaches surface on Incidents); blocking at `DecisionsWriter.log_invocation` is on the roadmap |
+| Scheduled quota checker | On-demand button only; no background scheduler |
+| Slack / email notifications for incidents and quota breaches | Not started |
+| Composition immutability enforcement via DB triggers | Application-level guards only; defense-in-depth triggers planned |
+| Session continuity (long-running conversational memory) | Not started |
+| Execution hooks (pre/post invocation) | Not started |
+| Retry / fallback / circuit breaker around Claude API | Not started (single failure = failed decision) |
+| Vision / image input | Not started |
+| Batch API | Not started |
+| Response caching (outside of Claude's prompt cache) | Not started |
+| Tool versioning | Not started |
+| Description similarity computation | Schema ready; pgvector columns always NULL; embedding backfill and similarity check not built |
+| Streaming execution from Runtime to UI end-to-end | `ExecutionEvent` contract present; UI does not yet consume the stream |
+| Governance-as-sidecar deployment topology | REST API surface supports it; no external-orchestrator integration shipped |
 
 ---
 
@@ -1809,13 +1963,12 @@ If `VERITY_DB_URL` is wrong or the database is unreachable:
 
 | Gap | Description |
 |-----|-------------|
-| Pipeline status bug | Pipeline runs page shows "complete" while still running (only completed steps are in the DB) |
-| No pipeline_run table | Pipeline-level status is only in-memory; only step-level decisions are persisted |
 | Tool calls sequential within a turn | Claude may request 3 tools, but they execute one at a time |
-| No sub-agent support | `parent_decision_id` column exists, but no code creates sub-agent invocations |
-| No streaming with tools | Streaming emits events, but tool call results aren't streamed |
-| No cleanup/archival | Decision log, test results grow forever |
+| Streaming not consumed by UI | Runtime emits `ExecutionEvent` but the admin UI does not stream live — users wait for completion |
+| No cleanup / archival strategy | Decision log, model_invocation_log, test results grow forever |
 | pgvector unused | Embedding columns exist but are always NULL; similarity checks not implemented |
+| Soft quotas only | Breaches surface on Incidents but do not block invocation |
+| Price edits apply going forward only (by design) | SCD-2 means a pricing mistake cannot be retroactively corrected by editing — requires issuing a corrected price row with a backdated `effective_from`, which itself is a governance event worth noting |
 
 ---
 
@@ -1927,20 +2080,47 @@ verity = Verity(database_url="postgresql://...", application="my_app")
 await verity.connect()
 
 # Assume agents are already registered (by a seed script or another app)
-result = await verity.execute_agent("existing_agent", context={"key": "value"})
+result = await verity.execution.run_agent("existing_agent", context={"key": "value"})
 print(result.output)  # The agent's structured output
 print(result.decision_log_id)  # UUID of the audit record
 ```
 
 No tool registration needed if the agent doesn't use tools. No application registration needed if you don't need execution context grouping. No lifecycle management needed if you use existing champion versions.
 
+### 13.4 Integration Over the REST API
+
+An out-of-process consumer (a notebook, a non-Python service, an external orchestrator) integrates via `/api/v1/*` instead of importing the SDK.
+
+```python
+import httpx
+
+api = httpx.Client(base_url="http://verity:8000")
+
+# Register / map application (idempotent patterns)
+api.post("/api/v1/applications",
+         json={"name": "my_app", "display_name": "My App"})
+
+# Run a champion agent
+r = api.post("/api/v1/runtime/agents/triage_agent/run",
+             json={"context": {"submission_id": "SUB-001"},
+                   "application": "my_app"})
+r.raise_for_status()
+out = r.json()
+print(out["output"], out["decision_log_id"])
+```
+
+**Notes:**
+- Every POST `/runtime/*` endpoint accepts an `application` override in the body; if omitted, the decision is tagged with the Verity process default. This is how the `ds-workbench` JupyterLab service attributes all its activity to the `ds_workbench` application.
+- Tool implementations must still live somewhere executable. For REST-only consumers that don't host Python tools, the tools must be MCP-served (registered as `mcp://` tools) or the agent must not require tools.
+- Full Swagger UI at `/api/v1/docs` enumerates the ~78 operations.
+
 ---
 
-## 14. Testing, Validation & Lifecycle Components (FC-11)
+## 14. Testing, Validation & Lifecycle Components
 
-Three new core modules implement the VERIFY pillar: metrics computation, test execution, and ground truth validation. These were added after the initial release and complete the governance loop from asset registration through validation to promotion.
+Three runtime modules implement the VERIFY pillar: metrics computation, test execution, and ground truth validation. They complete the governance loop from asset registration through validation to promotion.
 
-### 14.1 Metrics Engine (`core/metrics.py`)
+### 14.1 Metrics Engine (`runtime/metrics.py`)
 
 Pure computation module. No database access, no I/O. Implements all metrics from scratch for regulatory auditability (no sklearn dependency).
 
@@ -1966,7 +2146,7 @@ Pure computation module. No database access, no I/O. Implements all metrics from
 - Normalizes `{value: "Acme", confidence: 0.95}` dicts to plain values before comparison
 - Tracks missing fields (in expected but not actual) and extra fields separately
 
-### 14.2 Test Runner (`core/test_runner.py`)
+### 14.2 Test Runner (`runtime/test_runner.py`)
 
 Executes test suites against entity versions using the SAME execution path as production. MockContext controls what's mocked.
 
@@ -1999,7 +2179,7 @@ TestRunner.run_suite(entity_type, entity_version_id, suite_id, mock_llm=True)
 **Tables read:** test_suite, test_case, plus all tables from agent/task config resolution.
 **Tables written:** test_execution_log (1 row per case), agent_decision_log (1 row per case execution).
 
-### 14.3 Validation Runner (`core/validation_runner.py`)
+### 14.3 Validation Runner (`runtime/validation_runner.py`)
 
 Validates entity versions against ground truth datasets. More comprehensive than test runner: runs against every record in a dataset, computes aggregate metrics, checks thresholds, stores per-record results.
 
@@ -2122,7 +2302,7 @@ Managed via the Settings page in the admin UI (`/admin/settings`).
 
 ### 14.8 Client Integration
 
-The Verity client (`core/client.py`) now initializes TestRunner and ValidationRunner alongside existing modules:
+The Verity client (`client/inprocess.py`) initializes TestRunner and ValidationRunner as part of the Runtime construction, alongside ExecutionEngine and PipelineExecutor:
 
 ```python
 self.test_runner = TestRunner(
@@ -2178,12 +2358,15 @@ The `underwriting` collection has per-submission folders. The `ground_truth` col
 
 | Metric | Count |
 |--------|-------|
-| Database tables | 34 (33 + platform_settings) |
-| Named SQL queries | ~132 (117 + 15 new testing/validation) |
-| Pydantic models | ~48 |
-| Python enums | 15 |
-| Web routes | ~35 (26 + 9 new governance) |
-| Jinja2 templates | 30 (21 + 9 new) |
-| Core modules | 12 (9 + metrics, test_runner, validation_runner) |
-| SDK public methods | ~55 |
-| agent_decision_log columns | 33 (31 + decision_log_detail, redaction_applied) |
+| Database tables | ~45 (registry, multi-app, context, testing, decisions, pipeline_run, model / model_price / model_invocation_log, quota / quota_check, incidents, evaluation, model_card, field_extraction_config, description_similarity_log, platform_settings, mcp_server) |
+| Views | 1 (`v_model_invocation_cost`) |
+| Named SQL queries | ~223 across 10 files (registry, registration, authoring, lifecycle, decisions, testing, reporting, models, quotas, connectors) |
+| Pydantic models | 60+ (including contracts/ boundary types) |
+| Python enums | 15+ |
+| Admin UI HTML routes (Jinja2) | ~40 |
+| REST API endpoints (`/api/v1/*`) | ~78 across 11 sub-routers |
+| Jinja2 templates | 36 |
+| Governance modules | 7 (registry, lifecycle, decisions reader, reporting, testing_meta, models, quotas) + coordinator |
+| Runtime modules | 11 (engine, pipeline, decisions_writer, mcp_client, connectors, mock_context, fixture_backend, test_runner, validation_runner, metrics, runtime) |
+| SDK public methods (`client/inprocess.py` + sub-facades) | ~100 |
+| `agent_decision_log` columns | ~35 (adds pipeline_run_id, parent_decision_id, decision_depth, step_name, application, reproduced_from_decision_id, hitl_required, decision_log_detail, redaction_applied) |

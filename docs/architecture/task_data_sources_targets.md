@@ -313,22 +313,23 @@ Show which sources were resolved vs. mocked for each record. Helps debug
 
 ---
 
-## Open questions to resolve before coding
+## Decisions (locked in 2026-04-23)
 
-1. **Connector config storage.** Base URL + auth for EDMS — JSONB in
-   `data_connector.config`, or read from env at provider-construction time?
-   Recommend env for v1 (keeps secrets out of DB), `config` for non-secret
-   tuning only.
-2. **Target firing rule.** Which channels fire real writes? Proposal:
-   `champion` only. `challenger`, `shadow`, `staging`, `candidate`, `draft`,
-   `validation`, `test` all log-only.
-3. **Lazy vs. eager source resolution.** Eager (resolve all required sources
-   before prompt build) is simpler and matches governance logging better.
-   Lazy (only resolve vars the prompt actually uses) saves fetches. Proposal:
-   **eager in v1** — simpler, fewer edge cases.
-4. **Error policy.** Required source fails to resolve → Task fails with
-   `SourceResolutionError`. Optional source fails → log and continue with
-   `{{var}}` unbound (prompt template must handle). Proposal: adopt this.
+1. **Connector config storage.** Env vars for secrets (API keys, auth tokens).
+   DB `data_connector.config` JSONB for non-secret tuning only (base URLs for
+   dev/prod split, timeouts, feature flags).
+2. **Target firing rule.** Default gate: only `champion` writes for real;
+   every other channel is log-only. **Runtime override required**: callers
+   can pass `dry_run=True` to force log-only even on champion (useful for
+   replay, debugging, shadow comparisons). Implementation: execution engine
+   accepts an explicit `write_mode` parameter — `"auto"` (channel-gated,
+   default), `"log_only"` (forced dry run), `"write"` (forced, requires
+   explicit opt-in, used only by production callers).
+3. **Source resolution.** Eager — all required sources resolved before prompt
+   build. Resolution order = `task_version_source.execution_order`.
+4. **Error policy.** Any source resolution failure is a hard fail —
+   `SourceResolutionError`. `required=False` only means "caller may omit the
+   ref"; if a ref *is* provided, it must resolve successfully.
 
 ---
 

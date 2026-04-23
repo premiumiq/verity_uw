@@ -1,22 +1,6 @@
 # Decision Logging Levels — Verity Governance Architecture
 
-## Problem
-
-The `agent_decision_log` table stores the full payload of every AI invocation — including `input_json`, `output_json`, `message_history`, and `tool_calls_made`. This creates two problems:
-
-1. **Bloat**: When a classifier receives PDF content blocks (base64), the entire ~670KB base64 string is stored in `input_json` and again in `message_history`. A single pipeline run with 3 PDFs produces ~4MB of base64 in the database.
-
-2. **No control**: Every invocation logs everything. There's no way to say "log the triage agent's full reasoning but skip the classifier's input payload." In production, a high-volume extraction task might run 10,000 times/day — logging full inputs for all of them is wasteful.
-
-## Design: Two Separate Concerns
-
-### Concern 1: Application Logging (Python `logging` module)
-What goes to stdout/files. Controlled by `LOG_LEVEL` (DEBUG/INFO/WARNING/ERROR). Already implemented. This is for **operations** — debugging, monitoring, alerting.
-
-### Concern 2: Decision Logging (Verity `agent_decision_log` table)
-What goes to the governance database. Controlled by `decision_log_detail` configuration. This is for **governance** — audit trail, compliance, replay, regulatory evidence.
-
-These are independent. You can have `LOG_LEVEL=WARNING` (quiet console) with `decision_log_detail=full` (everything in the audit trail), or vice versa.
+The `agent_decision_log` table stores the logs of every AI invocation — including `input_json`, `output_json`, `message_history`, and `tool_calls_made`. What goes to the governance database. Controlled by `decision_log_detail` configuration. This is for **governance** — audit trail, compliance, replay, regulatory evidence.
 
 ---
 
@@ -137,91 +121,6 @@ global_override > runtime_parameter > asset_version_default > 'standard'
 
 ---
 
-## Schema Changes
-
-### agent_decision_log table
-
-Add two columns:
-
-```sql
--- What detail level was used for this log entry
-ALTER TABLE agent_decision_log
-    ADD COLUMN decision_log_detail VARCHAR(20) DEFAULT 'standard';
-
--- What was redacted (null if nothing was redacted)
-ALTER TABLE agent_decision_log
-    ADD COLUMN redaction_applied JSONB;
-```
-
-### agent_version and task_version tables
-
-Add one column each:
-
-```sql
-ALTER TABLE agent_version
-    ADD COLUMN decision_log_detail VARCHAR(20) DEFAULT 'standard';
-
-ALTER TABLE task_version
-    ADD COLUMN decision_log_detail VARCHAR(20) DEFAULT 'standard';
-```
-
----
-
-## Implementation in Execution Engine
-
-The `_log_decision()` method in `execution.py` applies redaction based on the resolved detail level before writing to the database:
-
-```python
-async def _log_decision(self, ..., decision_log_detail: str = None):
-    # Resolve detail level: global > runtime > asset > default
-    level = self._resolve_log_detail(config, decision_log_detail)
-
-    # Apply redaction
-    logged_input, logged_output, logged_history, logged_tools, redaction_info = (
-        _apply_decision_redaction(level, context, output, message_history, tool_calls_made)
-    )
-
-    return await self.decisions.log_decision(DecisionLogCreate(
-        ...
-        input_json=logged_input,
-        output_json=logged_output,
-        message_history=logged_history,
-        tool_calls_made=logged_tools,
-        decision_log_detail=level,
-        redaction_applied=redaction_info,
-    ))
-```
-
-The `_apply_decision_redaction()` function handles each level:
-
-```python
-def _apply_decision_redaction(level, input_data, output, history, tools):
-    redaction_info = {"level": level}
-
-    if level == "full":
-        return input_data, output, history, tools, None  # no redaction
-
-    if level == "metadata" or level == "none":
-        return None, None, None, None, redaction_info
-
-    if level == "summary":
-        return (
-            str(input_data)[:500] if input_data else None,
-            str(output)[:500] if output else None,
-            None,  # no history
-            [{"tool_name": t["tool_name"]} for t in (tools or [])],  # names only
-            redaction_info,
-        )
-
-    # level == "standard" (default)
-    logged_input = _redact_input(input_data, redaction_info)
-    logged_history = _redact_message_history(history, redaction_info)
-    logged_tools = _redact_tool_calls(tools, redaction_info)
-    return logged_input, output, logged_history, logged_tools, redaction_info
-```
-
----
-
 ## Interaction with Replay
 
 The `full` level preserves everything needed for `MockContext.from_decision_log()` replay. Lower levels trade replay capability for storage efficiency:
@@ -236,24 +135,3 @@ The `full` level preserves everything needed for `MockContext.from_decision_log(
 The decision log `redaction_applied` field tells the replay system what's missing, so it can fail with a clear error instead of silently producing wrong results.
 
 ---
-
-## Implementation Phases
-
-### Phase 1: Redaction function + _log_decision changes
-- Create `_apply_decision_redaction()` in execution.py
-- Modify `_log_decision()` to accept and resolve detail level
-- Apply redaction before writing to DB
-- Add `decision_log_detail` and `redaction_applied` columns to schema
-
-### Phase 2: Asset configuration
-- Add `decision_log_detail` column to agent_version and task_version
-- Update registry to read/write this field
-- Update register_all.py seed data with appropriate defaults per entity
-
-### Phase 3: Runtime override
-- Add `decision_log_detail` parameter to `execute_agent()`, `execute_task()`, `execute_pipeline()`
-- Pass through to `_log_decision()`
-
-### Phase 4: Global override
-- Add verity_db settings mechanism (or reuse app_settings pattern)
-- Read in `_resolve_log_detail()`
