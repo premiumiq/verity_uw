@@ -562,9 +562,7 @@ All six notebooks were executed end-to-end against the live API: **0 errors / 40
 
 ### 10. Known limitations and next steps
 
-**Decision-attribution gap.** Decisions triggered through the REST `/runtime/*` endpoints are tagged with `application='default'` (the Verity server process's client identity), not with the caller's application name. The `DELETE /api/v1/applications/{name}/activity` endpoint matches decisions by the `application` VARCHAR column, so workbench-initiated runs are **not** caught by the activity purge. Documented in `99_cleanup.ipynb`. Two follow-ups would close the gap:
-1. Add an `application` override field to the runtime request bodies and thread it through to the SDK's decision writer.
-2. Broaden the purge SQL to also delete decisions linked via `execution_context.application_id` (not just by `application` name match).
+**Decision attribution — fixed in [84591c9](../../../../commit/84591c9).** The runtime request bodies now accept an optional `application` field; the workbench's `VerityAPI` passes `application='ds_workbench'` by default on every run. The purge/preview queries match by both `application` name AND `execution_context.application_id`, so legacy `'default'`-tagged decisions linked to a workbench-owned context also get swept up. Activity preview and purge are guaranteed to agree.
 
 **No auth.** The API binds to the docker network and localhost only. Before any shared deployment, an auth layer (bearer or per-app API keys) must be added.
 

@@ -254,12 +254,12 @@ def build_cleanup_notebook() -> nbf.NotebookNode:
             "dev this is baked into `docker-compose.yml`. Without it, the "
             "API returns 400 and no rows are touched.\n"
             "\n"
-            "**Note on decision attribution.** Decisions triggered through "
-            "the REST runtime endpoints are currently tagged with the "
-            "server's `application='default'` (because the API host's "
-            "Verity client has that identity). Those decisions are NOT "
-            "caught by this app's activity purge. To remove them, use "
-            "Verity's admin UI or a direct SQL delete.\n"
+            "**Decision attribution.** Every workbench-initiated run is "
+            "tagged `application='ds_workbench'` on the decision log. "
+            "The activity preview and the purge both match decisions by "
+            "that tag OR by their `execution_context.application_id` — "
+            "so historical `'default'`-tagged rows linked to a workbench "
+            "context also get caught. Preview and purge are in sync.\n"
         ),
         md(
             "## Prerequisites\n"
