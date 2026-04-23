@@ -1,0 +1,280 @@
+<!--
+  QUOTAS PAGE — per-scope soft budget caps + on-demand checker
+
+  Top strip: two buttons side by side — "Run check now" (POSTs to
+  /admin/quotas/check and reloads) and a "+ Add quota" disclosure
+  that reveals the create form inline.
+
+  Main table: one row per quota with its latest-check summary folded
+  in (spend / budget / %, alert badge). A delete button lives in the
+  last column for quick removal.
+
+  DATA PASSED BY ROUTE:
+    quotas           list of quota rows
+    latest_by_quota  {quota_id → latest quota_check row} (may be empty)
+    applications / agents / tasks / models  scope-picker dropdown sources
+-->
+{% extends "base.html" %}
+
+{% block title %}Quotas — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <span>Quotas</span>
+{% endblock %}
+
+{% block page_title %}Quotas{% endblock %}
+
+{% block content %}
+
+<style>
+    .quota-toolbar {
+        display: flex; gap: 8px; align-items: center;
+        margin-bottom: 16px; flex-wrap: wrap;
+    }
+    .quota-toolbar form { margin: 0; }
+    .quota-toolbar .run-check {
+        background: var(--verity-blue-deep); color: white;
+        padding: 7px 14px; border: none; border-radius: 4px;
+        font-weight: 600; font-size: 0.8rem; cursor: pointer;
+        font-family: inherit;
+    }
+    .quota-toolbar .add-quota {
+        background: white; color: var(--verity-blue-deep);
+        padding: 7px 14px; border: 1px solid var(--verity-blue-deep);
+        border-radius: 4px; font-weight: 600; font-size: 0.8rem;
+        cursor: pointer; font-family: inherit;
+    }
+
+    .quota-form {
+        background: var(--verity-bg-alt); padding: 16px;
+        border-radius: 8px; margin-bottom: 20px;
+        display: none;
+    }
+    .quota-form.open { display: block; }
+    .quota-form-grid {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 10px 14px;
+    }
+    .quota-form label {
+        display: flex; flex-direction: column; gap: 4px;
+        font-size: 0.7rem; text-transform: uppercase; letter-spacing: .4px;
+        color: var(--verity-text-light); font-weight: 600;
+    }
+    .quota-form input, .quota-form select, .quota-form textarea {
+        padding: 6px 10px; border: 1px solid var(--verity-border);
+        border-radius: 4px; font-family: inherit; font-size: 0.85rem;
+        background: white;
+    }
+    .quota-form .actions {
+        display: flex; gap: 8px; margin-top: 10px;
+    }
+    .quota-form button[type=submit] {
+        background: var(--verity-green); color: white; border: none;
+        padding: 8px 16px; border-radius: 4px; font-weight: 600;
+        cursor: pointer; font-family: inherit;
+    }
+    .quota-form .cancel {
+        background: white; color: var(--verity-text);
+        border: 1px solid var(--verity-border);
+        padding: 8px 16px; border-radius: 4px; cursor: pointer;
+        font-family: inherit;
+    }
+
+    .quota-progress-bar {
+        width: 100%; height: 6px; background: var(--verity-border-light);
+        border-radius: 3px; overflow: hidden; margin-top: 4px;
+    }
+    .quota-progress-bar .fill {
+        height: 100%;
+        transition: width .2s;
+    }
+    .quota-progress-bar .fill.warn   { background: #E3B447; }
+    .quota-progress-bar .fill.breach { background: #ED7D31; }
+    .quota-progress-bar .fill.ok     { background: var(--verity-green); }
+
+    .quota-delete-btn {
+        background: none; border: none; color: var(--verity-text-light);
+        cursor: pointer; padding: 4px 8px; font-family: inherit;
+        border-radius: 3px;
+    }
+    .quota-delete-btn:hover { background: var(--verity-red-light); color: #A23838; }
+</style>
+
+<p class="verity-page-description">
+    Soft budget caps on application / agent / task / model scopes. When the checker runs, it computes spend over the active period (daily / weekly / monthly) via <a href="/admin/usage">the same cost view</a> the Usage dashboard uses, and records a breach if spend reaches the alert threshold. V1 does not refuse calls at the budget — breaches surface on <a href="/admin/incidents">Incidents</a> and on the home dashboard's Open Incidents tile. Kick off a check with the button below, or <code>POST /api/v1/quotas/check</code>.
+</p>
+
+<div class="quota-toolbar">
+    <form method="post" action="/admin/quotas/check">
+        <button type="submit" class="run-check">▶ Run check now</button>
+    </form>
+    <button type="button" class="add-quota" onclick="document.getElementById('quota-form').classList.toggle('open');">+ Add quota</button>
+    <span style="color: var(--verity-text-light); font-size: 0.8rem; margin-left: 8px;">
+        {{ quotas | length }} quota{{ '' if quotas | length == 1 else 's' }} registered
+    </span>
+</div>
+
+<form id="quota-form" method="post" action="/admin/quotas/new" class="quota-form">
+    <div class="quota-form-grid">
+        <label>
+            Scope
+            {#- One <select> covers every scope type via encoded value
+               "<scope_type>:<scope_id>:<scope_name>". The server parses
+               the split on POST. -#}
+            <select name="scope" required>
+                <option value="">— select —</option>
+                <optgroup label="Application">
+                    {% for a in applications %}
+                    <option value="application:{{ a.id }}:{{ a.name }}">
+                        {{ a.display_name or a.name }}
+                    </option>
+                    {% endfor %}
+                </optgroup>
+                <optgroup label="Agent">
+                    {% for a in agents %}
+                    <option value="agent:{{ a.id }}:{{ a.name }}">
+                        {{ a.display_name or a.name }}
+                    </option>
+                    {% endfor %}
+                </optgroup>
+                <optgroup label="Task">
+                    {% for t in tasks %}
+                    <option value="task:{{ t.id }}:{{ t.name }}">
+                        {{ t.display_name or t.name }}
+                    </option>
+                    {% endfor %}
+                </optgroup>
+                <optgroup label="Model">
+                    {% for m in models %}
+                    <option value="model:{{ m.id }}:{{ m.model_id }}">
+                        {{ m.display_name or m.model_id }}
+                    </option>
+                    {% endfor %}
+                </optgroup>
+            </select>
+        </label>
+        <label>
+            Period
+            <select name="period" required>
+                <option value="daily">daily</option>
+                <option value="weekly">weekly</option>
+                <option value="monthly">monthly</option>
+            </select>
+        </label>
+        <label>
+            Budget (USD)
+            <input type="number" name="budget_usd" min="0" step="0.0001"
+                   placeholder="e.g. 0.01" required>
+        </label>
+        <label>
+            Alert threshold (%)
+            <input type="number" name="alert_threshold_pct" min="1" max="200" value="80">
+        </label>
+        <label style="grid-column: 1 / -1;">
+            Notes (optional)
+            <textarea name="notes" rows="2" placeholder="Why this cap exists, contact, etc."></textarea>
+        </label>
+    </div>
+    <div class="actions">
+        <button type="submit">Create quota</button>
+        <button type="button" class="cancel"
+                onclick="document.getElementById('quota-form').classList.remove('open');">Cancel</button>
+    </div>
+</form>
+
+
+{% if quotas %}
+<table class="verity-table">
+    <thead>
+        <tr>
+            <th>Scope</th>
+            <th>Period</th>
+            <th>Budget (USD)</th>
+            <th>Current spend</th>
+            <th>Last check</th>
+            <th>Status</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for q in quotas %}
+        {% set latest = latest_by_quota.get(q.id) %}
+        <tr>
+            <td>
+                <span class="verity-badge verity-badge-{{ q.scope_type }}" style="background: #E8EEF8; color: #2B4D8A; margin-right: 6px;">
+                    {{ q.scope_type }}
+                </span>
+                <strong>{{ q.scope_display_name or q.scope_name }}</strong>
+                {% if q.scope_display_name and q.scope_display_name != q.scope_name %}
+                <div style="font-size: 0.65rem; color: var(--verity-text-light); font-family: monospace; margin-top: 2px;">
+                    {{ q.scope_name }}
+                </div>
+                {% endif %}
+                {% if q.notes %}
+                <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 2px;">{{ q.notes }}</div>
+                {% endif %}
+            </td>
+            <td style="font-size: 0.8rem;">{{ q.period }}</td>
+            <td style="font-family: monospace; font-size: 0.85rem;">${{ '%.4f' % (q.budget_usd | float) }}</td>
+            <td>
+                {% if latest %}
+                    <span style="font-family: monospace; font-size: 0.85rem;">
+                        ${{ '%.4f' % (latest.spend_usd | float) }}
+                    </span>
+                    <span style="color: var(--verity-text-light); font-size: 0.7rem;">
+                        ({{ latest.spend_pct }}%)
+                    </span>
+                    <div class="quota-progress-bar">
+                        {% set pct = latest.spend_pct if latest.spend_pct <= 100 else 100 %}
+                        {% if latest.alert_level == 'breach' %}
+                            <div class="fill breach" style="width: 100%;"></div>
+                        {% elif latest.alert_level == 'warning' %}
+                            <div class="fill warn" style="width: {{ pct }}%;"></div>
+                        {% else %}
+                            <div class="fill ok" style="width: {{ pct }}%;"></div>
+                        {% endif %}
+                    </div>
+                {% else %}
+                    <span style="color: var(--verity-text-light); font-style: italic; font-size: 0.8rem;">never checked</span>
+                {% endif %}
+            </td>
+            <td style="font-size: 0.75rem; color: var(--verity-text-light);">
+                {% if latest %}
+                    {{ latest.checked_at.strftime('%m-%d %H:%M') if latest.checked_at else '—' }}
+                {% else %}—{% endif %}
+            </td>
+            <td>
+                {% if not q.enabled %}
+                    <span class="verity-badge verity-badge-deprecated">disabled</span>
+                {% elif latest and latest.alert_fired and not latest.resolved_at %}
+                    {% if latest.alert_level == 'breach' %}
+                        <span class="verity-badge verity-badge-failed">breach</span>
+                    {% else %}
+                        <span class="verity-badge" style="background: #F9F0DA; color: #816014;">warning</span>
+                    {% endif %}
+                {% elif latest %}
+                    <span class="verity-badge verity-badge-complete">within budget</span>
+                {% else %}
+                    <span style="color: var(--verity-text-light); font-size: 0.75rem;">—</span>
+                {% endif %}
+            </td>
+            <td>
+                <form method="post" action="/admin/quotas/{{ q.id }}/delete"
+                      onsubmit="return confirm('Delete this quota and all its check history?');"
+                      style="margin: 0;">
+                    <button type="submit" class="quota-delete-btn" title="Delete quota">✕</button>
+                </form>
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="verity-empty">
+    <div style="font-size: 2rem; opacity: 0.3;">⛃</div>
+    <div class="verity-empty-message">No quotas set. Click <strong>+ Add quota</strong> above.</div>
+</div>
+{% endif %}
+
+{% endblock %}

@@ -112,6 +112,9 @@
             <a href="/admin/usage" class="verity-nav-link {% if active_page == 'usage' %}active{% endif %}">
                 <span class="verity-nav-icon">◌</span> Usage &amp; Spend
             </a>
+            <a href="/admin/quotas" class="verity-nav-link {% if active_page == 'quotas' %}active{% endif %}">
+                <span class="verity-nav-icon">⛃</span> Quotas
+            </a>
 
             <!-- GOVERNANCE — compliance, lifecycle, testing -->
             <div class="verity-nav-section" style="margin-top: 10px;">Governance</div>
@@ -130,10 +133,9 @@
             <a href="/admin/validation-runs" class="verity-nav-link {% if active_page == 'validation_runs' %}active{% endif %}">
                 <span class="verity-nav-icon">◎</span> Validation Runs
             </a>
-            <span class="verity-nav-link" style="opacity: 0.35; cursor: default;">
+            <a href="/admin/incidents" class="verity-nav-link {% if active_page == 'incidents' %}active{% endif %}">
                 <span class="verity-nav-icon">⟁</span> Incidents
-                <span style="font-size: 0.55rem; opacity: 0.6; margin-left: 4px;">soon</span>
-            </span>
+            </a>
 
             <!-- Platform -->
             <div class="verity-nav-section" style="margin-top: 10px;">Platform</div>

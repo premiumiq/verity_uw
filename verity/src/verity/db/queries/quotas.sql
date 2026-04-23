@@ -27,8 +27,28 @@ RETURNING id, created_at;
 -- Most-recently created first. The admin UI also joins the latest
 -- quota_check (if any) for the inline "last check" summary — that
 -- join is done in a separate query to keep this one simple.
-SELECT * FROM quota
-ORDER BY created_at DESC;
+--
+-- scope_display_name is resolved at query time by LEFT JOINing the
+-- canonical table for each scope_type. The stored scope_name stays
+-- the machine name (uw_demo / appetite_agent / claude-sonnet-4-…)
+-- because the spend queries match against exactly that column in
+-- decision_log / agent / task / model; changing it would break the
+-- checker. Display-only names surface here.
+SELECT
+    q.*,
+    COALESCE(
+        app.display_name,
+        a.display_name,
+        t.display_name,
+        m.display_name,
+        q.scope_name
+    ) AS scope_display_name
+FROM quota q
+LEFT JOIN application app ON q.scope_type = 'application' AND app.id = q.scope_id
+LEFT JOIN agent       a   ON q.scope_type = 'agent'       AND a.id   = q.scope_id
+LEFT JOIN task        t   ON q.scope_type = 'task'        AND t.id   = q.scope_id
+LEFT JOIN model       m   ON q.scope_type = 'model'       AND m.id   = q.scope_id
+ORDER BY q.created_at DESC;
 
 
 -- name: get_quota_by_id

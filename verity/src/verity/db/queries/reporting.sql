@@ -89,6 +89,13 @@ ORDER BY t.materiality_tier, t.name;
 -- name: dashboard_counts
 -- Global counts across the whole registry + activity log. The decluttered
 -- home dashboard uses this when no application filter is active.
+--
+-- `open_incidents` is the UNION of two sources:
+--   (a) governance-driven incidents (the `incident` table), and
+--   (b) currently-active quota breaches (most recent quota_check per
+--       quota with alert_fired=true and resolved_at IS NULL).
+-- The Incidents admin page renders the same union as a single list
+-- so the count on the home tile matches what you see when you click it.
 SELECT
     (SELECT COUNT(*) FROM agent) AS agent_count,
     (SELECT COUNT(*) FROM task) AS task_count,
@@ -99,7 +106,14 @@ SELECT
     (SELECT COUNT(*) FROM mcp_server WHERE active = TRUE) AS mcp_server_count,
     (SELECT COUNT(*) FROM agent_decision_log) AS total_decisions,
     (SELECT COUNT(*) FROM override_log) AS total_overrides,
-    (SELECT COUNT(*) FROM incident WHERE status = 'open') AS open_incidents;
+    (
+        (SELECT COUNT(*) FROM incident WHERE status = 'open')
+      + (SELECT COUNT(*) FROM (
+            SELECT DISTINCT ON (quota_id) alert_fired, resolved_at
+            FROM quota_check
+            ORDER BY quota_id, checked_at DESC
+        ) latest WHERE alert_fired = TRUE AND resolved_at IS NULL)
+    ) AS open_incidents;
 
 
 -- name: dashboard_counts_scoped
@@ -143,7 +157,18 @@ SELECT
                  )
        )
     ) AS total_overrides,
-    (SELECT COUNT(*) FROM incident WHERE status = 'open') AS open_incidents;
+    -- open_incidents stays global when scoped too — legacy incidents
+    -- and quota breaches aren't (yet) attributable per application in
+    -- the UI filter. Keeps the scoped + unscoped tile values
+    -- consistent with what /admin/incidents shows.
+    (
+        (SELECT COUNT(*) FROM incident WHERE status = 'open')
+      + (SELECT COUNT(*) FROM (
+            SELECT DISTINCT ON (quota_id) alert_fired, resolved_at
+            FROM quota_check
+            ORDER BY quota_id, checked_at DESC
+        ) latest WHERE alert_fired = TRUE AND resolved_at IS NULL)
+    ) AS open_incidents;
 
 
 -- name: dashboard_governance_stats
@@ -187,3 +212,80 @@ LEFT JOIN task t ON t.id = tv.task_id
 WHERE ol.created_at > NOW() - INTERVAL '%(days)s days'
 GROUP BY ol.override_reason_code, ol.entity_type, a.name, t.name
 ORDER BY count DESC;
+
+
+-- name: list_open_incidents
+-- Unified list of active incidents. Two sources in one view:
+--   1) governance incidents (`incident` table, status='open') — legacy
+--      signal populated by earlier flows (failed validation runs,
+--      similarity drift, etc.).
+--   2) active quota breaches — the most recent quota_check per quota
+--      whose alert_fired is true and resolved_at is null.
+-- Rendered as a single list on /admin/incidents, newest first.
+WITH latest_breach AS (
+    SELECT DISTINCT ON (quota_id)
+        id, quota_id, checked_at, spend_usd, budget_usd, spend_pct,
+        alert_level
+    FROM quota_check
+    WHERE alert_fired = TRUE
+    ORDER BY quota_id, checked_at DESC
+)
+SELECT
+    i.id::text                                    AS id,
+    'governance'::text                            AS source,
+    i.title                                       AS title,
+    i.description                                 AS description,
+    i.severity                                    AS severity,
+    i.detected_at                                 AS detected_at,
+    i.status                                      AS status,
+    i.entity_type::text                           AS scope_type,
+    NULL::text                                    AS scope_name,
+    NULL::numeric                                 AS spend_usd,
+    NULL::numeric                                 AS budget_usd,
+    NULL::integer                                 AS spend_pct
+FROM incident i
+WHERE i.status = 'open'
+
+UNION ALL
+
+SELECT
+    lb.id::text                                   AS id,
+    'quota'::text                                 AS source,
+    -- Prefer the scope's human-friendly display name in the title,
+    -- matching the convention used on the Quotas and Usage pages.
+    ('Quota breach — ' || COALESCE(
+        app.display_name, a.display_name, t.display_name,
+        m.display_name, q.scope_name
+    ))                                            AS title,
+    -- psycopg parses the raw SQL text for placeholders and does not
+    -- skip comments, so any literal percent sign inside THIS comment
+    -- would also need doubling. The `percent` character in the
+    -- concat below is doubled in the string literal.
+    ('Spend ' || lb.spend_pct || '%% of $'
+        || q.budget_usd || ' ' || q.period
+        || ' budget (scope_type ' || q.scope_type || ')') AS description,
+    COALESCE(lb.alert_level, 'warning')           AS severity,
+    lb.checked_at                                 AS detected_at,
+    'open'::text                                  AS status,
+    q.scope_type                                  AS scope_type,
+    COALESCE(
+        app.display_name, a.display_name, t.display_name,
+        m.display_name, q.scope_name
+    )                                             AS scope_name,
+    lb.spend_usd                                  AS spend_usd,
+    lb.budget_usd                                 AS budget_usd,
+    lb.spend_pct                                  AS spend_pct
+FROM latest_breach lb
+JOIN quota q ON q.id = lb.quota_id
+LEFT JOIN application app ON q.scope_type = 'application' AND app.id = q.scope_id
+LEFT JOIN agent       a   ON q.scope_type = 'agent'       AND a.id   = q.scope_id
+LEFT JOIN task        t   ON q.scope_type = 'task'        AND t.id   = q.scope_id
+LEFT JOIN model       m   ON q.scope_type = 'model'       AND m.id   = q.scope_id
+-- Only include quota breaches that haven't been resolved since the
+-- latest check (the DISTINCT-ON in latest_breach only filters by
+-- alert_fired; resolved_at is evaluated here for the final filter).
+JOIN quota_check qc ON qc.id = lb.id
+WHERE qc.resolved_at IS NULL
+
+ORDER BY detected_at DESC
+LIMIT 200;

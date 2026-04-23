@@ -554,6 +554,105 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             over_time=over_time,
         )
 
+    # ── QUOTAS ────────────────────────────────────────────────
+
+    @router.get("/quotas", response_class=HTMLResponse)
+    async def quotas_list(request: Request):
+        """List quotas + inline latest-check summary + create form."""
+        await verity.ensure_connected()
+        quotas = await verity.quotas.list_quotas()
+        latest_checks = await verity.quotas.latest_checks()
+        latest_by_quota = {row["quota_id"]: row for row in latest_checks}
+
+        # Lookup tables for the scope dropdown in the create form.
+        applications = await verity.list_applications()
+        agents       = await verity.list_agents()
+        tasks        = await verity.list_tasks()
+        models       = await verity.models.list_models()
+
+        return _render(templates, request, "quotas.html",
+            active_page="quotas",
+            quotas=quotas,
+            latest_by_quota=latest_by_quota,
+            applications=applications,
+            agents=agents,
+            tasks=tasks,
+            models=models,
+        )
+
+    @router.post("/quotas/new", response_class=HTMLResponse)
+    async def quotas_create(request: Request):
+        """Handle the create form POST. Redirects back to /admin/quotas."""
+        from fastapi.responses import RedirectResponse
+        await verity.ensure_connected()
+        form = await request.form()
+        # Scope dropdown value is encoded as "<scope_type>:<scope_id>:<scope_name>"
+        # — lets one <select> cover apps / agents / tasks / models and carry
+        # the display name without a second lookup server-side.
+        scope_raw = (form.get("scope") or "").strip()
+        if not scope_raw or ":" not in scope_raw:
+            return HTMLResponse("<h1>Bad scope</h1>", status_code=400)
+        parts = scope_raw.split(":", 2)
+        if len(parts) != 3:
+            return HTMLResponse("<h1>Bad scope</h1>", status_code=400)
+        scope_type, scope_id, scope_name = parts
+        try:
+            await verity.quotas.register_quota(
+                scope_type=scope_type,
+                scope_id=scope_id,
+                scope_name=scope_name,
+                period=form.get("period", "daily"),
+                budget_usd=float(form.get("budget_usd") or 0),
+                alert_threshold_pct=int(form.get("alert_threshold_pct") or 80),
+                notes=(form.get("notes") or "").strip() or None,
+            )
+        except (ValueError, Exception) as exc:
+            return HTMLResponse(f"<h1>Create failed</h1><pre>{exc}</pre>", status_code=400)
+        return RedirectResponse(url="/admin/quotas", status_code=303)
+
+    @router.post("/quotas/check", response_class=HTMLResponse)
+    async def quotas_check_now(request: Request):
+        """Click handler for the 'Run check now' button on /admin/quotas.
+
+        Runs run_all_checks() and redirects back so the page reloads
+        with fresh latest-check summaries visible.
+        """
+        from fastapi.responses import RedirectResponse
+        await verity.ensure_connected()
+        await verity.quotas.run_all_checks()
+        return RedirectResponse(url="/admin/quotas", status_code=303)
+
+    @router.post("/quotas/{quota_id}/delete", response_class=HTMLResponse)
+    async def quotas_delete(request: Request, quota_id: str):
+        """Delete one quota and its check history. Form POST so no JS needed."""
+        from fastapi.responses import RedirectResponse
+        await verity.ensure_connected()
+        try:
+            from uuid import UUID as _UUID
+            await verity.quotas.delete_quota(_UUID(quota_id))
+        except Exception as exc:
+            return HTMLResponse(f"<h1>Delete failed</h1><pre>{exc}</pre>", status_code=400)
+        return RedirectResponse(url="/admin/quotas", status_code=303)
+
+    # ── INCIDENTS ─────────────────────────────────────────────
+
+    @router.get("/incidents", response_class=HTMLResponse)
+    async def incidents_list(request: Request):
+        """Unified incidents page — governance incidents + active
+        quota breaches in one list. The Home page's Open Incidents
+        tile uses the same union."""
+        await verity.ensure_connected()
+        rows = await verity.db.fetch_all("list_open_incidents")
+        # Separate counts for the two source tiles at the top of the page.
+        governance_count = sum(1 for r in rows if r.get("source") == "governance")
+        quota_count      = sum(1 for r in rows if r.get("source") == "quota")
+        return _render(templates, request, "incidents.html",
+            active_page="incidents",
+            incidents=rows,
+            governance_count=governance_count,
+            quota_count=quota_count,
+        )
+
     # ── PIPELINES ─────────────────────────────────────────────
 
     @router.get("/pipelines", response_class=HTMLResponse)

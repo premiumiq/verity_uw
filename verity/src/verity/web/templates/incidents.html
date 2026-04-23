@@ -1,0 +1,139 @@
+<!--
+  INCIDENTS PAGE — unified view of open governance incidents + active
+  quota breaches. The Home dashboard's "Open Incidents" tile counts
+  the same union, so the number there and the row count here agree.
+
+  DATA PASSED BY ROUTE:
+    incidents         list of rows from list_open_incidents
+                      (each carries a `source` = 'governance' or 'quota')
+    governance_count  incident rows whose source = 'governance'
+    quota_count       incident rows whose source = 'quota'
+-->
+{% extends "base.html" %}
+
+{% block title %}Incidents — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <span>Incidents</span>
+{% endblock %}
+
+{% block page_title %}Incidents{% endblock %}
+
+{% block content %}
+
+<style>
+    .inc-tiles {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 14px; margin-bottom: 20px;
+    }
+    .inc-tile {
+        background: white; border: 1px solid var(--verity-border);
+        border-radius: 8px; padding: 14px 18px;
+    }
+    .inc-tile .tile-label {
+        font-size: 0.7rem; text-transform: uppercase; letter-spacing: .5px;
+        color: var(--verity-text-light); font-weight: 600; margin-bottom: 6px;
+    }
+    .inc-tile .tile-value {
+        font-size: 1.9rem; font-weight: 700; line-height: 1;
+        color: var(--verity-blue-deep);
+    }
+    .inc-tile.alert .tile-value { color: #A23838; }
+    .inc-tile.warn  .tile-value { color: #816014; }
+
+    .inc-table td.detail {
+        font-size: 0.8rem; color: var(--verity-text-light);
+        max-width: 600px;
+    }
+</style>
+
+<p class="verity-page-description">
+    Active incidents across Verity. Governance-sourced rows come from the <code>incident</code> table — typically failed validation runs, drift alerts, and similar compliance signals. Quota-sourced rows come from <a href="/admin/quotas">quota breaches</a> whose most recent check still flags alert-fired and has no resolved timestamp. Both sources contribute to the <strong>Open Incidents</strong> tile on the home page.
+</p>
+
+<div class="inc-tiles">
+    <div class="inc-tile alert">
+        <div class="tile-label">Total active</div>
+        <div class="tile-value">{{ incidents | length }}</div>
+    </div>
+    <div class="inc-tile">
+        <div class="tile-label">Governance incidents</div>
+        <div class="tile-value">{{ governance_count }}</div>
+    </div>
+    <div class="inc-tile warn">
+        <div class="tile-label">Quota breaches</div>
+        <div class="tile-value">{{ quota_count }}</div>
+    </div>
+</div>
+
+{% if incidents %}
+<table class="verity-table inc-table">
+    <thead>
+        <tr>
+            <th>Source</th>
+            <th>Severity</th>
+            <th>Title</th>
+            <th>Detail</th>
+            <th>Scope</th>
+            <th>Detected</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for i in incidents %}
+        <tr>
+            <td>
+                {% if i.source == 'quota' %}
+                    <span class="verity-badge" style="background: #FEF3C7; color: #92400E;">quota</span>
+                {% else %}
+                    <span class="verity-badge" style="background: #E0E7FF; color: #3730A3;">governance</span>
+                {% endif %}
+            </td>
+            <td>
+                {% set sev = (i.severity or 'warning') | lower %}
+                {% if sev == 'breach' or sev == 'critical' or sev == 'high' %}
+                    <span class="verity-badge verity-badge-failed">{{ sev }}</span>
+                {% elif sev == 'warning' or sev == 'medium' %}
+                    <span class="verity-badge" style="background: #F9F0DA; color: #816014;">{{ sev }}</span>
+                {% else %}
+                    <span class="verity-badge">{{ sev }}</span>
+                {% endif %}
+            </td>
+            <td style="font-weight: 500;">{{ i.title }}</td>
+            <td class="detail">
+                {% if i.source == 'quota' %}
+                    Spend ${{ '%.4f' % (i.spend_usd | float) }} / ${{ '%.4f' % (i.budget_usd | float) }}
+                    ({{ i.spend_pct }}% of budget)
+                {% else %}
+                    {{ (i.description or '')[:240] }}{% if i.description and i.description|length > 240 %}…{% endif %}
+                {% endif %}
+            </td>
+            <td style="font-size: 0.8rem;">
+                {% if i.scope_type %}
+                    <span class="verity-badge" style="background: #F2F2F2; color: #4D4D4D; font-size: 0.65rem;">{{ i.scope_type }}</span>
+                {% endif %}
+                {{ i.scope_name or '' }}
+            </td>
+            <td style="font-size: 0.75rem; color: var(--verity-text-light);">
+                {% if i.detected_at %}{{ i.detected_at.strftime('%m-%d %H:%M') }}{% else %}—{% endif %}
+            </td>
+            <td>
+                {% if i.source == 'quota' %}
+                    <a href="/admin/quotas" style="font-size: 0.75rem; color: var(--verity-blue-deep);">Manage →</a>
+                {% endif %}
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="verity-empty" style="padding: 40px 20px; text-align: center; background: var(--verity-bg-alt); border-radius: 8px;">
+    <div style="font-size: 2rem; opacity: 0.3;">✓</div>
+    <div style="color: var(--verity-text-light); font-style: italic; margin-top: 8px;">
+        No active incidents. Governance is quiet and every quota is within budget.
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}
