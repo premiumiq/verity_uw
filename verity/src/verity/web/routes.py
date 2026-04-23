@@ -165,6 +165,27 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
         else:
             total_pipeline_runs = governance_stats.get("total_pipeline_runs") or 0
 
+        # ── Month-to-date cost + invocations (scoped to selected apps)
+        # for the home page's "Usage & Spend" section. Same usage_totals
+        # call the /admin/usage dashboard uses, with the window pinned
+        # to the first of the current UTC month → now.
+        from datetime import datetime, timezone
+        now_utc = datetime.now(timezone.utc)
+        month_start = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        mtd_totals = await verity.models.usage_totals(
+            from_ts=month_start, to_ts=now_utc,
+            app_names=selected_names,
+        ) or {}
+        mtd = {
+            "month_label": month_start.strftime("%B %Y"),     # e.g. "April 2026"
+            "from_date":   month_start.date().isoformat(),
+            "to_date":     now_utc.date().isoformat(),
+            "total_cost_usd":   float(mtd_totals.get("total_cost_usd") or 0),
+            "invocation_count": int(mtd_totals.get("invocation_count") or 0),
+            "input_tokens":     int(mtd_totals.get("input_tokens") or 0),
+            "output_tokens":    int(mtd_totals.get("output_tokens") or 0),
+        }
+
         return _render(templates, request, "dashboard.html",
             active_page="home",
             counts=counts,
@@ -172,6 +193,7 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             total_pipeline_runs=total_pipeline_runs,
             applications=applications,
             selected_app_names=selected_names,
+            mtd=mtd,
         )
 
     # ── AGENTS ────────────────────────────────────────────────

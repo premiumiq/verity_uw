@@ -263,7 +263,34 @@
 
 
 <!-- ══════════════════════════════════════════════════════════
-     5. GOVERNANCE
+     5. USAGE & SPEND — month-to-date
+     ══════════════════════════════════════════════════════════
+     Scoped by the same ?apps= filter as the sections above. Cards
+     drill through to /admin/usage with the month pre-filled, so
+     clicking either tile takes you to the full breakdown.
+-->
+<div class="home-section-label">
+    Usage &amp; Spend
+    <span style="color: var(--verity-text-light); font-weight: 400; text-transform: none; letter-spacing: 0;">
+        ({{ mtd.month_label }} to date{% if selected_app_names %} — filtered by {{ selected_app_names | join(', ') }}{% endif %})
+    </span>
+</div>
+{% set usage_qs = "from=" ~ mtd.from_date ~ "&to=" ~ mtd.to_date %}
+{% if selected_app_names %}{% set usage_qs = usage_qs ~ "&apps=" ~ (selected_app_names | join(',')) %}{% endif %}
+<div class="home-card-grid">
+    <a href="/admin/usage?{{ usage_qs }}" class="home-card green">
+        <span class="home-card-value">${{ '%.4f' % mtd.total_cost_usd }}</span>
+        <span class="home-card-label">Cost this month</span>
+    </a>
+    <a href="/admin/usage?{{ usage_qs }}" class="home-card">
+        <span class="home-card-value">{{ '{:,}'.format(mtd.invocation_count) }}</span>
+        <span class="home-card-label">Model invocations this month</span>
+    </a>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     6. GOVERNANCE
      ══════════════════════════════════════════════════════════ -->
 <div class="home-section-label">Governance <span style="color: var(--verity-text-light); font-weight: 400; text-transform: none; letter-spacing: 0;">(platform-wide — not scoped by application)</span></div>
 <div class="home-card-grid">

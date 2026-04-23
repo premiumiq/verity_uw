@@ -357,9 +357,11 @@
             textStyle: { fontSize: 10 },
             itemGap: 10,
         },
-        // `right: 130` reserves the strip for the legend; `left: 70`
-        // and the inline-name y-axes sit comfortably on the left.
-        grid: { left: 70, right: 130, top: 20, bottom: 32 },
+        // `right: 130` reserves the strip for the legend; `top: 40`
+        // leaves headroom for the y-axis name labels ("Cost" on the
+        // left, "Count" on the right) — default nameLocation 'end'
+        // puts them above the axis, so the plot area has to sit lower.
+        grid: { left: 70, right: 130, top: 40, bottom: 32 },
         xAxis: {
             type: 'time',
             min: axisMin,
@@ -373,14 +375,23 @@
             },
         },
         yAxis: [
+            // splitLine disabled on both axes — the horizontal gridlines
+            // were distracting on a minimalist time series.
+            // nameGap raises the "Cost" / "Count" labels well above the
+            // axis line so they sit cleanly inside grid.top (was
+            // clipping at the chart's top edge before).
             { type: 'value', name: 'Cost',
-              nameTextStyle: { fontSize: 9, color: '#7F7F7F', padding: [0, 0, 0, 20] },
+              nameGap: 18, nameLocation: 'end',
+              nameTextStyle: { fontSize: 10, color: '#7F7F7F' },
               axisLabel: { fontSize: 9, color: '#7F7F7F',
-                  formatter: function(v) { return '$' + v.toFixed(4); } } },
+                  formatter: function(v) { return '$' + v.toFixed(4); } },
+              splitLine: { show: false } },
             { type: 'value', name: 'Count',
-              nameTextStyle: { fontSize: 9, color: '#7F7F7F', padding: [0, 20, 0, 0] },
+              nameGap: 18, nameLocation: 'end',
+              nameTextStyle: { fontSize: 10, color: '#7F7F7F' },
               axisLabel: { fontSize: 9, color: '#7F7F7F' },
-              minInterval: 1 },
+              minInterval: 1,
+              splitLine: { show: false } },
         ],
         series: [
             { name: 'Cost (USD)', type: 'bar', data: costSeries,
