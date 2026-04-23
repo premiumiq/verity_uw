@@ -29,6 +29,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Callable, Optional
 from uuid import UUID, uuid4
 
@@ -86,6 +87,7 @@ class ExecutionEngine:
         tool_implementations: Optional[dict[str, Callable]] = None,
         application: str = "default",
         mcp_client: Optional[MCPClient] = None,
+        models=None,
     ):
         self.registry = registry
         self.decisions = decisions
@@ -98,6 +100,11 @@ class ExecutionEngine:
         # an MCP tool is dispatched, we return an error result rather than
         # crash — the error is fed back to Claude and logged to the audit trail.
         self.mcp_client = mcp_client
+        # Governance "models" facade — writes a model_invocation_log row
+        # after each agent/task decision so usage + spend are trackable
+        # by agent / task / application / time. None disables logging
+        # silently (e.g. in unit tests that don't need it).
+        self.models = models
 
     def register_tool_implementation(self, tool_name: str, func: Callable):
         """Register a Python function as a tool implementation."""
@@ -719,6 +726,19 @@ class ExecutionEngine:
             messages = [{"role": "user", "content": msg} for msg in user_messages]
             total_input_tokens = 0
             total_output_tokens = 0
+            # Prompt-cache tokens are per-turn on the Anthropic response
+            # (`.usage.cache_creation_input_tokens`, `.cache_read_input_tokens`).
+            # Summed across the agentic loop and written to the
+            # model_invocation_log row so spend analytics can see cache
+            # savings at a glance.
+            total_cache_write_tokens = 0
+            total_cache_read_tokens = 0
+            # One entry per real (non-mock) turn — used as the per_turn_metadata
+            # JSONB on the invocation row for drill-through.
+            per_turn_usage: list[dict] = []
+            real_api_turns = 0
+            last_stop_reason: Optional[str] = None
+            invocation_started_at = datetime.now(timezone.utc)
             tool_calls_made = []
             # Track full message history for audit / future replay tooling.
             message_history = []
@@ -732,10 +752,29 @@ class ExecutionEngine:
                 # ── LLM GATEWAY (async — won't block event loop) ──
                 response = await self._gateway_llm_call(api_params, mock)
 
-                # Track tokens (0 for mock responses)
+                # Track tokens (0 for mock responses). Mock responses don't
+                # carry a `.usage` attribute, which is how we distinguish
+                # real API turns from mocked ones for the invocation log.
                 if hasattr(response, 'usage'):
-                    total_input_tokens += response.usage.input_tokens
-                    total_output_tokens += response.usage.output_tokens
+                    in_tok = response.usage.input_tokens
+                    out_tok = response.usage.output_tokens
+                    cw_tok = getattr(response.usage, 'cache_creation_input_tokens', 0) or 0
+                    cr_tok = getattr(response.usage, 'cache_read_input_tokens', 0) or 0
+                    total_input_tokens += in_tok
+                    total_output_tokens += out_tok
+                    total_cache_write_tokens += cw_tok
+                    total_cache_read_tokens += cr_tok
+                    real_api_turns += 1
+                    last_stop_reason = getattr(response, 'stop_reason', None)
+                    per_turn_usage.append({
+                        "turn": turn,
+                        "input_tokens": in_tok,
+                        "output_tokens": out_tok,
+                        "cache_write_tokens": cw_tok,
+                        "cache_read_tokens": cr_tok,
+                        "stop_reason": last_stop_reason,
+                        "request_id": getattr(response, 'id', None),
+                    })
 
                 # Store assistant response in message history
                 if hasattr(response, 'content'):
@@ -816,6 +855,25 @@ class ExecutionEngine:
                 application=application,
             )
 
+            # Model invocation log — one row per decision, tokens summed
+            # across agentic-loop turns. Silently skipped for fully-
+            # mocked runs (no real provider usage to record).
+            await self._log_model_invocation(
+                decision_log_id=log_result["decision_log_id"],
+                config=config,
+                started_at=invocation_started_at,
+                completed_at=datetime.now(timezone.utc),
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
+                cache_write_tokens=total_cache_write_tokens,
+                cache_read_tokens=total_cache_read_tokens,
+                api_call_count=real_api_turns,
+                stop_reason=last_stop_reason,
+                status="complete",
+                error_message=None,
+                per_turn_metadata=per_turn_usage or None,
+            )
+
             logger.info("Agent execution complete: %s (%dms, %d tool calls, %d+%d tokens, depth=%d)",
                          agent_name, duration_ms, len(tool_calls_made),
                          total_input_tokens, total_output_tokens, decision_depth)
@@ -852,6 +910,24 @@ class ExecutionEngine:
                 execution_context_id=execution_context_id,
                 application=application,
             )
+            # Record partial token usage on failed runs too — the loop
+            # may have completed N turns before raising, and that token
+            # spend is still real. Helper skips if totals are all zero.
+            await self._log_model_invocation(
+                decision_log_id=log_result["decision_log_id"],
+                config=config,
+                started_at=invocation_started_at,
+                completed_at=datetime.now(timezone.utc),
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
+                cache_write_tokens=total_cache_write_tokens,
+                cache_read_tokens=total_cache_read_tokens,
+                api_call_count=real_api_turns,
+                stop_reason=last_stop_reason,
+                status="failed",
+                error_message=str(e),
+                per_turn_metadata=per_turn_usage or None,
+            )
             return ExecutionResult(
                 decision_log_id=log_result["decision_log_id"],
                 entity_type="agent", entity_name=agent_name,
@@ -883,6 +959,7 @@ class ExecutionEngine:
         logger.info("Task execution starting: %s (step=%s, mock=%s)",
                      task_name, step_name or "standalone", mock is not None)
         start_ms = _now_ms()
+        invocation_started_at = datetime.now(timezone.utc)
         config = await self.registry.get_task_config(task_name)
         system_prompt, user_messages = _assemble_prompts(config.prompts, input_data)
 
@@ -947,6 +1024,27 @@ class ExecutionEngine:
                 status="complete",
                 execution_context_id=execution_context_id,
                 application=application,
+            )
+
+            # Single-turn task — one API call, so per_turn_metadata is
+            # omitted (the invocation row's top-level fields already have
+            # everything for a one-turn call).
+            cache_write_tok = getattr(response.usage, 'cache_creation_input_tokens', 0) or 0
+            cache_read_tok  = getattr(response.usage, 'cache_read_input_tokens', 0) or 0
+            await self._log_model_invocation(
+                decision_log_id=log_result["decision_log_id"],
+                config=config,
+                started_at=invocation_started_at,
+                completed_at=datetime.now(timezone.utc),
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
+                cache_write_tokens=cache_write_tok,
+                cache_read_tokens=cache_read_tok,
+                api_call_count=1,
+                stop_reason=getattr(response, 'stop_reason', None),
+                status="complete",
+                error_message=None,
+                per_turn_metadata=None,
             )
 
             logger.info("Task execution complete: %s (%dms, %d+%d tokens)",
@@ -1090,6 +1188,86 @@ class ExecutionEngine:
     # ══════════════════════════════════════════════════════════
     # DECISION LOGGING (shared by agents, tasks, and tools)
     # ══════════════════════════════════════════════════════════
+
+    async def _log_model_invocation(
+        self,
+        *,
+        decision_log_id: UUID,
+        config,
+        started_at: datetime,
+        completed_at: datetime,
+        input_tokens: int,
+        output_tokens: int,
+        cache_write_tokens: int,
+        cache_read_tokens: int,
+        api_call_count: int,
+        stop_reason: Optional[str],
+        status: str,
+        error_message: Optional[str],
+        per_turn_metadata: Optional[list[dict]],
+    ) -> None:
+        """Write a model_invocation_log row alongside the decision.
+
+        Silent no-op paths:
+          - `self.models` is None (unit tests / pre-FC instances).
+          - The run was fully mocked (input_tokens + output_tokens == 0
+            AND cache tokens == 0). Mock runs carry no real provider
+            usage; writing rows would corrupt spend analytics.
+          - The model isn't in the catalog (e.g. someone just added a
+            new Claude model but hasn't run the seed). Logs a warning
+            rather than crashing the decision path — the decision row
+            itself is already safely written at this point.
+        """
+        if self.models is None:
+            return
+        if (input_tokens + output_tokens + cache_write_tokens + cache_read_tokens) == 0:
+            return
+
+        model_name = (
+            config.inference_config.model_name
+            if hasattr(config, "inference_config") else None
+        )
+        if not model_name:
+            return
+
+        # Anthropic is the only provider the engine currently calls;
+        # Bedrock / OpenAI paths will override this when they land.
+        provider = "anthropic"
+        model_row = await self.models.get_model_by_name(provider, model_name)
+        if not model_row:
+            logger.warning(
+                "Model '%s/%s' not in catalog — invocation log skipped for "
+                "decision %s. Register the model (and a price row) and "
+                "re-run.", provider, model_name, decision_log_id,
+            )
+            return
+
+        try:
+            await self.models.log_invocation(
+                decision_log_id=decision_log_id,
+                model_id=model_row["id"],
+                provider=provider,
+                model_name=model_name,
+                started_at=started_at,
+                completed_at=completed_at,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_creation_input_tokens=cache_write_tokens,
+                cache_read_input_tokens=cache_read_tokens,
+                api_call_count=api_call_count,
+                stop_reason=stop_reason,
+                status=status,
+                error_message=error_message,
+                per_turn_metadata=per_turn_metadata,
+            )
+        except Exception:
+            # Never fail a decision because invocation logging failed —
+            # the decision row is the audit-critical record; the
+            # invocation row is observability data.
+            logger.exception(
+                "Failed to write model_invocation_log for decision %s",
+                decision_log_id,
+            )
 
     async def _log_decision(
         self,

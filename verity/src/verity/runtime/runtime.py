@@ -52,6 +52,7 @@ class Runtime:
         testing: Testing,
         anthropic_api_key: str = "",
         application: str = "default",
+        models=None,
     ):
         self.db = db
         self.application = application
@@ -69,6 +70,7 @@ class Runtime:
             anthropic_api_key=anthropic_api_key,
             application=application,
             mcp_client=self.mcp_client,
+            models=models,
         )
         self.pipeline_executor = PipelineExecutor(
             registry=registry,

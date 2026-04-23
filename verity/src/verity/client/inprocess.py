@@ -113,6 +113,7 @@ class Verity:
             testing=self._gov.testing,
             anthropic_api_key=anthropic_api_key,
             application=application,
+            models=self._gov.models,
         )
 
         # ── Backward-compat attribute surface ──
@@ -123,6 +124,7 @@ class Verity:
         self.lifecycle = self._gov.lifecycle
         self.reporting = self._gov.reporting
         self.testing = self._gov.testing
+        self.models = self._gov.models
         self.execution = self._rt.execution
         self.pipeline_executor = self._rt.pipeline_executor
         self.test_runner = self._rt.test_runner

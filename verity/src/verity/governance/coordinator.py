@@ -12,6 +12,7 @@ HTTP API a single typed entry point into governance.
 from verity.db.connection import Database
 from verity.governance.decisions import DecisionsReader
 from verity.governance.lifecycle import Lifecycle
+from verity.governance.models import Models
 from verity.governance.registry import Registry
 from verity.governance.reporting import Reporting
 from verity.governance.testing_meta import Testing
@@ -26,6 +27,7 @@ class GovernanceCoordinator:
       - decisions_reader  : audit trail reads + human override record
       - reporting         : dashboard counts, model inventory, override analysis
       - testing           : test suite + ground truth metadata reads (NOT execution)
+      - models            : model catalog, SCD-2 price history, invocation log + usage rollups
     """
 
     def __init__(self, db: Database, application: str = "default"):
@@ -36,6 +38,7 @@ class GovernanceCoordinator:
         self.decisions_reader = DecisionsReader(db)
         self.reporting = Reporting(db)
         self.testing = Testing(db)
+        self.models = Models(db)
 
 
 __all__ = ["GovernanceCoordinator"]

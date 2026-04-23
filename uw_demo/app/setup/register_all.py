@@ -49,9 +49,19 @@ async def main():
     await verity.connect()
 
     try:
+        # ── STEP 0b: Model catalog + current prices ───────────
+        # Must come before inference_configs so the backfill can
+        # resolve inference_config.model_id from the text model_name.
+        print("Step 0b: Registering model catalog + prices...")
+        await seed_models(verity)
+
         # ── STEP 1: Inference Configs ─────────────────────────
         print("Step 1: Registering inference configs...")
         configs = await seed_inference_configs(verity)
+
+        # Backfill inference_config.model_id from the text model_name.
+        updated = await verity.models.backfill_inference_config_model_id()
+        print(f"  + backfilled inference_config.model_id on {len(updated)} rows")
 
         # ── STEP 1b: MCP servers ──────────────────────────────
         # Must come before tools — tool.mcp_server_name has a FK to
@@ -148,6 +158,74 @@ async def main():
 # ══════════════════════════════════════════════════════════════
 # STEP 1: INFERENCE CONFIGS
 # ══════════════════════════════════════════════════════════════
+
+async def seed_models(verity: Verity) -> dict:
+    """Register the models + currently-active prices Verity knows about.
+
+    Prices are the published Anthropic API list prices as of early 2026
+    (per 1M tokens). Cache-read is 10% of base input; cache-write is
+    125% of base input (Anthropic's documented multipliers for prompt
+    caching). Update by inserting a new model_price row via
+    verity.models.set_price(...) — which sets valid_to on the prior
+    row so the historical cost view stays correct.
+
+    Returns {model_id_string: verity_model_row_id}.
+    """
+    models_data = [
+        {
+            "provider": "anthropic",
+            "model_id": "claude-sonnet-4-20250514",
+            "display_name": "Claude Sonnet 4",
+            "context_window": 200_000,
+            "description": "Balanced model — default for most Verity-governed agents and tasks.",
+            "prices": {
+                "input_price_per_1m": 3.00,
+                "output_price_per_1m": 15.00,
+                "cache_read_price_per_1m": 0.30,
+                "cache_write_price_per_1m": 3.75,
+            },
+        },
+        {
+            "provider": "anthropic",
+            "model_id": "claude-opus-4-20250514",
+            "display_name": "Claude Opus 4",
+            "context_window": 200_000,
+            "description": "Highest-capability model — for complex reasoning tasks.",
+            "prices": {
+                "input_price_per_1m": 15.00,
+                "output_price_per_1m": 75.00,
+                "cache_read_price_per_1m": 1.50,
+                "cache_write_price_per_1m": 18.75,
+            },
+        },
+        {
+            "provider": "anthropic",
+            "model_id": "claude-haiku-4-5-20251001",
+            "display_name": "Claude Haiku 4.5",
+            "context_window": 200_000,
+            "description": "Fast + inexpensive model — for high-volume classification tasks.",
+            "prices": {
+                "input_price_per_1m": 0.80,
+                "output_price_per_1m": 4.00,
+                "cache_read_price_per_1m": 0.08,
+                "cache_write_price_per_1m": 1.00,
+            },
+        },
+    ]
+
+    result: dict[str, str] = {}
+    for m in models_data:
+        prices = m.pop("prices")
+        row = await verity.models.register_model(**m)
+        await verity.models.set_price(
+            model_pk=row["id"],
+            notes="Seeded at platform setup — public Anthropic list price",
+            **prices,
+        )
+        result[m["model_id"]] = row["id"]
+        print(f"  + model: {m['provider']}/{m['model_id']}  (${prices['input_price_per_1m']:.2f} in / ${prices['output_price_per_1m']:.2f} out per 1M)")
+    return result
+
 
 async def seed_inference_configs(verity: Verity) -> dict:
     """Register 5 named inference configs. Returns {name: id}."""

@@ -1338,6 +1338,130 @@ CREATE TABLE IF NOT EXISTS platform_settings (
 
 
 -- ============================================================
+-- MODEL MANAGEMENT — registry, pricing history, invocation log
+-- ============================================================
+-- `model` is the per-(provider, model_id) catalog row. Inference configs
+-- link to it via `inference_config.model_id` (added idempotently below).
+--
+-- `model_price` is SCD Type 2: each row covers a validity window.
+-- To insert a new price, set valid_to on the previous currently-active
+-- row and INSERT a new one with valid_from = NOW() and valid_to = NULL.
+-- The unique index uq_mp_active enforces "at most one currently-active
+-- price per model" at the DB level.
+--
+-- `model_invocation_log` is one row per agent/task decision (NOT per
+-- API turn — tokens are summed across turns). decision_log_id is the
+-- FK back to the audit trail. Cost is computed on the fly via the
+-- v_model_invocation_cost view, which joins to the pricing row whose
+-- window contains the invocation's started_at — so historical reports
+-- stay stable when prices change.
+
+CREATE TABLE IF NOT EXISTS model (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    provider        VARCHAR(50)  NOT NULL,
+    model_id        VARCHAR(200) NOT NULL,
+    display_name    VARCHAR(300) NOT NULL,
+    modality        VARCHAR(50)  DEFAULT 'chat',     -- chat / embedding / vision / ...
+    context_window  INTEGER,
+    status          VARCHAR(20)  DEFAULT 'active',   -- active / deprecated / beta
+    description     TEXT,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT uq_model UNIQUE (provider, model_id)
+);
+CREATE INDEX IF NOT EXISTS idx_model_provider ON model(provider);
+CREATE INDEX IF NOT EXISTS idx_model_status ON model(status);
+
+
+CREATE TABLE IF NOT EXISTS model_price (
+    id                          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    model_id                    UUID NOT NULL REFERENCES model(id),
+    input_price_per_1m          NUMERIC(14,6) NOT NULL,
+    output_price_per_1m         NUMERIC(14,6) NOT NULL,
+    cache_read_price_per_1m     NUMERIC(14,6),
+    cache_write_price_per_1m    NUMERIC(14,6),
+    currency                    VARCHAR(3) DEFAULT 'USD',
+    valid_from                  TIMESTAMPTZ NOT NULL,
+    valid_to                    TIMESTAMPTZ,            -- NULL = currently active
+    notes                       TEXT,
+    created_at                  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_mp_lookup ON model_price(model_id, valid_from DESC);
+-- At most one currently-active price per model. Application code
+-- closes the prior row (sets valid_to) before inserting a new one.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_mp_active ON model_price(model_id) WHERE valid_to IS NULL;
+
+
+CREATE TABLE IF NOT EXISTS model_invocation_log (
+    id                              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    decision_log_id                 UUID NOT NULL REFERENCES agent_decision_log(id) ON DELETE CASCADE,
+    model_id                        UUID NOT NULL REFERENCES model(id),
+    -- Denormalized (for fast group-by without joins on the hot path):
+    provider                        VARCHAR(50)  NOT NULL,
+    model_name                      VARCHAR(200) NOT NULL,
+    started_at                      TIMESTAMPTZ NOT NULL,
+    completed_at                    TIMESTAMPTZ NOT NULL,
+    input_tokens                    INTEGER NOT NULL DEFAULT 0,
+    output_tokens                   INTEGER NOT NULL DEFAULT 0,
+    cache_creation_input_tokens     INTEGER DEFAULT 0,
+    cache_read_input_tokens         INTEGER DEFAULT 0,
+    api_call_count                  INTEGER DEFAULT 1,  -- turns within this decision
+    stop_reason                     VARCHAR(50),
+    status                          VARCHAR(20) DEFAULT 'complete',  -- complete / failed
+    error_message                   TEXT,
+    -- Per-turn details when we want drill-through; null for single-turn calls.
+    per_turn_metadata               JSONB,
+    created_at                      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_mil_decision ON model_invocation_log(decision_log_id);
+CREATE INDEX IF NOT EXISTS idx_mil_started  ON model_invocation_log(started_at);
+CREATE INDEX IF NOT EXISTS idx_mil_model    ON model_invocation_log(model_id, started_at);
+
+
+-- Cost-on-the-fly view. Joins each invocation to the price row whose
+-- [valid_from, valid_to) window contains the invocation's started_at.
+-- Historical reports stay stable across price changes.
+CREATE OR REPLACE VIEW v_model_invocation_cost AS
+SELECT
+    mil.id,
+    mil.decision_log_id,
+    mil.model_id,
+    mil.provider,
+    mil.model_name,
+    mil.started_at,
+    mil.completed_at,
+    mil.input_tokens,
+    mil.output_tokens,
+    mil.cache_creation_input_tokens,
+    mil.cache_read_input_tokens,
+    mil.api_call_count,
+    mil.stop_reason,
+    mil.status,
+    mp.input_price_per_1m,
+    mp.output_price_per_1m,
+    mp.cache_read_price_per_1m,
+    mp.cache_write_price_per_1m,
+    (mil.input_tokens::numeric  / 1e6) * mp.input_price_per_1m  AS input_cost_usd,
+    (mil.output_tokens::numeric / 1e6) * mp.output_price_per_1m AS output_cost_usd,
+    (mil.cache_creation_input_tokens::numeric / 1e6)
+        * COALESCE(mp.cache_write_price_per_1m, mp.input_price_per_1m) AS cache_write_cost_usd,
+    (mil.cache_read_input_tokens::numeric / 1e6)
+        * COALESCE(mp.cache_read_price_per_1m, mp.input_price_per_1m * 0.1) AS cache_read_cost_usd,
+    (
+        (mil.input_tokens::numeric  / 1e6) * mp.input_price_per_1m
+      + (mil.output_tokens::numeric / 1e6) * mp.output_price_per_1m
+      + (mil.cache_creation_input_tokens::numeric / 1e6)
+            * COALESCE(mp.cache_write_price_per_1m, mp.input_price_per_1m)
+      + (mil.cache_read_input_tokens::numeric / 1e6)
+            * COALESCE(mp.cache_read_price_per_1m, mp.input_price_per_1m * 0.1)
+    ) AS total_cost_usd
+FROM model_invocation_log mil
+JOIN model_price mp
+  ON mp.model_id = mil.model_id
+ AND mil.started_at >= mp.valid_from
+ AND (mp.valid_to IS NULL OR mil.started_at < mp.valid_to);
+
+
+-- ============================================================
 -- IDEMPOTENT ADDITIONS
 -- ============================================================
 -- Columns added to existing version tables for clone provenance.
@@ -1348,3 +1472,8 @@ ALTER TABLE agent_version    ADD COLUMN IF NOT EXISTS cloned_from_version_id UUI
 ALTER TABLE task_version     ADD COLUMN IF NOT EXISTS cloned_from_version_id UUID REFERENCES task_version(id);
 ALTER TABLE prompt_version   ADD COLUMN IF NOT EXISTS cloned_from_version_id UUID REFERENCES prompt_version(id);
 ALTER TABLE pipeline_version ADD COLUMN IF NOT EXISTS cloned_from_version_id UUID REFERENCES pipeline_version(id);
+
+-- Model management — link inference configs to the registered model
+-- catalog. Kept alongside the existing `model_name` VARCHAR column for
+-- transition; seed script backfills this FK from the text column.
+ALTER TABLE inference_config ADD COLUMN IF NOT EXISTS model_id UUID REFERENCES model(id);
