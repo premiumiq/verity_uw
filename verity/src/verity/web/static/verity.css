@@ -155,13 +155,15 @@ a:hover {
 
 /* Navigation section in sidebar */
 .verity-sidebar-nav {
-    padding: 12px 0;
+    padding: 10px 0;
     flex: 1;
 }
 
-/* Section label (e.g., "Registry", "Governance") */
+/* Section label (e.g., "Registry", "Governance") — tighter vertical
+   padding so the three sections (Registry / Observability / Governance)
+   fit on a standard 768px-tall viewport without scrolling. */
 .verity-nav-section {
-    padding: 8px 16px 4px;
+    padding: 5px 16px 2px;
     font-size: 0.65rem;
     text-transform: uppercase;
     letter-spacing: 1.5px;
@@ -169,11 +171,11 @@ a:hover {
     font-weight: 600;
 }
 
-/* Individual nav link */
+/* Individual nav link — reduced vertical padding in same spirit. */
 .verity-nav-link {
     display: flex;
     align-items: center;
-    padding: 8px 16px;
+    padding: 5px 16px;
     color: var(--verity-text-sidebar);
     font-size: 0.85rem;
     text-decoration: none;
