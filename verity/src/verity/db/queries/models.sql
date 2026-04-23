@@ -155,18 +155,21 @@ WHERE decision_log_id = %(decision_log_id)s::uuid;
 
 
 -- name: usage_totals
--- Top-of-page summary tiles: totals across the window.
+-- Top-of-page summary tiles: totals across the window. Every column
+-- is qualified with `v.` because agent_decision_log (joined-in for
+-- the application-name filter) also exposes input_tokens/output_tokens
+-- — referring to either plain would be ambiguous.
 SELECT
-    COUNT(*)                              AS invocation_count,
-    COALESCE(SUM(input_tokens),        0) AS input_tokens,
-    COALESCE(SUM(output_tokens),       0) AS output_tokens,
-    COALESCE(SUM(cache_creation_input_tokens), 0) AS cache_write_tokens,
-    COALESCE(SUM(cache_read_input_tokens),     0) AS cache_read_tokens,
-    COALESCE(SUM(total_cost_usd), 0)      AS total_cost_usd,
-    COALESCE(SUM(input_cost_usd), 0)      AS input_cost_usd,
-    COALESCE(SUM(output_cost_usd), 0)     AS output_cost_usd,
-    COALESCE(SUM(cache_write_cost_usd), 0) AS cache_write_cost_usd,
-    COALESCE(SUM(cache_read_cost_usd), 0) AS cache_read_cost_usd
+    COUNT(*)                                         AS invocation_count,
+    COALESCE(SUM(v.input_tokens),                0) AS input_tokens,
+    COALESCE(SUM(v.output_tokens),               0) AS output_tokens,
+    COALESCE(SUM(v.cache_creation_input_tokens), 0) AS cache_write_tokens,
+    COALESCE(SUM(v.cache_read_input_tokens),     0) AS cache_read_tokens,
+    COALESCE(SUM(v.total_cost_usd),              0) AS total_cost_usd,
+    COALESCE(SUM(v.input_cost_usd),              0) AS input_cost_usd,
+    COALESCE(SUM(v.output_cost_usd),             0) AS output_cost_usd,
+    COALESCE(SUM(v.cache_write_cost_usd),        0) AS cache_write_cost_usd,
+    COALESCE(SUM(v.cache_read_cost_usd),         0) AS cache_read_cost_usd
 FROM v_model_invocation_cost v
 JOIN agent_decision_log adl ON adl.id = v.decision_log_id
 WHERE v.started_at >= %(from_ts)s

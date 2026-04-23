@@ -1,0 +1,97 @@
+<!--
+  AI MODELS PAGE — Catalog of registered models + currently-active prices.
+
+  Each row is one `model` record joined to its currently-active
+  `model_price` (valid_to IS NULL). Price history lives in the price
+  table as SCD Type 2 rows — the current row here is just the most
+  recent one in the ongoing window. Prices can be updated via the
+  /api/v1/models/{id}/prices endpoint.
+
+  DATA PASSED BY ROUTE:
+  - models: list of dicts from verity.models.list_models()
+-->
+{% extends "base.html" %}
+
+{% block title %}AI Models — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <span>AI Models</span>
+{% endblock %}
+
+{% block page_title %}AI Models{% endblock %}
+
+{% block content %}
+
+<p class="verity-page-description">
+    Models are global infrastructure — shared across every application, pipeline, agent, and task. An <a href="/admin/configs">inference config</a> links an agent or task version to one model + its runtime settings (temperature, max_tokens, etc.). Prices are tracked as SCD Type 2 history: each row below shows the <em>currently-active</em> price, and the model invocation log joins each recorded run to the price row whose validity window contains its start time, so historical cost reports stay stable when prices change.
+</p>
+
+{% if models %}
+<table class="verity-table">
+    <thead>
+        <tr>
+            <th>Model</th>
+            <th>Provider</th>
+            <th>Modality</th>
+            <th>Context</th>
+            <th>Input $ / 1M</th>
+            <th>Output $ / 1M</th>
+            <th>Cache read</th>
+            <th>Cache write</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for m in models %}
+        <tr>
+            <td>
+                <span style="font-weight: 600;">{{ m.display_name }}</span>
+                <div style="font-size: 0.7rem; color: var(--verity-text-light); font-family: monospace;">{{ m.model_id }}</div>
+                {% if m.description %}
+                <div style="font-size: 0.75rem; color: var(--verity-text-light); margin-top: 3px;">
+                    {{ m.description[:160] }}{% if m.description|length > 160 %}…{% endif %}
+                </div>
+                {% endif %}
+            </td>
+            <td>
+                <span class="verity-badge" style="background: #e8f0fe; color: #1967d2; border: 1px solid #a5c4f4;">{{ m.provider }}</span>
+            </td>
+            <td style="font-size: 0.8rem; color: var(--verity-text-light);">{{ m.modality or 'chat' }}</td>
+            <td style="font-family: monospace; font-size: 0.8rem;">
+                {% if m.context_window %}{{ '{:,}'.format(m.context_window) }}{% else %}—{% endif %}
+            </td>
+            <td style="font-family: monospace; font-size: 0.85rem;">
+                {% if m.input_price_per_1m is not none %}${{ '%.2f' % m.input_price_per_1m }}{% else %}<span style="color:#94A3B8;">—</span>{% endif %}
+            </td>
+            <td style="font-family: monospace; font-size: 0.85rem;">
+                {% if m.output_price_per_1m is not none %}${{ '%.2f' % m.output_price_per_1m }}{% else %}<span style="color:#94A3B8;">—</span>{% endif %}
+            </td>
+            <td style="font-family: monospace; font-size: 0.8rem; color: var(--verity-text-light);">
+                {% if m.cache_read_price_per_1m is not none %}${{ '%.2f' % m.cache_read_price_per_1m }}{% else %}—{% endif %}
+            </td>
+            <td style="font-family: monospace; font-size: 0.8rem; color: var(--verity-text-light);">
+                {% if m.cache_write_price_per_1m is not none %}${{ '%.2f' % m.cache_write_price_per_1m }}{% else %}—{% endif %}
+            </td>
+            <td>
+                {% set s = m.status or 'active' %}
+                <span class="verity-badge"
+                      style="background: {% if s == 'active' %}#E8F0E9; color: #3E6044{% elif s == 'deprecated' %}#F4DEDE; color: #A23838{% else %}#F9F0DA; color: #816014{% endif %};">
+                    {{ s }}
+                </span>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<p style="font-size: 0.75rem; color: var(--verity-text-light); margin-top: 12px;">
+    Prices are quoted per 1 million tokens. Cache-read / cache-write apply when prompt caching is used — see the <a href="/admin/usage">Usage dashboard</a> for realized cache savings.
+</p>
+{% else %}
+<p style="color: var(--verity-text-light); font-style: italic; padding: 20px 0;">
+    No models registered yet. The seed script normally loads three Claude models at platform setup — run <code>uw_demo/app/setup/register_all.py</code>, or register via <code>POST /api/v1/models</code>.
+</p>
+{% endif %}
+
+{% endblock %}

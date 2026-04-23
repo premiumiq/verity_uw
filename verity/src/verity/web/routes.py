@@ -22,7 +22,9 @@ from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Request
+from typing import Optional
+
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -423,6 +425,95 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             active_page="mcp-servers",
             server=server,
             tools=bound_tools,
+        )
+
+    # ── MODELS ────────────────────────────────────────────────
+
+    @router.get("/models", response_class=HTMLResponse)
+    async def models_list(request: Request):
+        """Model catalog with currently-active prices. Clicking a row
+        takes you to the model detail page (price history + usage)."""
+        await verity.ensure_connected()
+        models = await verity.models.list_models()
+        return _render(templates, request, "models.html",
+            active_page="models",
+            models=models,
+        )
+
+    # ── USAGE & SPEND ─────────────────────────────────────────
+
+    @router.get("/usage", response_class=HTMLResponse)
+    async def usage_dashboard(
+        request: Request,
+        from_: Optional[str] = Query(None, alias="from"),
+        to: Optional[str] = Query(None),
+        apps: Optional[str] = Query(None),
+    ):
+        """Usage + spend dashboard. Defaults: last 7 days, all apps."""
+        from datetime import datetime, timedelta, timezone
+
+        await verity.ensure_connected()
+
+        # Parse window (default: last 7 days). Same helper logic as the
+        # /api/v1/usage/* endpoints; kept inline here so the template
+        # stays route-local.
+        now = datetime.now(timezone.utc)
+        try:
+            from_ts = datetime.fromisoformat(from_) if from_ else (now - timedelta(days=7))
+            to_ts   = datetime.fromisoformat(to)    if to    else now
+        except ValueError:
+            return HTMLResponse("<h1>Bad date</h1>", status_code=400)
+        if from_ts.tzinfo is None:
+            from_ts = from_ts.replace(tzinfo=timezone.utc)
+        if to_ts.tzinfo is None:
+            to_ts = to_ts.replace(tzinfo=timezone.utc)
+
+        # Parse apps filter, same pattern as the home dashboard.
+        raw_apps = (apps or "").strip()
+        selected_app_names = [s for s in (x.strip() for x in raw_apps.split(",")) if s]
+        applications = await verity.list_applications()
+        valid_names = {a["name"] for a in applications}
+        selected_app_names = [n for n in selected_app_names if n in valid_names]
+
+        # ECharts needs plain JSON on the client — psycopg returns
+        # Decimal and date objects from aggregation queries which break
+        # `| tojson`. Normalize to float + ISO string before handing
+        # the rollup to the template's <script> block.
+        def _jsonable(rows):
+            out = []
+            for r in rows:
+                nr = {}
+                for k, v in r.items():
+                    if hasattr(v, "as_integer_ratio") and not isinstance(v, int):
+                        nr[k] = float(v)    # Decimal → float
+                    elif hasattr(v, "isoformat"):
+                        nr[k] = v.isoformat()   # datetime / date → iso string
+                    else:
+                        nr[k] = v
+                out.append(nr)
+            return out
+
+        totals     = await verity.models.usage_totals(from_ts, to_ts, selected_app_names)
+        by_model   = await verity.models.usage_by_model(from_ts, to_ts, selected_app_names)
+        by_agent   = await verity.models.usage_by_agent(from_ts, to_ts, selected_app_names)
+        by_task    = await verity.models.usage_by_task(from_ts, to_ts, selected_app_names)
+        by_app     = await verity.models.usage_by_application(from_ts, to_ts, selected_app_names)
+        over_time  = _jsonable(
+            await verity.models.usage_over_time_daily(from_ts, to_ts, selected_app_names),
+        )
+
+        return _render(templates, request, "usage.html",
+            active_page="usage",
+            from_ts=from_ts.date().isoformat(),
+            to_ts=to_ts.date().isoformat(),
+            applications=applications,
+            selected_app_names=selected_app_names,
+            totals=totals,
+            by_model=by_model,
+            by_agent=by_agent,
+            by_task=by_task,
+            by_application=by_app,
+            over_time=over_time,
         )
 
     # ── PIPELINES ─────────────────────────────────────────────

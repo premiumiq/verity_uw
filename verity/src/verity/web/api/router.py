@@ -21,9 +21,11 @@ from verity.web.api.authoring import build_authoring_router
 from verity.web.api.decisions import build_decisions_router
 from verity.web.api.draft_edit import build_draft_edit_router
 from verity.web.api.lifecycle import build_lifecycle_router
+from verity.web.api.models import build_models_router
 from verity.web.api.registry import build_registry_router
 from verity.web.api.reporting import build_reporting_router
 from verity.web.api.runtime import build_runtime_router
+from verity.web.api.usage import build_usage_router
 
 
 def build_api_router(verity) -> APIRouter:
@@ -54,6 +56,13 @@ def build_api_router(verity) -> APIRouter:
     # Draft edit — PATCH/PUT/DELETE for in-place edits on draft versions,
     # plus POST .../clone to produce a new draft from any prior version.
     router.include_router(build_draft_edit_router(verity))
+
+    # Models — catalog CRUD + SCD-2 price history.
+    router.include_router(build_models_router(verity))
+
+    # Usage & spend — aggregations over the model invocation log +
+    # point-in-time price view.
+    router.include_router(build_usage_router(verity))
 
     # Applications — multi-tenant anchor, entity mappings, activity +
     # purge for the cleanup-notebook flow, and execution-context creation.

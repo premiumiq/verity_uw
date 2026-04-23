@@ -1,0 +1,352 @@
+<!--
+  USAGE & SPEND DASHBOARD
+
+  Structure (top to bottom):
+    1. Date range + application filter (both in the URL query string
+       so the page is shareable/bookmarkable; the apps filter mirrors
+       the home dashboard's ?apps= mechanism).
+    2. Summary tiles — total cost, invocations, tokens (input/output/
+       cache read/cache write).
+    3. Daily time-series bar chart — stacked input vs output cost.
+    4. Breakdown tables — by model, by application, by agent, by task.
+
+  All data comes from v_model_invocation_cost, which joins each
+  invocation to the price row whose validity window contains its
+  started_at. Historical reports stay stable when prices change.
+
+  DATA PASSED BY ROUTE:
+  - from_ts, to_ts       ISO date strings for the <input> values
+  - applications         list of all apps (for the filter strip)
+  - selected_app_names   which are currently active
+  - totals               dict with invocation_count + tokens + costs
+  - by_model / by_agent / by_task / by_application  list-of-dict tables
+  - over_time            daily rollup
+-->
+{% extends "base.html" %}
+
+{% block title %}Usage & Spend — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <span>Usage &amp; Spend</span>
+{% endblock %}
+
+{% block page_title %}Usage &amp; Spend{% endblock %}
+
+{% block content %}
+
+<!-- Inline styles scoped to /admin/usage. Kept local so the rest of
+     the admin CSS doesn't grow for a single page. -->
+<style>
+    .usage-filter-bar {
+        display: flex; gap: 14px; align-items: end; flex-wrap: wrap;
+        background: var(--verity-bg-alt); padding: 12px 16px;
+        border-radius: 8px; margin-bottom: 20px;
+    }
+    .usage-filter-bar label {
+        display: flex; flex-direction: column; gap: 4px;
+        font-size: 0.7rem; text-transform: uppercase; letter-spacing: .4px;
+        color: var(--verity-text-light); font-weight: 600;
+    }
+    .usage-filter-bar input[type=date] {
+        padding: 6px 10px; border: 1px solid var(--verity-border);
+        border-radius: 4px; font-family: inherit; font-size: 0.85rem;
+        background: white;
+    }
+    .usage-filter-bar .apps-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+    .usage-filter-bar .apps-pills a {
+        padding: 4px 10px; border-radius: 12px; font-size: 0.75rem;
+        border: 1px solid var(--verity-border); background: white;
+        color: var(--verity-text); text-decoration: none;
+    }
+    .usage-filter-bar .apps-pills a.selected {
+        background: var(--verity-blue-pale); border-color: var(--verity-blue-deep);
+        color: var(--verity-blue-deep); font-weight: 600;
+    }
+    .usage-filter-bar button {
+        padding: 7px 14px; border-radius: 4px; border: 1px solid var(--verity-blue-deep);
+        background: var(--verity-blue-deep); color: white; font-weight: 600;
+        font-family: inherit; font-size: 0.8rem; cursor: pointer;
+    }
+
+    .usage-tiles {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 14px; margin-bottom: 22px;
+    }
+    .usage-tile {
+        background: white; border: 1px solid var(--verity-border);
+        border-radius: 8px; padding: 16px 20px;
+    }
+    .usage-tile .tile-label {
+        font-size: 0.7rem; text-transform: uppercase; letter-spacing: .5px;
+        color: var(--verity-text-light); font-weight: 600; margin-bottom: 8px;
+    }
+    .usage-tile .tile-value {
+        font-size: 1.9rem; font-weight: 700; color: var(--verity-blue-deep);
+        line-height: 1;
+    }
+    .usage-tile .tile-sub {
+        font-size: 0.75rem; color: var(--verity-text-light); margin-top: 4px;
+    }
+    .usage-tile.spend .tile-value { color: #3E6044; }
+    .usage-tile.cache .tile-value { color: #816014; }
+
+    .usage-section-label {
+        font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1.5px;
+        color: var(--verity-text-light); font-weight: 600;
+        margin: 24px 0 8px 0;
+    }
+    .usage-table td.num { font-family: monospace; text-align: right; }
+</style>
+
+<!-- ══════════════════════════════════════════════════════════
+     1. Filter bar — date range + application pills
+     ══════════════════════════════════════════════════════════ -->
+<form method="get" action="/admin/usage" class="usage-filter-bar">
+    <label>
+        From
+        <input type="date" name="from" value="{{ from_ts }}">
+    </label>
+    <label>
+        To
+        <input type="date" name="to" value="{{ to_ts }}">
+    </label>
+
+    <label style="flex: 1; min-width: 240px;">
+        Applications
+        <div class="apps-pills">
+            {#- No Jinja macro here — the from/to state needs to survive the
+               app toggle, so each pill rewrites the full query string. -#}
+            <a href="/admin/usage?from={{ from_ts }}&to={{ to_ts }}"
+               class="{% if not selected_app_names %}selected{% endif %}">all</a>
+            {% for app in applications %}
+                {% if app.name in selected_app_names %}
+                    {% set new_set = selected_app_names | reject('equalto', app.name) | list %}
+                {% else %}
+                    {% set new_set = selected_app_names + [app.name] %}
+                {% endif %}
+                <a href="/admin/usage?from={{ from_ts }}&to={{ to_ts }}{% if new_set %}&apps={{ new_set | join(',') }}{% endif %}"
+                   class="{% if app.name in selected_app_names %}selected{% endif %}"
+                   title="{{ app.display_name or app.name }}">
+                    {{ app.display_name or app.name }}
+                </a>
+            {% endfor %}
+        </div>
+    </label>
+
+    <input type="hidden" name="apps" value="{{ selected_app_names | join(',') }}">
+    <button type="submit">Apply</button>
+</form>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     2. Summary tiles
+     ══════════════════════════════════════════════════════════ -->
+<div class="usage-tiles">
+    <div class="usage-tile spend">
+        <div class="tile-label">Total cost (USD)</div>
+        <div class="tile-value">${{ '%.4f' % (totals.total_cost_usd | float) }}</div>
+        <div class="tile-sub">
+            input ${{ '%.4f' % (totals.input_cost_usd | float) }} ·
+            output ${{ '%.4f' % (totals.output_cost_usd | float) }}
+        </div>
+    </div>
+    <div class="usage-tile">
+        <div class="tile-label">Invocations</div>
+        <div class="tile-value">{{ '{:,}'.format(totals.invocation_count | int) }}</div>
+        <div class="tile-sub">decisions that called a model</div>
+    </div>
+    <div class="usage-tile">
+        <div class="tile-label">Input tokens</div>
+        <div class="tile-value">{{ '{:,}'.format(totals.input_tokens | int) }}</div>
+        <div class="tile-sub">total sent to the model</div>
+    </div>
+    <div class="usage-tile">
+        <div class="tile-label">Output tokens</div>
+        <div class="tile-value">{{ '{:,}'.format(totals.output_tokens | int) }}</div>
+        <div class="tile-sub">total returned from the model</div>
+    </div>
+    <div class="usage-tile cache">
+        <div class="tile-label">Cache read tokens</div>
+        <div class="tile-value">{{ '{:,}'.format(totals.cache_read_tokens | int) }}</div>
+        <div class="tile-sub">served from prompt cache (cheaper)</div>
+    </div>
+    <div class="usage-tile cache">
+        <div class="tile-label">Cache write tokens</div>
+        <div class="tile-value">{{ '{:,}'.format(totals.cache_write_tokens | int) }}</div>
+        <div class="tile-sub">written to cache (one-time premium)</div>
+    </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     3. Daily time-series
+     ══════════════════════════════════════════════════════════ -->
+<div class="usage-section-label">Cost over time</div>
+{% if over_time %}
+<div id="chart-over-time" style="height: 220px; background: white;
+     border: 1px solid var(--verity-border); border-radius: 8px;
+     padding: 8px 12px;"></div>
+{% else %}
+<p style="color: var(--verity-text-light); font-style: italic; padding: 20px 0;">
+    No invocations recorded in this window.
+</p>
+{% endif %}
+
+
+<!-- ══════════════════════════════════════════════════════════
+     4. Breakdown tables
+     ══════════════════════════════════════════════════════════ -->
+<div class="usage-section-label">By model</div>
+{% if by_model %}
+<table class="verity-table usage-table">
+    <thead><tr>
+        <th>Provider</th><th>Model</th>
+        <th style="text-align:right;">Invocations</th>
+        <th style="text-align:right;">Input tokens</th>
+        <th style="text-align:right;">Output tokens</th>
+        <th style="text-align:right;">Total cost</th>
+    </tr></thead>
+    <tbody>
+        {% for r in by_model %}
+        <tr>
+            <td><span class="verity-badge" style="background: #e8f0fe; color: #1967d2;">{{ r.provider }}</span></td>
+            <td style="font-family: monospace; font-size: 0.8rem;">{{ r.model_name }}</td>
+            <td class="num">{{ '{:,}'.format(r.invocation_count) }}</td>
+            <td class="num">{{ '{:,}'.format(r.input_tokens) }}</td>
+            <td class="num">{{ '{:,}'.format(r.output_tokens) }}</td>
+            <td class="num">${{ '%.4f' % (r.total_cost_usd | float) }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}<p style="color: var(--verity-text-light); font-style: italic; padding: 10px 0;">No model usage in this window.</p>{% endif %}
+
+
+<div class="usage-section-label">By application</div>
+{% if by_application %}
+<table class="verity-table usage-table">
+    <thead><tr>
+        <th>Application</th>
+        <th style="text-align:right;">Invocations</th>
+        <th style="text-align:right;">Input tokens</th>
+        <th style="text-align:right;">Output tokens</th>
+        <th style="text-align:right;">Total cost</th>
+    </tr></thead>
+    <tbody>
+        {% for r in by_application %}
+        <tr>
+            <td style="font-weight: 500;">{{ r.application }}</td>
+            <td class="num">{{ '{:,}'.format(r.invocation_count) }}</td>
+            <td class="num">{{ '{:,}'.format(r.input_tokens) }}</td>
+            <td class="num">{{ '{:,}'.format(r.output_tokens) }}</td>
+            <td class="num">${{ '%.4f' % (r.total_cost_usd | float) }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}<p style="color: var(--verity-text-light); font-style: italic; padding: 10px 0;">No per-application usage in this window.</p>{% endif %}
+
+
+<div class="usage-section-label">By agent</div>
+{% if by_agent %}
+<table class="verity-table usage-table">
+    <thead><tr>
+        <th>Agent</th>
+        <th style="text-align:right;">Invocations</th>
+        <th style="text-align:right;">Failed</th>
+        <th style="text-align:right;">Input tokens</th>
+        <th style="text-align:right;">Output tokens</th>
+        <th style="text-align:right;">Total cost</th>
+    </tr></thead>
+    <tbody>
+        {% for r in by_agent %}
+        <tr>
+            <td>
+                <a href="/admin/agents/{{ r.entity_name }}" style="font-weight: 500;">{{ r.entity_display_name or r.entity_name }}</a>
+                <div style="font-size: 0.65rem; color: var(--verity-text-light); font-family: monospace;">{{ r.entity_name }}</div>
+            </td>
+            <td class="num">{{ '{:,}'.format(r.invocation_count) }}</td>
+            <td class="num" style="color: {% if r.failed_count > 0 %}#A23838{% else %}var(--verity-text-light){% endif %};">
+                {{ r.failed_count }}
+            </td>
+            <td class="num">{{ '{:,}'.format(r.input_tokens) }}</td>
+            <td class="num">{{ '{:,}'.format(r.output_tokens) }}</td>
+            <td class="num">${{ '%.4f' % (r.total_cost_usd | float) }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}<p style="color: var(--verity-text-light); font-style: italic; padding: 10px 0;">No agent usage in this window.</p>{% endif %}
+
+
+<div class="usage-section-label">By task</div>
+{% if by_task %}
+<table class="verity-table usage-table">
+    <thead><tr>
+        <th>Task</th>
+        <th style="text-align:right;">Invocations</th>
+        <th style="text-align:right;">Failed</th>
+        <th style="text-align:right;">Input tokens</th>
+        <th style="text-align:right;">Output tokens</th>
+        <th style="text-align:right;">Total cost</th>
+    </tr></thead>
+    <tbody>
+        {% for r in by_task %}
+        <tr>
+            <td>
+                <a href="/admin/tasks/{{ r.entity_name }}" style="font-weight: 500;">{{ r.entity_display_name or r.entity_name }}</a>
+                <div style="font-size: 0.65rem; color: var(--verity-text-light); font-family: monospace;">{{ r.entity_name }}</div>
+            </td>
+            <td class="num">{{ '{:,}'.format(r.invocation_count) }}</td>
+            <td class="num" style="color: {% if r.failed_count > 0 %}#A23838{% else %}var(--verity-text-light){% endif %};">
+                {{ r.failed_count }}
+            </td>
+            <td class="num">{{ '{:,}'.format(r.input_tokens) }}</td>
+            <td class="num">{{ '{:,}'.format(r.output_tokens) }}</td>
+            <td class="num">${{ '%.4f' % (r.total_cost_usd | float) }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}<p style="color: var(--verity-text-light); font-style: italic; padding: 10px 0;">No task usage in this window.</p>{% endif %}
+
+
+<!-- ══════════════════════════════════════════════════════════
+     ECHARTS — daily time series
+     ══════════════════════════════════════════════════════════ -->
+{% if over_time %}
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script>
+(function() {
+    const data = {{ over_time | tojson }};
+    const dates = data.map(d => d.bucket.slice(0, 10));   // YYYY-MM-DD
+    const cost  = data.map(d => parseFloat(d.total_cost_usd));
+    const invos = data.map(d => d.invocation_count);
+
+    const c = echarts.init(document.getElementById('chart-over-time'));
+    window.addEventListener('resize', () => c.resize());
+    c.setOption({
+        textStyle: { fontFamily: 'Poppins, sans-serif' },
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['Cost (USD)', 'Invocations'], top: 0, right: 10, textStyle: { fontSize: 9 } },
+        grid: { left: 55, right: 55, top: 30, bottom: 25 },
+        xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 9, color: '#7F7F7F' } },
+        yAxis: [
+            { type: 'value', name: 'Cost', axisLabel: { fontSize: 9, color: '#7F7F7F',
+              formatter: function(v) { return '$' + v.toFixed(4); } } },
+            { type: 'value', name: 'Count', axisLabel: { fontSize: 9, color: '#7F7F7F' } },
+        ],
+        series: [
+            { name: 'Cost (USD)', type: 'bar', data: cost,
+              itemStyle: { color: '#405A8A', borderRadius: [3, 3, 0, 0] },
+              barWidth: 18 },
+            { name: 'Invocations', type: 'line', yAxisIndex: 1, data: invos,
+              itemStyle: { color: '#E3B447' }, lineStyle: { width: 1.5 } },
+        ],
+    });
+})();
+</script>
+{% endif %}
+
+{% endblock %}
