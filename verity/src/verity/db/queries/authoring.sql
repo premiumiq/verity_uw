@@ -221,14 +221,27 @@ WHERE parent_agent_version_id = %(version_id)s::uuid;
 
 -- name: get_application_activity_counts
 -- Counts tied to the application, used by GET /applications/{name}/activity.
--- `application` on agent_decision_log is a VARCHAR (app name); everything
--- else uses the application.id FK.
+-- Mirrors the predicate used by the purge queries so the "preview" numbers
+-- match what a subsequent DELETE /activity will actually remove.
+-- A decision counts as belonging to this app if EITHER
+--   (a) its `application` VARCHAR matches %(app_name)s, or
+--   (b) its execution_context_id points at a context owned by the app.
 SELECT
     (SELECT COUNT(*) FROM agent_decision_log
-     WHERE application = %(app_name)s) AS decision_count,
+     WHERE application = %(app_name)s
+        OR execution_context_id IN (
+               SELECT id FROM execution_context
+               WHERE application_id = %(app_id)s::uuid
+           )
+    ) AS decision_count,
     (SELECT COUNT(*) FROM override_log
      WHERE decision_log_id IN (
-         SELECT id FROM agent_decision_log WHERE application = %(app_name)s
+         SELECT id FROM agent_decision_log
+         WHERE application = %(app_name)s
+            OR execution_context_id IN (
+                   SELECT id FROM execution_context
+                   WHERE application_id = %(app_id)s::uuid
+               )
      )) AS override_count,
     (SELECT COUNT(*) FROM execution_context
      WHERE application_id = %(app_id)s::uuid) AS execution_context_count,
@@ -239,18 +252,37 @@ SELECT
 -- name: purge_override_logs_for_application
 -- Step 1 of purge: clear override_log rows that point at this app's
 -- decisions. Must run before the agent_decision_log delete.
+--
+-- A decision "belongs to" the app if EITHER of:
+--   (a) its `application` VARCHAR column matches %(app_name)s — the
+--       normal flow when the client was constructed with application=<name>.
+--   (b) its `execution_context_id` points at an execution_context row
+--       owned by the app — catches REST-runtime-initiated decisions that
+--       were tagged with the server's 'default' identity but were still
+--       produced on behalf of %(app_name)s (e.g. from the DS Workbench).
 DELETE FROM override_log
 WHERE decision_log_id IN (
-    SELECT id FROM agent_decision_log WHERE application = %(app_name)s
+    SELECT id FROM agent_decision_log
+    WHERE application = %(app_name)s
+       OR execution_context_id IN (
+              SELECT id FROM execution_context
+              WHERE application_id = %(app_id)s::uuid
+          )
 );
 
 
 -- name: purge_decisions_for_application
--- Step 2 of purge. agent_decision_log.parent_decision_id is a self-FK
+-- Step 2 of purge. Same OR predicate as above — keeps the two cleanup
+-- steps in sync. agent_decision_log.parent_decision_id is a self-FK
 -- with no CASCADE, but the DELETE happens in a single statement so
--- PostgreSQL defers the FK check to end-of-statement — safe as long
--- as no decisions from other apps reference rows in this set.
-DELETE FROM agent_decision_log WHERE application = %(app_name)s
+-- PostgreSQL defers the FK check to end-of-statement; safe as long as
+-- no decisions from other apps reference rows in this set.
+DELETE FROM agent_decision_log
+WHERE application = %(app_name)s
+   OR execution_context_id IN (
+          SELECT id FROM execution_context
+          WHERE application_id = %(app_id)s::uuid
+      )
 RETURNING id;
 
 

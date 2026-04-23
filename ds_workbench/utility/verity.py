@@ -355,31 +355,41 @@ class VerityAPI:
         return self.call("list_agent_versions", path_params={"name": name})
 
     # Runtime
+    # Each convenience wrapper defaults `application=self.application`, so
+    # every run launched from the workbench attributes its decision log to
+    # our app rather than the Verity server's default identity. Pass
+    # `application=None` explicitly to opt out.
     def run_agent(
         self, name: str, context: dict, channel: str = "production",
         execution_context_id: Optional[UUID] = None,
+        application: Optional[str] = ...,
     ) -> dict:
         body = {"context": context, "channel": channel}
         if execution_context_id:
             body["execution_context_id"] = str(execution_context_id)
+        body["application"] = self.application if application is ... else application
         return self.call("run_agent", path_params={"name": name}, json=body)
 
     def run_task(
         self, name: str, input_data: dict, channel: str = "production",
         execution_context_id: Optional[UUID] = None,
+        application: Optional[str] = ...,
     ) -> dict:
         body = {"input_data": input_data, "channel": channel}
         if execution_context_id:
             body["execution_context_id"] = str(execution_context_id)
+        body["application"] = self.application if application is ... else application
         return self.call("run_task", path_params={"name": name}, json=body)
 
     def run_pipeline(
         self, name: str, context: dict, channel: str = "production",
         execution_context_id: Optional[UUID] = None,
+        application: Optional[str] = ...,
     ) -> dict:
         body = {"context": context, "channel": channel}
         if execution_context_id:
             body["execution_context_id"] = str(execution_context_id)
+        body["application"] = self.application if application is ... else application
         return self.call("run_pipeline", path_params={"name": name}, json=body)
 
     # Decisions + audit

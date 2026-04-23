@@ -40,6 +40,15 @@ class RunAgentRequest(BaseModel):
         description="Link this run to a parent pipeline run (normally "
                     "left null when calling the agent directly).",
     )
+    application: Optional[str] = Field(
+        None,
+        description="Attribution override for the decision log's "
+                    "`application` column. When omitted, decisions are "
+                    "tagged with the Verity server process's default "
+                    "client identity ('default'). External callers "
+                    "(e.g. the DS Workbench) pass their own app name "
+                    "here so cleanup-by-application queries work.",
+    )
 
 
 class RunTaskRequest(BaseModel):
@@ -53,6 +62,11 @@ class RunTaskRequest(BaseModel):
     channel: str = "production"
     execution_context_id: Optional[UUID] = None
     pipeline_run_id: Optional[UUID] = None
+    application: Optional[str] = Field(
+        None,
+        description="Attribution override for the decision log's "
+                    "`application` column (see RunAgentRequest.application).",
+    )
 
 
 class RunPipelineRequest(BaseModel):
@@ -64,3 +78,9 @@ class RunPipelineRequest(BaseModel):
     )
     channel: str = "production"
     execution_context_id: Optional[UUID] = None
+    application: Optional[str] = Field(
+        None,
+        description="Attribution override for every decision log row "
+                    "produced by this pipeline run "
+                    "(see RunAgentRequest.application).",
+    )

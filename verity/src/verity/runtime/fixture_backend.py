@@ -180,6 +180,7 @@ class FixtureEngine:
         mock: Optional[MockContext] = None,
         stream: bool = False,
         execution_context_id: Optional[UUID] = None,
+        application: Optional[str] = None,
     ) -> ExecutionResult:
         """Return the fixture for this agent as an ExecutionResult and log the decision.
 
@@ -205,6 +206,7 @@ class FixtureEngine:
             decision_depth=decision_depth,
             step_name=step_name,
             execution_context_id=execution_context_id,
+            application=application,
         )
 
         return ExecutionResult(
@@ -236,6 +238,7 @@ class FixtureEngine:
         mock: Optional[MockContext] = None,
         stream: bool = False,
         execution_context_id: Optional[UUID] = None,
+        application: Optional[str] = None,
     ) -> ExecutionResult:
         """Return the fixture for this task as an ExecutionResult and log the decision."""
         start_ms = _now_ms()
@@ -256,6 +259,7 @@ class FixtureEngine:
             decision_depth=decision_depth,
             step_name=step_name,
             execution_context_id=execution_context_id,
+            application=application,
         )
 
         return ExecutionResult(
@@ -308,6 +312,7 @@ class FixtureEngine:
         decision_depth: int,
         step_name: Optional[str],
         execution_context_id: Optional[UUID],
+        application: Optional[str] = None,
     ) -> dict:
         """Write a DecisionLogCreate row shaped like a real run but flagged mock_mode=True.
 
@@ -362,7 +367,7 @@ class FixtureEngine:
                 message_history=fixture.message_history
                 if fixture.message_history
                 else None,
-                application=self.application,
+                application=application or self.application,
                 status="complete",
             )
         )

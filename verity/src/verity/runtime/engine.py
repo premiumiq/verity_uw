@@ -661,6 +661,7 @@ class ExecutionEngine:
         mock: Optional[MockContext] = None,
         stream: bool = False,
         execution_context_id: Optional[UUID] = None,
+        application: Optional[str] = None,
     ) -> ExecutionResult:
         """Execute an agent: resolve config, assemble prompts, run the agentic loop.
 
@@ -812,6 +813,7 @@ class ExecutionEngine:
                 decision_depth=decision_depth, step_name=step_name,
                 status="complete", mock_mode=is_mocked,
                 execution_context_id=execution_context_id,
+                application=application,
             )
 
             logger.info("Agent execution complete: %s (%dms, %d tool calls, %d+%d tokens, depth=%d)",
@@ -848,6 +850,7 @@ class ExecutionEngine:
                 decision_depth=decision_depth, step_name=step_name,
                 status="failed", error_message=str(e),
                 execution_context_id=execution_context_id,
+                application=application,
             )
             return ExecutionResult(
                 decision_log_id=log_result["decision_log_id"],
@@ -874,6 +877,7 @@ class ExecutionEngine:
         mock: Optional[MockContext] = None,
         stream: bool = False,
         execution_context_id: Optional[UUID] = None,
+        application: Optional[str] = None,
     ) -> ExecutionResult:
         """Execute a task with single-turn structured output and mock support."""
         logger.info("Task execution starting: %s (step=%s, mock=%s)",
@@ -936,12 +940,13 @@ class ExecutionEngine:
                 tool_calls_made=[], message_history=[],
                 total_input_tokens=response.usage.input_tokens,
                 total_output_tokens=response.usage.output_tokens,
-                duration_ms=duration_ms, 
+                duration_ms=duration_ms,
                 channel=channel, pipeline_run_id=pipeline_run_id,
                 parent_decision_id=parent_decision_id,
                 decision_depth=decision_depth, step_name=step_name,
                 status="complete",
                 execution_context_id=execution_context_id,
+                application=application,
             )
 
             logger.info("Task execution complete: %s (%dms, %d+%d tokens)",
@@ -970,6 +975,7 @@ class ExecutionEngine:
                 decision_depth=decision_depth, step_name=step_name,
                 status="failed", error_message=str(e),
                 execution_context_id=execution_context_id,
+                application=application,
             )
             return ExecutionResult(
                 decision_log_id=log_result["decision_log_id"],
@@ -995,6 +1001,7 @@ class ExecutionEngine:
         step_name: Optional[str] = None,
         mock: Optional[MockContext] = None,
         execution_context_id: Optional[UUID] = None,
+        application: Optional[str] = None,
     ) -> ExecutionResult:
         """Execute a tool directly — no LLM call.
 
@@ -1054,7 +1061,7 @@ class ExecutionEngine:
                 input_tokens=0, output_tokens=0,
                 duration_ms=duration_ms,
                 tool_calls_made=[tool_record],
-                application=self.application,
+                application=application or self.application,
                 status="complete" if not tool_record.get("error") else "failed",
                 mock_mode=tool_record.get("mock_mode", False),
             ))
@@ -1108,6 +1115,13 @@ class ExecutionEngine:
         run_purpose: str = "production",
         reproduced_from_decision_id: Optional[UUID] = None,
         id: Optional[UUID] = None,
+        # `application` overrides self.application for this one decision.
+        # Used by the REST runtime endpoints so that decisions produced on
+        # behalf of a caller (e.g. ds_workbench) get logged with the
+        # caller's app name rather than the Verity server's default
+        # identity. None → fall back to self.application (the SDK-client
+        # identity the engine was constructed with).
+        application: Optional[str] = None,
     ) -> dict:
         """Create a decision log entry with full snapshot.
 
@@ -1156,7 +1170,7 @@ class ExecutionEngine:
             duration_ms=duration_ms,
             tool_calls_made=tool_calls_made if tool_calls_made else None,
             message_history=message_history if message_history else None,
-            application=self.application,
+            application=application or self.application,
             status=status,
             error_message=error_message,
         ))

@@ -41,6 +41,7 @@ def build_runtime_router(verity) -> APIRouter:
                 channel=req.channel,
                 pipeline_run_id=req.pipeline_run_id,
                 execution_context_id=req.execution_context_id,
+                application=req.application,
             )
         except ValueError as exc:
             # Unknown agent name or version — surface as 404 rather than 500.
@@ -56,6 +57,7 @@ def build_runtime_router(verity) -> APIRouter:
                 channel=req.channel,
                 pipeline_run_id=req.pipeline_run_id,
                 execution_context_id=req.execution_context_id,
+                application=req.application,
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
@@ -74,6 +76,7 @@ def build_runtime_router(verity) -> APIRouter:
                 context=req.context,
                 channel=req.channel,
                 execution_context_id=req.execution_context_id,
+                application=req.application,
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))

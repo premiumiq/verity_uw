@@ -177,11 +177,15 @@ class Verity:
         mock: Optional[MockContext] = None,
         stream: bool = False,
         execution_context_id: Optional[UUID] = None,
+        application: Optional[str] = None,
     ) -> ExecutionResult:
         """Execute an agent with full governance.
 
         Pass execution_context_id to link this decision to a business context.
         Pass mock=MockContext(...) to control mocking behavior.
+        Pass application="<name>" to stamp the decision row with a caller
+        identity different from this client's default. Used by the REST
+        runtime endpoints to attribute workbench / external runs correctly.
         """
         await self.ensure_connected()
         return await self._rt.execution.run_agent(
@@ -192,6 +196,7 @@ class Verity:
             mock=mock,
             stream=stream,
             execution_context_id=execution_context_id,
+            application=application,
         )
 
     async def execute_task(
@@ -203,8 +208,13 @@ class Verity:
         mock: Optional[MockContext] = None,
         stream: bool = False,
         execution_context_id: Optional[UUID] = None,
+        application: Optional[str] = None,
     ) -> ExecutionResult:
-        """Execute a task with single-turn structured output."""
+        """Execute a task with single-turn structured output.
+
+        `application=<name>` overrides the decision-row attribution
+        (see execute_agent for the rationale).
+        """
         await self.ensure_connected()
         return await self._rt.execution.run_task(
             task_name=task_name,
@@ -214,6 +224,7 @@ class Verity:
             mock=mock,
             stream=stream,
             execution_context_id=execution_context_id,
+            application=application,
         )
 
     async def execute_pipeline(
@@ -224,6 +235,7 @@ class Verity:
         mock: Optional[MockContext] = None,
         fixtures: Optional[dict[str, Any]] = None,
         execution_context_id: Optional[UUID] = None,
+        application: Optional[str] = None,
     ) -> PipelineResult:
         """Execute a full pipeline with dependency resolution and parallel groups.
 
@@ -272,6 +284,7 @@ class Verity:
                 context=context,
                 channel=channel,
                 execution_context_id=execution_context_id,
+                application=application,
             )
 
         # Real path: the persistent pipeline_executor over ExecutionEngine.
@@ -281,6 +294,7 @@ class Verity:
             channel=channel,
             mock=mock,
             execution_context_id=execution_context_id,
+            application=application,
         )
 
     def register_tool_implementation(self, tool_name: str, func: Callable):

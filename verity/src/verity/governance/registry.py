@@ -1055,12 +1055,13 @@ class Registry:
         async with self.db.transaction() as tx:
             # Order matters: override_log → agent_decision_log (FK) →
             # execution_context (referenced by agent_decision_log).
-            await tx.execute(
-                "purge_override_logs_for_application", {"app_name": name},
-            )
-            dec_rows = await tx.fetch_all(
-                "purge_decisions_for_application", {"app_name": name},
-            )
+            # Both log purges match by app_name AND by execution_context
+            # → application_id, so REST-runtime decisions tagged with the
+            # server's 'default' identity still get caught when they
+            # reference a context this app owns.
+            params = {"app_name": name, "app_id": str(app["id"])}
+            await tx.execute("purge_override_logs_for_application", params)
+            dec_rows = await tx.fetch_all("purge_decisions_for_application", params)
             ctx_rows = await tx.fetch_all(
                 "purge_execution_contexts_for_application",
                 {"app_id": str(app["id"])},

@@ -62,6 +62,7 @@ class PipelineExecutor:
         channel: str = "production",
         mock=None,  # Optional MockContext
         execution_context_id=None,  # Optional UUID — links decisions to a business context
+        application: Optional[str] = None,  # Overrides engine.application for every step in this run
     ) -> PipelineResult:
         """Execute a pipeline from its champion version.
 
@@ -169,6 +170,7 @@ class PipelineExecutor:
                 result = await self._execute_step(
                     runnable[0], context, accumulated_results,
                     channel, pipeline_run_id, mock, execution_context_id,
+                    application,
                 )
                 accumulated_results[runnable[0].step_name] = result
                 all_steps.append(result)
@@ -180,7 +182,8 @@ class PipelineExecutor:
                 tasks = [
                     self._execute_step(
                         step, context, accumulated_results,
-                        channel, pipeline_run_id, mock,
+                        channel, pipeline_run_id, mock, execution_context_id,
+                        application,
                     )
                     for step in runnable
                 ]
@@ -243,6 +246,7 @@ class PipelineExecutor:
         pipeline_run_id: UUID,
         mock=None,
         execution_context_id=None,
+        application: Optional[str] = None,
     ) -> StepResult:
         """Execute a single pipeline step (agent, task, or tool)."""
         start_ms = _now_ms()
@@ -268,6 +272,7 @@ class PipelineExecutor:
                     step_name=step.step_name,
                     mock=mock,
                     execution_context_id=execution_context_id,
+                    application=application,
                 )
             elif entity_type == "task":
                 exec_result = await self.engine.run_task(
@@ -279,6 +284,7 @@ class PipelineExecutor:
                     step_name=step.step_name,
                     mock=mock,
                     execution_context_id=execution_context_id,
+                    application=application,
                 )
             elif entity_type == "tool":
                 exec_result = await self.engine.run_tool(
@@ -290,6 +296,7 @@ class PipelineExecutor:
                     step_name=step.step_name,
                     mock=mock,
                     execution_context_id=execution_context_id,
+                    application=application,
                 )
             else:
                 return StepResult(
