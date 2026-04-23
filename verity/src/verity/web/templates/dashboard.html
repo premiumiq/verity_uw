@@ -27,13 +27,9 @@
      Kept here (rather than verity.css) because they're home-only
      and the admin CSS file is already large. -->
 <style>
-    .home-intro {
-        color: var(--verity-text);
-        font-size: 0.95rem;
-        line-height: 1.5;
-        max-width: 900px;
-        margin: 0 0 22px 0;
-    }
+    /* .home-intro removed — home intro now uses the shared
+       .verity-page-description class so its size, colour, and
+       max-width match every other page. */
     .home-section-label {
         font-size: 0.75rem;
         text-transform: uppercase;
@@ -142,7 +138,7 @@
 <!-- ══════════════════════════════════════════════════════════
      1. INTRO
      ══════════════════════════════════════════════════════════ -->
-<p class="home-intro">
+<p class="verity-page-description">
     <strong>Verity</strong> is PremiumIQ's AI trust &amp; compliance platform.
     It is the single source of truth for every AI component in your organization:
     agents, tasks, prompts, tools, inference configs, and pipelines are governed
