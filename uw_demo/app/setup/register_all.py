@@ -2066,6 +2066,36 @@ async def seed_decisions(verity, agent_versions, task_versions):
         "00000004-0004-0004-0004-000000000004": "aaaa0004-0004-0004-0004-000000000004",
     }
 
+    # Seed pipeline_run rows first so the /admin/pipeline-runs page
+    # has something to show after a fresh reset. Each synthetic run
+    # is written in two steps — 'insert at start' then 'update to
+    # complete' — to mirror exactly what PipelineExecutor does in
+    # production, so the demo data is indistinguishable from a real
+    # run that's already finished.
+    from datetime import datetime, timezone
+    seed_started_at = datetime.now(timezone.utc)
+    synth_total_duration = sum(2000 + (i * 300) for i in range(len(step_configs)))
+    for sub in submissions:
+        pipeline_run_id = PIPELINE_RUN_IDS[sub["id"]]
+        await verity.db.execute_returning("insert_pipeline_run_start", {
+            "id": pipeline_run_id,
+            "pipeline_name": "uw_document_processing",
+            "application": "uw_demo",
+            "started_at": seed_started_at,
+            "step_count": len(step_configs),
+            "execution_context_id": None,
+        })
+        await verity.db.execute("update_pipeline_run_complete", {
+            "id": pipeline_run_id,
+            "status": "complete",
+            "completed_at": seed_started_at,
+            "duration_ms": synth_total_duration,
+            "step_count": len(step_configs),
+            "failed_step_count": 0,
+            "skipped_step_count": 0,
+            "error_message": None,
+        })
+
     decision_count = 0
     override_decisions = []
 

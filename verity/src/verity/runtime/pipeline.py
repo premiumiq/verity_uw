@@ -8,6 +8,7 @@ support via asyncio.gather. Each step is a governed Verity execution
 import asyncio
 import logging
 import time
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Any, Optional
 from uuid import UUID, uuid4
@@ -73,6 +74,7 @@ class PipelineExecutor:
         5. Handle error policies per step
         """
         start_ms = _now_ms()
+        started_at = datetime.now(timezone.utc)
         pipeline_run_id = uuid4()
         pipeline_run_id_var.set(str(pipeline_run_id))
 
@@ -94,6 +96,33 @@ class PipelineExecutor:
         step_names = [s.step_name if isinstance(s, PipelineStep) else s.get("step_name", "?") for s in steps]
         logger.info("Pipeline run starting: %s (run_id=%s, steps=%s, mock=%s)",
                      pipeline_name, str(pipeline_run_id)[:8], step_names, mock is not None)
+
+        # ── Write `pipeline_run` row with status='running'.
+        # Without this, the /admin/pipeline-runs page had no way to
+        # know a run was in flight — it always showed "complete" as
+        # soon as the first step's decision row appeared. The row is
+        # updated in both the success and exception branches below.
+        # Any write failure here is logged but non-fatal: the run
+        # should still execute even if observability storage hiccups.
+        try:
+            await self.registry.db.execute_returning(
+                "insert_pipeline_run_start",
+                {
+                    "id": str(pipeline_run_id),
+                    "pipeline_name": pipeline_name,
+                    "application": application or "default",
+                    "started_at": started_at,
+                    "step_count": len(steps),
+                    "execution_context_id": (
+                        str(execution_context_id) if execution_context_id else None
+                    ),
+                },
+            )
+        except Exception:
+            logger.exception(
+                "Failed to write pipeline_run start row for %s (run_id=%s)",
+                pipeline_name, pipeline_run_id,
+            )
 
         # Build execution plan: group by step_order, resolve dependencies
         execution_groups = _build_execution_groups(steps)
@@ -224,6 +253,32 @@ class PipelineExecutor:
                      "completed=%d, failed=%d, skipped=%d)",
                      pipeline_name, str(pipeline_run_id)[:8], overall_status,
                      duration_ms, len(completed), len(failed), len(skipped))
+
+        # Update pipeline_run with the final lifecycle state. _execute_step
+        # already catches its own exceptions and parallel groups use
+        # return_exceptions=True, so the loop itself does not raise in
+        # practice — if some catastrophic error (out-of-memory etc.)
+        # escapes, the row stays at status='running', which is a clear
+        # signal in the admin UI that something went wrong.
+        try:
+            await self.registry.db.execute(
+                "update_pipeline_run_complete",
+                {
+                    "id": str(pipeline_run_id),
+                    "status": overall_status,
+                    "completed_at": datetime.now(timezone.utc),
+                    "duration_ms": duration_ms,
+                    "step_count": len(all_steps),
+                    "failed_step_count": len(failed),
+                    "skipped_step_count": len(skipped),
+                    "error_message": None,
+                },
+            )
+        except Exception:
+            logger.exception(
+                "Failed to update pipeline_run row to %s (run_id=%s)",
+                overall_status, pipeline_run_id,
+            )
 
         return PipelineResult(
             pipeline_run_id=pipeline_run_id,

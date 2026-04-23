@@ -1477,3 +1477,34 @@ ALTER TABLE pipeline_version ADD COLUMN IF NOT EXISTS cloned_from_version_id UUI
 -- catalog. Kept alongside the existing `model_name` VARCHAR column for
 -- transition; seed script backfills this FK from the text column.
 ALTER TABLE inference_config ADD COLUMN IF NOT EXISTS model_id UUID REFERENCES model(id);
+
+
+-- ============================================================
+-- PIPELINE RUN — lifecycle tracking for one pipeline invocation
+-- ============================================================
+-- One row per PipelineExecutor.run_pipeline() call. Written with
+-- status='running' at entry and updated at exit with the final
+-- status + duration + step counters. Without this table, the
+-- /admin/pipeline-runs page could only GUESS whether a run was
+-- in flight — it always showed "complete" as soon as the first
+-- step's decision row appeared, even when later steps were still
+-- executing.
+
+CREATE TABLE IF NOT EXISTS pipeline_run (
+    id                  UUID PRIMARY KEY,
+    pipeline_name       VARCHAR(200) NOT NULL,
+    application         VARCHAR(100) DEFAULT 'default',
+    status              VARCHAR(20) NOT NULL DEFAULT 'running',  -- running/complete/partial/failed
+    started_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at        TIMESTAMPTZ,
+    duration_ms         INTEGER,
+    step_count          INTEGER,
+    failed_step_count   INTEGER DEFAULT 0,
+    skipped_step_count  INTEGER DEFAULT 0,
+    execution_context_id UUID REFERENCES execution_context(id),
+    error_message       TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pr_started     ON pipeline_run(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pr_status      ON pipeline_run(status);
+CREATE INDEX IF NOT EXISTS idx_pr_application ON pipeline_run(application);

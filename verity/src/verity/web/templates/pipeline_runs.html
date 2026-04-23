@@ -30,12 +30,13 @@
     <thead>
         <tr>
             <th>Run ID</th>
+            <th>Pipeline</th>
             <th>Application</th>
-            <th>Steps</th>
-            <th>Assets</th>
+            <th>Progress</th>
             <th>Status</th>
+            <th>Assets</th>
             <th>Duration</th>
-            <th>When</th>
+            <th>Started</th>
             <th></th>
         </tr>
     </thead>
@@ -47,8 +48,40 @@
                     {{ run.pipeline_run_id | short_id }}
                 </a>
             </td>
+            <td style="font-size: 0.8rem; font-weight: 500;">
+                {{ run.pipeline_name or '—' }}
+            </td>
             <td>{{ run.application or 'default' }}</td>
-            <td>{{ run.step_count }}</td>
+            <td style="font-size: 0.85rem; font-family: monospace;">
+                {#- expected_step_count is the pipeline's declared step count;
+                   decision_step_count is how many steps have logged a
+                   decision so far (completed + failed, not skipped).
+                   For a run still in flight, M / N where M < N. -#}
+                {% set logged = run.decision_step_count or 0 %}
+                {% set total  = run.expected_step_count or 0 %}
+                {% if total %}
+                    {{ logged }} / {{ total }}
+                    {% if run.status == 'running' and logged < total %}
+                        <span style="color: var(--verity-text-light); font-size: 0.7rem;">· {{ total - logged }} pending</span>
+                    {% endif %}
+                {% else %}
+                    {{ logged }}
+                {% endif %}
+            </td>
+            <td>
+                {% set s = run.status or 'complete' %}
+                {% if s == 'running' %}
+                    <span class="verity-badge" style="background: #D2DDF1; color: #2B4D8A;">● running</span>
+                {% elif s == 'complete' %}
+                    <span class="verity-badge verity-badge-complete">complete</span>
+                {% elif s == 'partial' %}
+                    <span class="verity-badge" style="background: #F9F0DA; color: #816014;">partial</span>
+                {% elif s == 'failed' %}
+                    <span class="verity-badge verity-badge-failed">failed</span>
+                {% else %}
+                    <span class="verity-badge">{{ s }}</span>
+                {% endif %}
+            </td>
             <td style="font-size: 0.75rem;">
                 {% if run.entities %}
                     {% for entity_name in run.entities.split(', ') %}
@@ -58,15 +91,18 @@
                     —
                 {% endif %}
             </td>
-            <td>
-                {% if run.has_failures %}
-                    <span class="verity-badge verity-badge-failed">has failures</span>
+            <td style="font-size: 0.8rem;">
+                {#- Prefer pipeline_run's recorded duration (set at exit);
+                   fall back to the sum over decisions for in-flight runs. -#}
+                {% if run.duration_ms is not none %}
+                    {{ run.duration_ms }}ms
+                {% elif run.status == 'running' %}
+                    <span style="color: var(--verity-text-light); font-style: italic;">in flight</span>
                 {% else %}
-                    <span class="verity-badge verity-badge-complete">complete</span>
+                    {{ run.logged_duration_ms or 0 }}ms
                 {% endif %}
             </td>
-            <td>{{ run.total_duration_ms }}ms</td>
-            <td>{{ run.first_at.strftime('%m-%d %H:%M') if run.first_at else '—' }}</td>
+            <td>{{ run.started_at.strftime('%m-%d %H:%M') if run.started_at else '—' }}</td>
             <td>
                 <a href="/admin/audit-trail/run/{{ run.pipeline_run_id }}" class="verity-btn verity-btn-secondary verity-btn-sm">
                     View Steps

@@ -263,26 +263,77 @@ ORDER BY adl.created_at;
 
 
 -- name: list_pipeline_runs
--- Get distinct pipeline runs with aggregated info for the Pipeline Runs page.
+-- Drives from the `pipeline_run` table which is authoritative for
+-- lifecycle state — inserted at PipelineExecutor.run_pipeline entry
+-- with status='running' and updated at exit with the final status.
+-- Step-level facts (entity names, failure count among logged steps,
+-- aggregate duration) are joined in from agent_decision_log.
+--
+-- decision_step_count may lag pipeline_run.step_count when the run
+-- is still in-flight — the template shows `decision_step_count` so
+-- users see progress like "2 / 5 steps logged so far" as the run
+-- unfolds.
 SELECT
-    adl.pipeline_run_id,
-    COALESCE(app.display_name, adl.application) AS application,
-    COUNT(*) AS step_count,
+    pr.id AS pipeline_run_id,
+    pr.pipeline_name,
+    COALESCE(app.display_name, pr.application) AS application,
+    pr.status,
+    pr.started_at,
+    pr.completed_at,
+    pr.duration_ms,
+    pr.step_count AS expected_step_count,
+    pr.failed_step_count,
+    pr.error_message,
+    -- Decision-log derived extras:
+    COUNT(adl.id) AS decision_step_count,
     STRING_AGG(DISTINCT COALESCE(a.display_name, t.display_name), ', ') AS entities,
-    BOOL_OR(adl.status = 'failed') AS has_failures,
-    SUM(COALESCE(adl.duration_ms, 0)) AS total_duration_ms,
-    MIN(adl.created_at) AS first_at,
-    MAX(adl.created_at) AS last_at
-FROM agent_decision_log adl
-LEFT JOIN application app ON app.name = adl.application
+    SUM(COALESCE(adl.duration_ms, 0)) AS logged_duration_ms
+FROM pipeline_run pr
+LEFT JOIN application app ON app.name = pr.application
+LEFT JOIN agent_decision_log adl ON adl.pipeline_run_id = pr.id
 LEFT JOIN agent_version av ON av.id = adl.entity_version_id AND adl.entity_type = 'agent'
 LEFT JOIN agent a ON a.id = av.agent_id
 LEFT JOIN task_version tv ON tv.id = adl.entity_version_id AND adl.entity_type = 'task'
 LEFT JOIN task t ON t.id = tv.task_id
-WHERE adl.pipeline_run_id IS NOT NULL
-GROUP BY adl.pipeline_run_id, app.display_name, adl.application
-ORDER BY first_at DESC
+GROUP BY pr.id, pr.pipeline_name, app.display_name, pr.application,
+         pr.status, pr.started_at, pr.completed_at, pr.duration_ms,
+         pr.step_count, pr.failed_step_count, pr.error_message
+ORDER BY pr.started_at DESC
 LIMIT 50;
+
+
+-- name: insert_pipeline_run_start
+-- Written at PipelineExecutor entry with status='running'. The id
+-- is caller-supplied (matches the uuid4 already generated for
+-- pipeline_run_id on the step decisions) so the agent_decision_log
+-- FKs line up correctly.
+INSERT INTO pipeline_run (
+    id, pipeline_name, application, status, started_at,
+    step_count, execution_context_id
+)
+VALUES (
+    %(id)s::uuid, %(pipeline_name)s, %(application)s, 'running', %(started_at)s,
+    %(step_count)s, %(execution_context_id)s
+)
+RETURNING id;
+
+
+-- name: update_pipeline_run_complete
+-- Written at PipelineExecutor exit (both success and exception paths).
+-- `status` is one of complete/partial/failed. `step_count` here is
+-- the actual executed count (may equal expected or be less if the
+-- pipeline failed mid-run). Skipped is tracked separately so the UI
+-- can distinguish "was never supposed to run" from "was but failed".
+UPDATE pipeline_run SET
+    status             = %(status)s,
+    completed_at       = %(completed_at)s,
+    duration_ms        = %(duration_ms)s,
+    step_count         = %(step_count)s,
+    failed_step_count  = %(failed_step_count)s,
+    skipped_step_count = %(skipped_step_count)s,
+    error_message      = %(error_message)s
+WHERE id = %(id)s::uuid
+RETURNING id;
 
 
 -- name: list_all_overrides
