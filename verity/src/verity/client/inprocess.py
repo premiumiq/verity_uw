@@ -39,6 +39,7 @@ from uuid import UUID
 from verity.db.connection import Database
 from verity.governance.coordinator import GovernanceCoordinator
 from verity.governance.decisions import DecisionsReader
+from verity.governance.runs import RunsReader
 from verity.models.decision import (
     AuditTrailEntry,
     DecisionLog,
@@ -48,6 +49,7 @@ from verity.models.decision import (
 from verity.models.lifecycle import EntityType, LifecycleState, PromotionRequest
 from verity.models.reporting import DashboardCounts, ModelInventoryAgent, ModelInventoryTask
 from verity.runtime.decisions_writer import DecisionsWriter
+from verity.runtime.runs_writer import RunsWriter
 from verity.runtime.engine import ExecutionResult
 from verity.runtime.mock_context import MockContext
 from verity.runtime.pipeline import PipelineResult
@@ -134,6 +136,13 @@ class Verity:
         # Unified Decisions (reader + writer) for legacy `verity.decisions.*`
         # callers. Stateless — the DB is the only state, and it's shared.
         self.decisions = _UnifiedDecisions(self.db)
+
+        # Run-tracking (event-sourced async runs). Reader serves the
+        # /runs UI + polling endpoints; writer is called by the API
+        # submit endpoint and the worker. Kept as separate attributes
+        # because nothing else conflates the two surfaces today.
+        self.runs_reader = RunsReader(self.db)
+        self.runs_writer = RunsWriter(self.db)
 
     async def connect(self) -> None:
         """Open the database connection pool."""
@@ -303,6 +312,196 @@ class Verity:
     def register_tool_implementation(self, tool_name: str, func: Callable):
         """Register a Python function as a tool implementation for agents."""
         self._rt.execution.register_tool_implementation(tool_name, func)
+
+    # ── ASYNC RUNS (submit / poll / cancel) ───────────────────
+    # Parallel surface to execute_task / execute_agent: instead of
+    # blocking until the run finishes, submit() returns a run_id
+    # immediately and a separate worker process picks up the row,
+    # dispatches it, and writes terminal state back. Callers poll via
+    # get_run() or block via wait_for_run(). Useful when the consuming
+    # app already has its own scheduler / queue / async story.
+
+    async def submit_task(
+        self,
+        task_name: str,
+        input_data: dict[str, Any],
+        *,
+        channel: str = "production",
+        execution_context_id: Optional[UUID] = None,
+        workflow_run_id: Optional[UUID] = None,
+        parent_decision_id: Optional[UUID] = None,
+        application: Optional[str] = None,
+        mock_mode: bool = False,
+        write_mode: Optional[str] = None,
+        submitted_by: Optional[str] = None,
+    ) -> UUID:
+        """Submit a task run. Returns run_id; worker picks it up async.
+
+        Resolves the task's champion version at submit time. The worker
+        re-resolves the full config when it dispatches. To poll the run,
+        use get_run(); to block until terminal, wait_for_run().
+        """
+        return await self._submit_run(
+            entity_kind="task",
+            entity_name=task_name,
+            input_data=input_data,
+            channel=channel,
+            execution_context_id=execution_context_id,
+            workflow_run_id=workflow_run_id,
+            parent_decision_id=parent_decision_id,
+            application=application,
+            mock_mode=mock_mode,
+            write_mode=write_mode,
+            enforce_output_schema=None,
+            submitted_by=submitted_by,
+        )
+
+    async def submit_agent(
+        self,
+        agent_name: str,
+        input_data: dict[str, Any],
+        *,
+        channel: str = "production",
+        execution_context_id: Optional[UUID] = None,
+        workflow_run_id: Optional[UUID] = None,
+        parent_decision_id: Optional[UUID] = None,
+        application: Optional[str] = None,
+        mock_mode: bool = False,
+        write_mode: Optional[str] = None,
+        enforce_output_schema: bool = False,
+        submitted_by: Optional[str] = None,
+    ) -> UUID:
+        """Submit an agent run. Returns run_id; worker picks it up async.
+
+        `enforce_output_schema=True` (Phase F) injects a submit_output
+        tool and forces tool_choice on the terminal turn. Off by default.
+        """
+        return await self._submit_run(
+            entity_kind="agent",
+            entity_name=agent_name,
+            input_data=input_data,
+            channel=channel,
+            execution_context_id=execution_context_id,
+            workflow_run_id=workflow_run_id,
+            parent_decision_id=parent_decision_id,
+            application=application,
+            mock_mode=mock_mode,
+            write_mode=write_mode,
+            enforce_output_schema=enforce_output_schema,
+            submitted_by=submitted_by,
+        )
+
+    async def _submit_run(
+        self,
+        *,
+        entity_kind: str,
+        entity_name: str,
+        input_data: dict[str, Any],
+        channel: str,
+        execution_context_id: Optional[UUID],
+        workflow_run_id: Optional[UUID],
+        parent_decision_id: Optional[UUID],
+        application: Optional[str],
+        mock_mode: bool,
+        write_mode: Optional[str],
+        enforce_output_schema: Optional[bool],
+        submitted_by: Optional[str],
+    ) -> UUID:
+        """Shared submission path. Resolves entity_name to a champion
+        version_id, then writes the execution_run + initial submitted
+        status row in one transaction.
+        """
+        from verity.contracts.run import RunSubmission
+
+        if entity_kind == "task":
+            row = await self.db.fetch_one("get_task_champion", {"task_name": entity_name})
+            if not row:
+                raise ValueError(
+                    f"Task '{entity_name}' has no champion version registered.",
+                )
+            version_id = UUID(str(row["task_version_id"]))
+        elif entity_kind == "agent":
+            row = await self.db.fetch_one("get_agent_champion", {"agent_name": entity_name})
+            if not row:
+                raise ValueError(
+                    f"Agent '{entity_name}' has no champion version registered.",
+                )
+            version_id = UUID(str(row["agent_version_id"]))
+        else:
+            raise ValueError(f"Unknown entity_kind: {entity_kind!r}")
+
+        request = RunSubmission(
+            entity_kind=entity_kind,
+            entity_name=entity_name,
+            input=input_data,
+            channel=channel,
+            execution_context_id=execution_context_id,
+            workflow_run_id=workflow_run_id,
+            parent_decision_id=parent_decision_id,
+            application=application or self.application,
+            mock_mode=mock_mode,
+            write_mode=write_mode,
+            enforce_output_schema=enforce_output_schema,
+            submitted_by=submitted_by,
+        )
+        response = await self.runs_writer.submit(
+            request=request, entity_version_id=version_id,
+        )
+        return response.run_id
+
+    async def get_run(self, run_id: UUID):
+        """Read current state of a run (or None if not found)."""
+        return await self.runs_reader.get_run(run_id)
+
+    async def list_runs(self, **filters):
+        """List runs with optional filters. See RunsReader.list_runs for
+        the supported keyword args (execution_context_id,
+        workflow_run_id, entity_kind, entity_name, channel, application,
+        status, limit, offset)."""
+        return await self.runs_reader.list_runs(**filters)
+
+    async def get_run_result(self, run_id: UUID) -> Optional[dict[str, Any]]:
+        """Decision-log row for a completed run. Returns None if the
+        run hasn't reached a terminal state or has no decision_log_id.
+
+        Phase G will reshape this into the canonical envelope; for now
+        the raw decision_log row is what's available.
+        """
+        return await self.runs_reader.get_run_result(run_id)
+
+    async def wait_for_run(
+        self,
+        run_id: UUID,
+        *,
+        timeout: float = 300.0,
+        poll_interval: float = 0.5,
+    ):
+        """Block until the run reaches a terminal state, then return it.
+
+        Polls get_run() on the supplied interval. Raises TimeoutError
+        if the timeout elapses before the run terminates. The default
+        timeout (5 min) is generous for an LLM-heavy task; trim for
+        shorter tasks to fail faster on stuck workers.
+        """
+        import asyncio
+        deadline = asyncio.get_running_loop().time() + timeout
+        while True:
+            run = await self.get_run(run_id)
+            if run and run.current_status.value in (
+                "complete", "cancelled", "failed",
+            ):
+                return run
+            if asyncio.get_running_loop().time() >= deadline:
+                raise TimeoutError(
+                    f"Run {run_id} did not reach a terminal state within "
+                    f"{timeout}s (last status: {run.current_status.value if run else 'missing'}).",
+                )
+            await asyncio.sleep(poll_interval)
+
+    async def cancel_run(self, run_id: UUID) -> bool:
+        """Request cancellation. Returns True if accepted, False if the
+        run was already terminal."""
+        return await self.runs_writer.cancel(run_id)
 
     # ── LIFECYCLE (promotion, rollback) ───────────────────────
 

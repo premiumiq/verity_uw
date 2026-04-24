@@ -81,7 +81,7 @@ class DecisionsReader:
         workflow_run_id (unique per execution), not the business app's key.
         No cross-application collision possible.
         """
-        rows = await self.db.fetch_all("list_decisions_by_pipeline_run", {
+        rows = await self.db.fetch_all("list_decisions_by_workflow_run", {
             "workflow_run_id": str(workflow_run_id),
         })
         return [_row_to_audit_entry(r) for r in rows]

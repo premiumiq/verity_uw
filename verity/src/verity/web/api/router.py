@@ -25,6 +25,7 @@ from verity.web.api.models import build_models_router
 from verity.web.api.quotas import build_quotas_router
 from verity.web.api.registry import build_registry_router
 from verity.web.api.reporting import build_reporting_router
+from verity.web.api.runs import build_runs_router
 from verity.web.api.runtime import build_runtime_router
 from verity.web.api.usage import build_usage_router
 
@@ -49,6 +50,11 @@ def build_api_router(verity) -> APIRouter:
 
     # Runtime — synchronous run_agent / run_task / run_pipeline.
     router.include_router(build_runtime_router(verity))
+
+    # Runs — async submission, polling, lifecycle drill-through.
+    # The actual execution happens in the verity-worker service; this
+    # API only inserts state-event rows.
+    router.include_router(build_runs_router(verity))
 
     # Authoring — POST wrappers for every register_* SDK method (headers,
     # versions, associations, governance artifacts).
