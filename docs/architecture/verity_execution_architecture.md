@@ -1,149 +1,366 @@
-# Verity Execution Architecture — Tasks, Agents, Pipelines, Envelope
+# Verity Execution Architecture — Tasks, Agents, Declarative I/O, Async Runs
 
-**Status:** Architecture decisions locked 2026-04-23.
-**Scope:** How Verity shapes its three execution units (Task, Agent, Pipeline),
-what every execution returns (the canonical envelope), and where
-orchestration stops being Verity's problem.
+**Status:** Architecture decisions locked 2026-04-24. Supersedes the 2026-04-23 set.
+**Scope:** How Verity shapes its two execution units (Task, Agent), how their
+inputs and outputs are declared and resolved, how runs are submitted and
+tracked asynchronously, and where orchestration stops being Verity's problem.
 
-This document is the reference for Phase 2+ of the Task Data Sources &
-Targets plan ([task_data_sources_targets.md](task_data_sources_targets.md))
-and for the follow-on work on pipeline input mapping, agent output
-contracts, and the unified envelope.
+This document is the reference for Phases A–K of the execution-architecture
+plan. It supersedes `task_data_sources_targets.md` (pre-descope source/target
+design) and reshapes the 2026-04-23 version of this doc, which included
+pipelines as a first-class runtime entity.
 
 ---
 
 ## Guiding principle
 
-Verity follows Anthropic's "Building Effective Agents" guidance: **prefer
-workflows over agents**. Express as much work as possible as a prescriptive
-pipeline of tasks; reserve agents for genuinely dynamic tool-use reasoning.
+Verity follows Anthropic's *Building Effective Agents* guidance: **prefer
+workflows over agents**. Express as much work as possible as single-call tasks
+against structured outputs; reserve agents for genuinely dynamic tool-use
+reasoning.
 
-This maps cleanly onto the three execution units:
+Verity governs AI components (Tasks, Agents, Tools). **Apps orchestrate them.**
+The prior doc modeled Pipelines as a third first-class execution unit with
+their own runtime; this version descopes that entirely. Multi-step workflows
+live in app code where they can integrate with the app's existing scheduler,
+retry policies, human-in-the-loop gates, and async infrastructure.
+
+The two concepts that map from Anthropic's framing onto Verity entities:
 
 | Anthropic concept | Verity entity |
 |---|---|
 | Augmented LLM (single call with tools/retrieval) | **Task** |
-| Workflow / prompt chain | **Pipeline** of Tasks |
 | Agent (dynamic tool-use loop) | **Agent** |
+| Workflow / prompt chain | App code, orchestrating Verity Tasks + Agents |
 
 ---
 
-## The three execution units
+## Task and Agent, side-by-side
 
-### Task
+Both execution units are now at parity for declarative I/O. The only
+semantic differences are what the runtime does between input and output.
 
-- **Single LLM call.** No tool loop, no dynamic decisions.
-- **Input**: declared input schema, optionally populated from declared
-  **sources** (resolved pre-call by the execution engine via registered
-  `data_connector` providers).
-- **Output**: strictly conformed to declared `output_schema`. Enforced via
-  `tool_choice` forcing a structured-output tool on the single call.
-- **Side effects**: declared **targets** only (channel-gated + runtime-gated
-  writes). No free-form tool calls.
-- **Purpose**: the default. Deterministic workflow step for anything
-  expressible as "one call with known inputs produces a known output."
+| | **Task** | **Agent** |
+|---|---|---|
+| **LLM shape** | Single call. No tool loop. | Multi-turn loop with tool calls. Dynamic control flow. |
+| **`input_schema`** | First-class column on `task_version`. Required. | First-class column on `agent_version` (new). Required. |
+| **`output_schema`** | First-class. Required for structured output. | First-class. Optional. |
+| **Output enforcement** | Forced via `tool_choice` on a synthetic `structured_output` tool when schema is declared. | Optional per run: `run_agent(enforce_output_schema=True)` injects a `submit_output` tool and forces `tool_choice` on the terminal turn. Off by default. |
+| **Declared sources** | Rows in `source_binding` with `owner_kind='task_version'`. Resolved pre-prompt. | Rows in `source_binding` with `owner_kind='agent_version'`. Resolved pre-loop. |
+| **Declared targets** | Rows in `write_target` (with `owner_kind='task_version'`) plus `target_payload_field` rows. Fired post-output. | Same tables with `owner_kind='agent_version'`. Fired post-terminal-turn. |
+| **Tool calls (dynamic)** | None. | Through registered tools; write authority per tool's `is_write_operation` flag. |
 
-### Agent
+### Tasks
 
-- **Multi-turn LLM loop** with tool calls. Dynamic control flow.
-- **Input**: declared input schema.
-- **Output**: **optional** declared `output_schema`. When declared, enforced
-  by an engine-injected `submit_output` tool forced on the terminal turn via
-  `tool_choice`.
-- **Side effects**: through registered tools (the tool's `is_write_operation`
-  flag governs write authority). No declared targets on agents in v1 —
-  agents fetch and write via tools, not declarative I/O.
-- **Purpose**: reasoning that genuinely needs the tool-use loop. Agents are
-  the exception, not the rule.
+A Task is the default. If work is expressible as "one LLM call with known
+inputs produces a known structured output," it's a Task.
 
-#### Agents without declared outputs
+- **Input**: declared `input_schema`. Values can come straight from the caller
+  or be resolved from declared sources before prompt assembly.
+- **Output**: strictly conformed to `output_schema`. Enforced via `tool_choice`
+  forcing a synthetic `structured_output` tool on the single call.
+- **Side effects**: declared `write_target` rows only. No free-form tool calls.
 
-An agent without a declared `output_schema` is fully supported. It may do
-meaningful work purely through tool-call side effects (e.g. "investigate
-submission X and log findings via the incident tool"). The envelope's
-`output` block is `null`; the envelope still captures telemetry,
-provenance, and status.
+### Agents
 
-**Restriction:** such an agent can still participate as a pipeline step,
-but its output is not referenceable by downstream steps' `input_mapping`.
-Pipeline registration validates this — mappings that reference an
-unschema'd agent's output field fail at admit time. This keeps agents
-free-form without letting them break pipeline contracts.
+An Agent is for work that genuinely needs the dynamic tool-use loop. They
+are the exception, not the rule.
 
-### Pipeline
-
-- **Ordered DAG of steps**, each step is a Task | Agent | Tool.
-- **Input**: declared pipeline-level input schema.
-- **Output**: declared pipeline-level output schema, assembled from step
-  outputs via explicit **output mapping**.
-- **Step wiring**: each step declares an **input_mapping** — per-input-field
-  specification with three source kinds:
-  - `context` — value from the pipeline's caller-supplied input
-  - `step` — value from a named upstream step's declared output
-  - `constant` — literal value baked in at registration
-- **Path language**: dotted + array indices only
-  (`fields.named_insured.value`, `documents[0].document_type`). No
-  JSONPath, no Jinja, no arithmetic. If you need transformation, add a
-  tool or task step.
-- **Validation at admit time**: `register_pipeline_version` walks every
-  mapping. Referenced steps must exist earlier in topological order;
-  referenced paths must exist in the source entity's declared output
-  schema; every required step input must be mapped or resolvable from
+- **Input**: declared `input_schema`. Same source-resolution story as Tasks —
+  sources resolved pre-loop, template variables bundled into the initial
   context.
-- **Synchronous internally.** One `execute_pipeline` call runs the whole
-  DAG top to bottom (respecting parallel_group) and returns one envelope.
-  No suspend, no resume, no callbacks, no triggers inside Verity.
+- **Output**: optional `output_schema`. When declared and the caller opts in
+  with `enforce_output_schema=True`, the engine injects a `submit_output` tool
+  on the terminal turn and uses `tool_choice` to force it. The returned
+  envelope's `output` is that tool's input dict. When the caller does not opt
+  in, the agent runs free-form and `output` is best-effort-parsed from the
+  final text.
+- **Side effects**: through registered tools (dynamic, per-turn) **and**
+  through declared targets fired after the terminal turn. Both mechanisms
+  coexist; targets are the governed declarative path, tools are the dynamic
+  path.
+
+#### Agents without declared output schemas
+
+Fully supported — they may do meaningful work purely through tool-call side
+effects (e.g. "investigate submission X and log findings via the incident
+tool"). The envelope's `output` is an empty dict; telemetry, provenance, and
+status are still populated.
+
+---
+
+## Reference grammar (declarative wiring)
+
+Every source binding and every target-payload field is a mapping from a
+`target_field` name to a **reference string**. The reference is parsed into
+one of four kinds:
+
+| Reference kind | Syntax | Valid on |
+|---|---|---|
+| This unit's own input | `input.<dotted.path[i]>` | source_binding, target_payload_field |
+| This unit's own output | `output.<dotted.path[i]>` | target_payload_field only |
+| Literal constant | `const:<value>` | source_binding, target_payload_field |
+| Connector fetch | `fetch:<connector>/<method>(input.<field>)` | source_binding only |
+
+**Path grammar:** dotted keys + bracketed integer indices
+(`fields.named_insured.value`, `documents[0].document_type`). No JSONPath, no
+arithmetic, no conditionals. If transformation is needed, add an intermediate
+task in the app's orchestration layer.
+
+No `context.*` or `step.*` references exist — those were pipeline-scope only
+and pipelines are descoped. Each reference resolves entirely against the
+unit's own `input` and `output` dicts.
+
+### Example — task source
+
+The field extractor declares `document_text` as a template variable that's
+filled from EDMS at execution time:
+
+```yaml
+source_binding on task:field_extractor
+  template_var: document_text
+  reference:    fetch:edms/get_document_text(input.document_ref)
+```
+
+When a caller invokes the task with `{document_ref: "<edms-uuid>", ...}`, the
+runtime walks to `input.document_ref`, calls `edms.get_document_text(<uuid>)`,
+and binds the result to `{{document_text}}` in the prompt template.
+
+### Example — task target payload
+
+The same extractor writes its `extracted_fields` back to EDMS as a child
+document linked to the original, using fields from both input and output:
+
+```yaml
+write_target on task:field_extractor
+  name:           extracted_fields_sink
+  connector:      edms
+  write_method:   create_derived_json
+  required:       false
+  target_payload_field rows:
+    parent_id:         input.destination_document_id
+    derivative_type:   input.derivative_type
+    data:              output.extracted_fields
+```
+
+The runtime assembles the payload dict by resolving each field's reference,
+then calls `edms.write("create_derived_json", container, {parent_id, derivative_type, data})`.
+
+### Admit-time validation
+
+`register_task_version` and `register_agent_version` run a wiring validator
+against the declarations before accepting them:
+
+- Every source_binding reference must resolve syntactically and semantically:
+  - `input.<path>` → the path exists in this unit's `input_schema`.
+  - `const:<value>` → always valid.
+  - `fetch:<connector>/<method>(input.<field>)` → the connector name exists
+    in `data_connector`, the provider supports the method (verified through
+    a startup-time capability query), and the argument path exists in
+    `input_schema`.
+- Every source_binding's `template_var` must appear in at least one prompt
+  template variable declaration (prevents orphan fetches).
+- Every target_payload_field reference must resolve:
+  - `input.<path>` → path in `input_schema`.
+  - `output.<path>` → path in `output_schema`. **Illegal if `output_schema` is
+    not declared.**
+  - `const:<value>` → always valid.
+- Every write_target's connector method must accept the payload shape the
+  payload-field rows construct (via the provider's method-signature query).
+
+The result is that a version that registers cleanly cannot fail at runtime
+due to wiring errors. Only real-world failures (LLM call timeout, connector
+IO error, schema-violation output from the model) can fail a run.
+
+---
+
+## Decision log and audit
+
+Verity's audit story rests on one immutable append-only table
+(`agent_decision_log`) and four identity columns that thread related decisions
+together. Pipelines are no longer the unit of grouping; `execution_context_id`
+was always the primary identity linker and continues to be.
+
+### Identity columns
+
+| Column | Populated by | What it groups |
+|---|---|---|
+| `execution_context_id` | App (registers a context per business entity) | **Submission-level.** All decisions for `submission:SUB-001` share one execution_context_id. |
+| `workflow_run_id` | App (generates a UUID per workflow invocation) | **Workflow-level.** All decisions made in one invocation of a multi-step app workflow. Renamed from `pipeline_run_id` now that Verity no longer owns pipelines. |
+| `parent_decision_id` | Runtime (set when an agent delegates to a sub-agent) | **Delegation-tree-level.** Threads sub-agent calls under their parent. |
+| `execution_run_id` | Runtime (set when a run is submitted via the async path) | **Run-level.** Ties a decision row to the event-sourced `execution_run` record. |
+
+### Reconstructing a submission
+
+Given a submission reference like `submission:SUB-001`, the app looks up its
+`execution_context_id` and queries:
+
+- **All decisions for the submission** — `list_decisions_by_execution_context`.
+  One query; returns every task, agent, and tool decision made for the
+  submission, across all workflow invocations.
+- **All decisions for one workflow invocation** — filter the above by
+  `workflow_run_id`. Shows the DAG the app ran (typically 2–5 decisions —
+  classify + extract, or triage + appetite + letter_draft, etc.).
+- **Drill into a single agent tree** — filter by `parent_decision_id` or walk
+  the tree from a root decision.
+- **Live state of a submitted run** — join through `execution_run_id` to the
+  `execution_run_current` view.
+
+### Run tracking is event-sourced
+
+Live run state is **not** stored on a mutable row. Four append-only tables
+plus a view give the lifecycle:
+
+- `execution_run` — the request. One row per submission. Never updated.
+- `execution_run_status` — ledger of `submitted | claimed | heartbeat |
+  released` transitions. Never updated.
+- `execution_run_completion` — successful terminal row (`complete | cancelled`).
+  At most one per run.
+- `execution_run_error` — failure terminal row. At most one per run.
+- `execution_run_current` — VIEW that surfaces the combined state. All API /
+  UI reads go through this view.
+
+The same immutability invariant that applies to `agent_decision_log` applies
+to run tracking: reads produce a complete history from insert-only writes.
+No UPDATE contention. Full audit of every claim, heartbeat, release, and
+terminal outcome.
+
+---
+
+## Async execution
+
+Task and Agent runs are asynchronous by default. The synchronous `run_task` /
+`run_agent` SDK methods remain as sugar that internally submits and waits.
+
+### Lifecycle
+
+```
+App submits a run  →  POST /api/v1/runs
+                      INSERT execution_run
+                      INSERT execution_run_status (status='submitted')
+                      ────────────────────────────────── return {run_id}
+
+Worker picks it up  →  SELECT candidate FOR UPDATE SKIP LOCKED
+                       INSERT execution_run_status (status='claimed', worker_id)
+                       ─────────────────────────────────
+                       Heartbeat every 30s:
+                         INSERT execution_run_status (status='heartbeat')
+
+Worker executes    →   run_task() / run_agent() (existing engine code)
+                       INSERT agent_decision_log (immutable audit)
+
+Success            →   INSERT execution_run_completion
+                         (final_status='complete', decision_log_id, duration_ms)
+Failure            →   INSERT execution_run_error
+                         (error_code, error_message, error_trace, worker_id)
+Cancel (pre-claim) →   INSERT execution_run_completion
+                         (final_status='cancelled')
+Cancel (mid-run)   →   Worker checks between steps, aborts, inserts
+                         execution_run_completion(final_status='cancelled')
+Stuck run          →   Janitor inserts execution_run_status(status='released')
+                       — re-claimable by any worker
+```
+
+### Worker model
+
+Workers are a separate Docker service (`verity-worker`) that run the same
+Verity package as the API. They are stateless, horizontally scalable
+(`docker compose up --scale verity-worker=4`), and use `SELECT ... FOR UPDATE
+SKIP LOCKED` to guarantee no two workers claim the same run.
+
+### API surface
+
+```
+POST /api/v1/runs                    — submit a run, returns {run_id, status}
+GET  /api/v1/runs                    — list (filter by execution_context_id, workflow_run_id, status, entity, channel)
+GET  /api/v1/runs/{id}               — current state (reads from execution_run_current view)
+GET  /api/v1/runs/{id}/lifecycle     — full event sequence (status + terminal rows in time order)
+GET  /api/v1/runs/{id}/result        — envelope (409 if not yet complete)
+POST /api/v1/runs/{id}/cancel        — request cancellation
+```
+
+### SDK surface
+
+```python
+run_id   = await verity.submit_task("field_extractor", input_data, ...)
+state    = await verity.get_run(run_id)                    # current state only
+envelope = await verity.get_run_result(run_id)             # terminal envelope; raises if not ready
+envelope = await verity.wait_for_run(run_id, timeout=60)   # blocks until terminal
+
+# Sync sugar — unchanged public name; internally submit + wait
+envelope = await verity.run_task("field_extractor", input_data, ...)
+```
 
 ---
 
 ## Where orchestration stops being Verity's problem
 
-Verity's scope is **one execution unit at a time**. Composition beyond a
-single pipeline belongs to the consuming application (or a future
-platform service in front of Verity). Specifically:
+Verity governs AI components. Apps orchestrate them. This is a hard line.
 
-- **Triggering**: "when X happens, run pipeline Y" — app's job.
-- **Chaining pipelines**: "when pipeline A completes, run pipeline B with
-  context from A" — app's job.
-- **Long-running / human-in-the-loop waits**: not modeled inside
-  pipelines. If the workflow needs to wait for a human approval or a
-  downstream event, the app breaks the work into multiple pipeline runs
-  separated by its own state.
-- **Scheduling, retries across pipelines, distributed queues**: not
-  Verity's concern.
+Specifically, Verity does **not**:
 
-Verity's contribution to that picture is the **envelope** (see below):
-everything needed to wire pipeline outputs into the next thing is in the
-envelope, so apps can do their own orchestration cheaply.
+- **Trigger** runs. "When X happens, run task Y" is the app's job.
+- **Chain** multiple runs. "When task A completes, run task B with context
+  from A" is the app's job.
+- **Model human-in-the-loop waits.** If a workflow needs to wait for human
+  approval, the app breaks the work into multiple run submissions with its
+  own state between them.
+- **Schedule**, **retry across runs**, or run **distributed queues**.
 
-### Future direction: async pipeline submission
+### What the app writes
 
-Today, `execute_pipeline` is a synchronous call — the HTTP request blocks
-until the whole DAG completes. For production scale this does not hold.
-The agreed target shape (not in current scope, but informs the design):
+Multi-step workflows are plain Python in the consuming app. The submission
+doc-processing workflow looks like:
 
-1. App submits a pipeline: returns `{run_id}` **immediately** (or an error
-   if admit-time validation fails).
-2. App polls for pipeline status: `{run_id, status, started_at,
-   completed_at, ...}`.
-3. When complete, the final envelope is retrievable from a secure output
-   location (object store / queue / bus) — or the pipeline **emits the
-   envelope to an event bus** the app subscribes to.
+```python
+async def run_doc_workflow(submission_id, document_ref):
+    wf_run_id = uuid4()
+    ctx_id = await verity.register_execution_context(f"submission:{submission_id}")
 
-This is the industry-standard async job pattern (Airflow, Temporal,
-Argo Workflows, AWS Step Functions all expose this shape). The current
-synchronous SDK is a deliberate v1 simplification — the envelope shape
-is designed to round-trip through any queue or bus unchanged, so the
-switch to async submission is an API/runtime change, not a re-model.
+    classify = await verity.run_task(
+        "document_classifier",
+        {"document_ref": document_ref},
+        execution_context_id=ctx_id,
+        workflow_run_id=wf_run_id,
+    )
+    extract = await verity.run_task(
+        "field_extractor",
+        {
+            "document_ref": document_ref,
+            "document_type": classify.output["doc_type"],
+            "destination_document_id": document_ref,
+            "derivative_type": "field_extraction",
+        },
+        execution_context_id=ctx_id,
+        workflow_run_id=wf_run_id,
+    )
+    return {"classify": classify, "extract": extract}
+```
+
+The workflow is readable, version-controlled in the app repo, integrates with
+whatever scheduler / retry / async infrastructure the app already has, and
+produces the full Verity audit trail because every call threads
+`execution_context_id` + `workflow_run_id`.
+
+### What Verity still contributes
+
+- Per-entity governance (7-state lifecycle on each task/agent version, prompt
+  versioning, output-schema enforcement, source/target declarations, admit-time
+  wiring validation).
+- Immutable decision log per run.
+- Event-sourced run tracking (submit/poll/cancel, lifecycle ledger).
+- Unified "Runs" UI — list, drill-through, submission-scoped view — giving
+  one place to see every task and agent run in the system.
 
 ---
 
 ## The canonical envelope
 
-**Every** Task, Agent, and Pipeline execution returns the same envelope
-shape. Rationale: a single canonical return type collapses caller-side
-code, makes pipelines' step envelopes compose recursively, and
-round-trips cleanly through any persistence or messaging layer.
+**Every** Task and Agent execution returns the same envelope shape.
+Rationale: one canonical return type collapses caller-side code, round-trips
+cleanly through any persistence or messaging layer, and anticipates async
+submission (same shape whether delivered synchronously or retrieved after a
+poll).
 
 ### Design references
 The shape borrows deliberately from established specs:
@@ -162,16 +379,16 @@ The shape borrows deliberately from established specs:
   "parent_run_id": "uuid | null",
 
   "entity": {
-    "type": "task | agent | pipeline",
+    "type": "task | agent",
     "name": "field_extractor",
     "version_label": "1.2.0",
     "version_id": "uuid",
     "channel": "champion"
   },
 
-  "status": "success | failure | partial",
+  "status": "success | failure",
 
-  "output": { /* present iff status in (success, partial). Conforms to entity's declared output schema. */ },
+  "output": { /* present iff status == success. Conforms to entity's declared output schema. */ },
   "error":  { "code": "string", "message": "string", "retriable": false, "details": {} } /* present iff status == failure */,
 
   "started_at": "iso8601",
@@ -185,92 +402,122 @@ The shape borrows deliberately from established specs:
     "turns": 2,
     "tool_calls": 3,
     "sources_resolved": ["document_text"],
-    "targets_fired": [],
+    "targets_fired": ["extracted_fields_sink"],
     "mocks_used": ["source:document_text", "tool:get_loss_runs"]
   },
 
   "provenance": {
     "decision_log_id": "uuid",
     "execution_context_id": "uuid",
+    "workflow_run_id": "uuid",
+    "execution_run_id": "uuid",
     "mock_mode": false,
     "application": "uw_demo"
-  },
-
-  "steps": [ /* pipeline only — array of nested envelopes for each step that ran, in execution order */ ]
+  }
 }
 ```
 
 ### Design notes
 
-- **`status` is a three-value enum**.
-  - `success` — all required work completed, output conforms to schema.
-  - `partial` — pipeline only: at least one step failed with
-    `error_policy="continue_with_flag"` but the pipeline completed what
-    it could. Output is populated with whatever mappings could resolve.
-  - `failure` — the unit of work failed. `output` absent, `error` populated.
-- **`output` and `error` are mutually exclusive** and discriminated by
-  `status`. This is the JSON-RPC / Problem Details convention.
-- **`steps[]` on pipelines** — recursive envelopes. Each step's envelope
-  is itself the same shape (so a task-within-pipeline's envelope looks
-  exactly like that task's standalone envelope). Drill-through audit UIs
-  get this for free.
-- **`mocks_used` in telemetry** — audit artifact. Shows at a glance
-  which mocks shaped a particular run. Critical for validation runs and
-  test replays.
-- **No narrative `summary` field in the envelope itself.** If an agent
-  wants to emit a narrative, it lives in `output.summary` per the agent's
-  declared output schema. Envelope fields are engine-generated and
-  uniform across all entities.
-- **`parent_run_id`** — when a pipeline step runs a task/agent, the
-  step's envelope carries `parent_run_id = pipeline.run_id`. When an
-  app chains two pipelines, it may set `parent_run_id` on the second
-  run to the first run's `run_id` for end-to-end traceability. Verity
-  does not set it across pipelines automatically — that's the app's
-  call, consistent with Verity staying out of cross-pipeline orchestration.
+- **`status` is a two-value enum**: `success` or `failure`. There's no
+  `partial` state — a single task or agent either produces its output or it
+  doesn't. Partial-success semantics belong to the app's orchestration layer
+  (e.g. "classify succeeded but extract failed" → the app decides what to do).
+- **`output` and `error` are mutually exclusive**, discriminated by `status`.
+- **No nested `steps[]`.** Envelopes are flat; pipelines no longer exist.
+  Apps that want to present a workflow as a single object can compose their
+  own wrapper from multiple per-run envelopes sharing a `workflow_run_id`.
+- **`parent_run_id`** — set automatically when an agent delegates to a
+  sub-agent (the sub-agent's envelope carries `parent_run_id = parent agent's
+  run_id`). Apps may also set it across their own chained runs for end-to-end
+  traceability; Verity never sets it on behalf of app-level orchestration.
+- **`mocks_used` in telemetry** — audit artifact. Shows at a glance which
+  mocks shaped a particular run. Critical for validation runs and replays.
+- **No narrative `summary` field.** If an agent wants to emit a narrative, it
+  lives in `output.summary` per the agent's declared `output_schema`.
+  Envelope fields are engine-generated and uniform across entities.
 
 ---
 
-## Locked decisions (2026-04-23)
+## Locked decisions (2026-04-24)
 
-1. **Pipelines are synchronous within themselves.** No suspend, resume,
-   triggers, or cross-pipeline chaining inside Verity. Async submission
-   is a future API layer; the envelope shape anticipates it.
-2. **Envelope is the canonical return type** for Task, Agent, and
-   Pipeline. All three return identical shape; pipelines nest child
-   envelopes under `steps[]`.
-3. **Agents without declared output schemas can run and can participate
-   in pipelines as side-effect steps.** Their outputs are simply not
-   referenceable by downstream `input_mapping`. Pipeline registration
-   validates and rejects mappings that reference an unschema'd agent's
-   output fields.
-4. **FC-3 (Agent Hooks / Pre-Post Middleware) is deferred indefinitely.**
-   See [future_capabilities.md](future_capabilities.md) for rationale.
+Supersedes the 2026-04-23 set.
+
+1. **Two execution units, not three.** Pipelines are descoped entirely — no
+   `pipeline`, `pipeline_version`, or `pipeline_step` tables; no
+   `execute_pipeline` runtime. Apps orchestrate multi-step workflows in their
+   own code.
+2. **Tasks and Agents at I/O parity.** Both have first-class `input_schema`
+   and `output_schema`, both can declare sources and targets. The only
+   semantic difference is what happens between input and output (single LLM
+   call vs. tool-use loop).
+3. **One reference grammar** for all declarative wiring — `input.*`,
+   `output.*`, `const:*`, `fetch:C/M(input.X)`. No `context.*` or `step.*`
+   references.
+4. **Wiring is split into two purpose-named tables**: `source_binding` and
+   `target_payload_field` (the latter subordinate to `write_target`).
+5. **Agent output enforcement is opt-in per run** —
+   `run_agent(enforce_output_schema=True)` injects a `submit_output` tool and
+   forces `tool_choice` on the terminal turn. Off by default.
+6. **Async runs with event-sourced tracking.** Submit/poll/cancel over REST;
+   external worker pool; all lifecycle state is append-only across four
+   tables (`execution_run`, `execution_run_status`, `execution_run_completion`,
+   `execution_run_error`) surfaced through the `execution_run_current` view.
+7. **Submission audit continues via `execution_context_id`.** Multi-step
+   workflow grouping continues via caller-supplied `workflow_run_id` (renamed
+   from `pipeline_run_id`).
+8. **Flat envelope.** No nested `steps[]`. Parent/child linkage is
+   `parent_run_id` on each envelope; app-level workflow envelopes are the
+   app's construction.
+9. **EDMS document references fully preserved.** Callers pass a `document_ref`
+   on `input` as today; a source_binding with a `fetch:edms/...` reference
+   resolves it. Same capability, new configuration surface.
+10. **FC-3 (Agent Hooks / Pre-Post Middleware) remains deferred indefinitely.**
+    See `future_capabilities.md`.
 
 ---
 
-## Implementation order (captured for reference)
+## Implementation order
 
-The work is staged after the current Phase 1 (sources/targets schema +
-models). Proposed order:
+Existing Phase 2/3 work (task sources + EDMS connector) is preserved
+conceptually but migrates to the new schema. Former Phase 7/8
+(pipeline-specific wiring) disappear.
 
-- **Phase 2 — Task source resolution** (in-flight): wire
-  `task_version_source` into the Task execution path. Eager resolution
-  before prompt build. Decision log entries. Mock-aware.
-- **Phase 3 — EDMS provider + first real source**: register the `edms`
-  connector, declare sources on classifier / extractor tasks, fix the
-  "validation sees no document" bug.
-- **Phase 4 — Task targets**: declarative output writes, channel-gated +
-  runtime-gated.
-- **Phase 5 — Canonical envelope**: replace ad-hoc `ExecutionResult` /
-  `StepResult` shapes with the envelope. Pipelines nest step envelopes.
-- **Phase 6 — Agent output contracts**: `submit_output` tool injection,
-  `tool_choice`-forced terminal turn, `agent_version.output_schema`
-  first-class column.
-- **Phase 7 — Pipeline input_mapping + output mapping**: declarative
-  field-level wiring between steps. Registration-time validation.
-- **Phase 8 — Pipeline-level input/output schemas**: pipeline version
-  declares its caller-facing contract; assembled output via output
-  mapping.
+- **Phase A — Schema foundations.** Create all new tables plus the
+  `execution_run_current` view. Add `agent_version.input_schema`. Rename
+  `pipeline_run_id` → `workflow_run_id`. Add `execution_run_id` FK on
+  `agent_decision_log`.
+- **Phase B — Data migration.** Convert `task_version_source` →
+  `source_binding`; convert `task_version_target` → `write_target` +
+  `target_payload_field`. Drop the old tables.
+- **Phase C — Async primitive + worker.** `POST /runs` + lifecycle endpoints,
+  `verity-worker` service, SDK `submit_*` / `get_run` / `wait_for_run` /
+  `cancel_run`. Existing `run_task` / `run_agent` become sync sugar over the
+  async primitive.
+- **Phase D — Unified runtime I/O.** Generic `_resolve_sources` /
+  `_write_targets` / `_resolve_reference` against the new tables. Refactor
+  `run_task` to use them.
+- **Phase E — Agent parity.** Add source resolution + target writes to
+  `run_agent`. Thread `execution_run_id` through.
+- **Phase F — Agent output enforcement.** `enforce_output_schema=True` +
+  `submit_output` tool injection on terminal turn.
+- **Phase G — Envelope unification.** One envelope shape for task and agent
+  returns.
+- **Phase H — Pipeline descope.** Delete pipeline runtime, contracts, models,
+  queries, UI pages. Rewrite uw_demo pipeline code as plain Python in
+  `workflows.py`.
+- **Phase I — Runs UI.** New `/runs`, `/runs/{id}`, `/workflows/{id}` pages.
+  Drop `/pipelines/*`. Wire the UW "View in Verity" deep-link to
+  `/runs?execution_context_id=<ctx>&group_by=workflow_run`.
+- **Phase J — EDMS write endpoint + extractor target.** EDMS
+  `POST /documents/{parent_id}/derived` route;
+  `EdmsProvider.write("create_derived_json", ...)`; register the extractor's
+  `write_target` + payload fields.
+- **Phase K — Doc rewrite.** Land this document; mark
+  `task_data_sources_targets.md` superseded; update cross-references in
+  `registry_runtime_split_plan.md`.
 
-Phases are sequential — each builds on the prior. Each is
+Phases are mostly sequential (A precedes B, C, D; B precedes D; D precedes E;
+E precedes F; H depends on D+E+G so uw_demo has a replacement path when
+pipelines vanish; I depends on C+H; J is independent; K last). Each is
 independently deployable.

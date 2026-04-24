@@ -1,5 +1,15 @@
 # Plan: Slim Verity to Governance, Extract Runtime, Harden the Current Engine (Local Docker)
 
+> **2026-04-24 update.** References to pipelines as a first-class runtime
+> entity (including `pipeline.py`, `execute_pipeline`, `pipeline_executor`,
+> and pipeline steps in the registry) are now historical. Pipelines have
+> been descoped per
+> [verity_execution_architecture.md](verity_execution_architecture.md);
+> Verity's two execution units are Task and Agent, and multi-step workflows
+> live in app code. The registry/runtime split and the "database-stored
+> definitions" principle still stand for tasks, agents, prompts, tools, and
+> inference configs.
+
 ## Context
 
 **Why this change.** The architectural goal is to slim Verity to its governance role — registry, lifecycle, decision log, ground truth, testing, compliance reporting — and extract execution into a replaceable Runtime. The hook is that **agents, tasks, prompts, tools, and pipelines remain database-stored definitions, not code-resident**. The registry is the source of truth for those definitions; every execution resolves a versioned config from the governance plane and logs back the exact version IDs it used. That's what delivers full auditability and version pinning, regardless of which LLM framework runs the actual calls.

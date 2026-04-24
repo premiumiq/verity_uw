@@ -1,7 +1,14 @@
 # Task Data Sources & Targets — Implementation Plan
 
-**Status:** Design approved, ready to implement
-**Date:** 2026-04-21
+**Status:** **SUPERSEDED 2026-04-24** by
+[verity_execution_architecture.md](verity_execution_architecture.md) and the
+`source_binding` + `write_target` + `target_payload_field` tables defined
+there. The conceptual goal (declarative input resolution and output writes
+for Tasks) is preserved; the concrete schema is now the unified grammar
+applied symmetrically to Tasks and Agents.
+
+**Original status:** Design approved, ready to implement
+**Original date:** 2026-04-21
 **Scope:** Give Tasks first-class declarative I/O so they can resolve data from
 external systems (EDMS v1) without the caller pre-resolving it. Symmetric
 sinks (targets) for writes. Full mocking support for test & validation runs.
