@@ -197,6 +197,11 @@ CREATE TABLE agent_version (
 
     -- Configuration — sourced from Verity at runtime, never hardcoded
     inference_config_id         UUID NOT NULL REFERENCES inference_config(id),
+    -- Declared caller-facing contract. Required for agents that participate
+    -- in multi-step workflows; existing agents get '{}' as a placeholder so
+    -- seeding keeps working during migration. Admit-time validator rejects
+    -- empty schemas when promoting an agent version out of draft.
+    input_schema                JSONB NOT NULL DEFAULT '{}',
     output_schema               JSONB,
     authority_thresholds        JSONB DEFAULT '{}',
     mock_mode_enabled           BOOLEAN DEFAULT FALSE,
@@ -617,6 +622,91 @@ CREATE TABLE task_version_target (
 );
 
 CREATE INDEX idx_tvtgt_task_version ON task_version_target(task_version_id);
+
+
+-- ── WIRING: SOURCES AND TARGETS (UNIFIED FOR TASKS AND AGENTS) ──
+-- Declarative I/O uses a single reference grammar across tasks and agents:
+--   input.<path>              — value from the unit's own input_data
+--   output.<path>             — value from the unit's own output (targets only)
+--   const:<literal>           — a constant baked into the declaration
+--   fetch:<connector>/<method>(input.<field>)
+--                             — connector call at resolution time (sources only)
+-- Path grammar: dotted keys + bracketed integer indices (`docs[0].kind`).
+-- No JSONPath, no arithmetic, no conditionals.
+--
+-- Two purpose-named tables:
+--   source_binding        — pre-prompt input resolution (task or agent)
+--   write_target          — post-output write declaration (task or agent)
+--   target_payload_field  — per-field payload assembly for a write_target
+--
+-- The older task_version_source / task_version_target tables remain during
+-- the data-migration window; they will be dropped once existing rows are
+-- translated into source_binding / write_target + target_payload_field.
+
+CREATE TABLE source_binding (
+    id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    owner_kind       VARCHAR(20) NOT NULL
+                     CHECK (owner_kind IN ('task_version', 'agent_version')),
+    owner_id         UUID NOT NULL,
+    -- The key the prompt template expects ({{template_var}}), or more
+    -- generally the key that gets overlaid into the template context before
+    -- prompt assembly. Unique per owner so a single version can't
+    -- double-declare the same variable.
+    template_var     VARCHAR(100) NOT NULL,
+    -- Reference string in the wiring DSL. See section comment above.
+    reference        TEXT NOT NULL,
+    required         BOOLEAN NOT NULL DEFAULT TRUE,
+    execution_order  INTEGER NOT NULL DEFAULT 1,
+    description      TEXT,
+    created_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_source_binding UNIQUE (owner_kind, owner_id, template_var)
+);
+
+CREATE INDEX idx_source_binding_owner ON source_binding(owner_kind, owner_id);
+
+
+CREATE TABLE write_target (
+    id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    owner_kind       VARCHAR(20) NOT NULL
+                     CHECK (owner_kind IN ('task_version', 'agent_version')),
+    owner_id         UUID NOT NULL,
+    -- Logical name for this target declaration, unique per owner. Surfaces
+    -- in the target_writes audit JSONB on the decision log so operators can
+    -- tell which declared target fired.
+    name             VARCHAR(100) NOT NULL,
+    connector_id     UUID NOT NULL REFERENCES data_connector(id),
+    write_method     VARCHAR(100) NOT NULL,
+    -- Optional static container hint (collection / folder / path). Dynamic
+    -- routing per-call should be expressed in the payload instead, via
+    -- target_payload_field rows.
+    container        VARCHAR(200),
+    required         BOOLEAN NOT NULL DEFAULT FALSE,
+    execution_order  INTEGER NOT NULL DEFAULT 1,
+    description      TEXT,
+    created_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_write_target UNIQUE (owner_kind, owner_id, name)
+);
+
+CREATE INDEX idx_write_target_owner ON write_target(owner_kind, owner_id);
+
+
+CREATE TABLE target_payload_field (
+    id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    -- CASCADE: if the write_target is dropped, its payload fields go with it.
+    write_target_id   UUID NOT NULL REFERENCES write_target(id) ON DELETE CASCADE,
+    -- The key that appears in the payload dict passed to the connector.
+    payload_field     VARCHAR(200) NOT NULL,
+    -- Reference string in the wiring DSL: input.<path>, output.<path>,
+    -- or const:<literal>. fetch:* is not valid on target payloads.
+    reference         TEXT NOT NULL,
+    required          BOOLEAN NOT NULL DEFAULT TRUE,
+    execution_order   INTEGER NOT NULL DEFAULT 1,
+    description       TEXT,
+    created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_target_payload_field UNIQUE (write_target_id, payload_field)
+);
+
+CREATE INDEX idx_target_payload_field_target ON target_payload_field(write_target_id);
 
 
 -- ── AGENT VERSION ↔ AGENT DELEGATION JUNCTION ────────────────
@@ -1186,6 +1276,112 @@ CREATE INDEX idx_ar_entity ON approval_record(entity_type, entity_version_id);
 CREATE INDEX idx_ar_gate ON approval_record(gate_type);
 
 
+-- ── RUN TRACKING (EVENT-SOURCED) ─────────────────────────────
+-- Tracks the live state of an asynchronous task or agent run.
+-- Four immutable, insert-only tables plus a view that surfaces current
+-- state. Nothing about a run is ever updated; the run's story is the
+-- append-only ledger. The decision log (agent_decision_log) already
+-- commits to immutability for audit — this section applies the same
+-- invariant to run-state tracking, which lets workers scale horizontally
+-- (INSERT has no row contention) and gives operators a complete ledger
+-- of every claim, heartbeat, and terminal outcome for post-hoc analysis.
+--
+--   execution_run            — the request (one row per submission)
+--   execution_run_status     — ledger of submitted/claimed/heartbeat/released
+--   execution_run_completion — terminal success row (at most one per run)
+--   execution_run_error      — terminal failure row (at most one per run)
+--   execution_run_current    — view combining all four into current state
+--
+-- API and UI reads go through the view; workers INSERT into the tables.
+
+CREATE TABLE execution_run (
+    id                    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+
+    -- What was requested. Immutable once inserted.
+    entity_kind           VARCHAR(20) NOT NULL
+                          CHECK (entity_kind IN ('task', 'agent')),
+    entity_version_id     UUID NOT NULL,
+    entity_name           VARCHAR(100) NOT NULL,
+    channel               deployment_channel NOT NULL,
+    input_json            JSONB,
+    execution_context_id  UUID REFERENCES execution_context(id),
+    -- Caller-supplied correlation id grouping multiple runs into one
+    -- logical workflow invocation. Opaque to Verity.
+    workflow_run_id       UUID,
+    -- For sub-agent delegation: the parent decision's id. Lets the
+    -- decision log for a spawned run be linked back to its parent
+    -- before that parent's own audit row is written.
+    parent_decision_id    UUID,
+    application           VARCHAR(100) NOT NULL DEFAULT 'default',
+    mock_mode             BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Overrides used by the runtime when the worker executes. Null means
+    -- fall back to the runtime default.
+    write_mode            VARCHAR(20),
+    enforce_output_schema BOOLEAN,
+
+    submitted_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+    submitted_by          VARCHAR(100)
+);
+
+CREATE INDEX idx_execution_run_context  ON execution_run(execution_context_id);
+CREATE INDEX idx_execution_run_workflow ON execution_run(workflow_run_id);
+CREATE INDEX idx_execution_run_entity   ON execution_run(entity_kind, entity_version_id);
+CREATE INDEX idx_execution_run_submitted ON execution_run(submitted_at DESC);
+
+
+CREATE TABLE execution_run_status (
+    id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    execution_run_id  UUID NOT NULL REFERENCES execution_run(id),
+    -- 'submitted' — inserted in the same txn as the execution_run row.
+    -- 'claimed'   — a worker has taken ownership of the run.
+    -- 'heartbeat' — periodic proof-of-life from the claiming worker.
+    -- 'released'  — worker handed the run back (graceful shutdown) or a
+    --               janitor re-queued a stuck claim. Next claim cycle
+    --               re-picks the run.
+    -- Terminal events live in execution_run_completion / _error, NOT here.
+    status            VARCHAR(20) NOT NULL
+                      CHECK (status IN ('submitted', 'claimed', 'heartbeat', 'released')),
+    recorded_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+    worker_id         VARCHAR(100),
+    notes             TEXT
+);
+
+CREATE INDEX idx_exec_run_status_run ON execution_run_status(execution_run_id, recorded_at DESC);
+
+
+CREATE TABLE execution_run_completion (
+    id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    -- Only one terminal-success row per run; enforced by UNIQUE.
+    execution_run_id  UUID NOT NULL UNIQUE REFERENCES execution_run(id),
+    -- 'complete'  — worker produced a successful envelope.
+    -- 'cancelled' — run was terminated on request before/after claim.
+    final_status      VARCHAR(20) NOT NULL
+                      CHECK (final_status IN ('complete', 'cancelled')),
+    completed_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    -- Points at the immutable audit row. Null on 'cancelled' if the run
+    -- was terminated before any engine work produced a decision.
+    decision_log_id   UUID,  -- FK added after agent_decision_log defined below
+    duration_ms       INTEGER,
+    worker_id         VARCHAR(100)
+);
+
+
+CREATE TABLE execution_run_error (
+    id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    -- Only one terminal-failure row per run; enforced by UNIQUE.
+    execution_run_id  UUID NOT NULL UNIQUE REFERENCES execution_run(id),
+    failed_at         TIMESTAMP NOT NULL DEFAULT NOW(),
+    -- Machine-readable code (e.g. 'connector_timeout', 'schema_violation').
+    error_code        VARCHAR(100),
+    error_message     TEXT NOT NULL,
+    error_trace       TEXT,
+    worker_id         VARCHAR(100),
+    -- If a partial audit row was written before the failure surfaced,
+    -- reference it here. FK added after agent_decision_log defined below.
+    decision_log_id   UUID
+);
+
+
 -- ── AGENT DECISION LOG ───────────────────────────────────────
 -- Every Claude invocation — agent or task — is logged here.
 
@@ -1200,9 +1396,18 @@ CREATE TABLE agent_decision_log (
 
     channel                 deployment_channel NOT NULL,
     mock_mode               BOOLEAN DEFAULT FALSE,
-    pipeline_run_id         UUID,
+    -- Caller-supplied correlation id grouping multiple related runs as one
+    -- logical workflow invocation (e.g. classify + extract for a single
+    -- document). App code sets it; Verity treats it as opaque. Renamed
+    -- from pipeline_run_id now that Verity no longer owns pipelines.
+    workflow_run_id         UUID,
+    -- Immutable-state FK into the event-sourced run-tracking tables.
+    -- Populated for any decision produced from a run submitted through
+    -- the async submission API; null for legacy synchronous calls that
+    -- predate the execution_run machinery.
+    execution_run_id        UUID REFERENCES execution_run(id),
 
-    -- Hierarchy: tracks parent-child relationships for pipeline steps and sub-agent calls
+    -- Hierarchy: tracks parent-child relationships for sub-agent calls.
     parent_decision_id      UUID REFERENCES agent_decision_log(id),
     decision_depth          INTEGER DEFAULT 0,
     step_name               VARCHAR(100),
@@ -1278,8 +1483,97 @@ CREATE TABLE agent_decision_log (
 
 CREATE INDEX idx_adl_entity ON agent_decision_log(entity_type, entity_version_id);
 CREATE INDEX idx_adl_created ON agent_decision_log(created_at);
-CREATE INDEX idx_adl_pipeline ON agent_decision_log(pipeline_run_id);
+CREATE INDEX idx_adl_workflow ON agent_decision_log(workflow_run_id);
+CREATE INDEX idx_adl_run ON agent_decision_log(execution_run_id);
 CREATE INDEX idx_adl_parent ON agent_decision_log(parent_decision_id);
+
+
+-- ── RUN TRACKING BACK-FILL FKS ───────────────────────────────
+-- The execution_run_completion and execution_run_error tables reference
+-- agent_decision_log, but they were created earlier in the file (before
+-- agent_decision_log existed). Add the FK constraints now that the
+-- target table is defined. Kept separate so the forward-referenced
+-- columns above don't block schema apply.
+
+ALTER TABLE execution_run_completion
+    ADD CONSTRAINT fk_exec_run_completion_decision
+    FOREIGN KEY (decision_log_id) REFERENCES agent_decision_log(id);
+
+ALTER TABLE execution_run_error
+    ADD CONSTRAINT fk_exec_run_error_decision
+    FOREIGN KEY (decision_log_id) REFERENCES agent_decision_log(id);
+
+
+-- ── RUN TRACKING: CURRENT-STATE VIEW ─────────────────────────
+-- Combines the four run-tracking tables into one queryable row per run.
+-- The current_status column is resolved by precedence:
+--   1. If a completion row exists: use its final_status ('complete'|'cancelled').
+--   2. Else if an error row exists: 'failed'.
+--   3. Else: the latest entry in execution_run_status.
+-- API and UI reads go through this view so callers never have to join
+-- the four tables themselves.
+
+CREATE VIEW execution_run_current AS
+SELECT
+    r.id,
+    r.entity_kind,
+    r.entity_version_id,
+    r.entity_name,
+    r.channel,
+    r.input_json,
+    r.execution_context_id,
+    r.workflow_run_id,
+    r.parent_decision_id,
+    r.application,
+    r.mock_mode,
+    r.write_mode,
+    r.enforce_output_schema,
+    r.submitted_at,
+    r.submitted_by,
+
+    -- Resolved current status. See precedence above.
+    COALESCE(
+        c.final_status,
+        CASE WHEN e.id IS NOT NULL THEN 'failed' ELSE s.latest_status END,
+        'submitted'
+    )                                   AS current_status,
+
+    -- Event-table details for drill-through.
+    s.latest_status                     AS latest_status_event,
+    s.latest_status_at                  AS current_status_as_of,
+    s.latest_worker_id                  AS current_worker_id,
+
+    -- Completion details (null if the run didn't complete successfully).
+    c.completed_at                      AS completed_at,
+    c.decision_log_id                   AS completion_decision_log_id,
+    c.duration_ms                       AS duration_ms,
+
+    -- Error details (null if the run didn't fail).
+    e.failed_at                         AS failed_at,
+    e.error_code                        AS error_code,
+    e.error_message                     AS error_message,
+    e.decision_log_id                   AS error_decision_log_id,
+
+    -- When the worker first picked it up (for elapsed-time display while
+    -- still running; null if never claimed).
+    first_claim.first_claimed_at        AS first_started_at
+FROM execution_run r
+LEFT JOIN execution_run_completion c ON c.execution_run_id = r.id
+LEFT JOIN execution_run_error      e ON e.execution_run_id = r.id
+LEFT JOIN LATERAL (
+    SELECT status AS latest_status,
+           recorded_at AS latest_status_at,
+           worker_id AS latest_worker_id
+    FROM execution_run_status
+    WHERE execution_run_id = r.id
+    ORDER BY recorded_at DESC
+    LIMIT 1
+) s ON TRUE
+LEFT JOIN LATERAL (
+    SELECT MIN(recorded_at) AS first_claimed_at
+    FROM execution_run_status
+    WHERE execution_run_id = r.id AND status = 'claimed'
+) first_claim ON TRUE;
 
 
 -- ── OVERRIDE LOG ─────────────────────────────────────────────
@@ -1573,84 +1867,20 @@ JOIN model_price mp
 
 
 -- ============================================================
--- IDEMPOTENT ADDITIONS
+-- POST-CREATE ADJUSTMENTS
 -- ============================================================
--- Columns added to existing version tables for clone provenance.
--- Safe to re-run: ADD COLUMN IF NOT EXISTS is a no-op on new DBs
--- that already have the column from the CREATE TABLE above.
-
-ALTER TABLE agent_version    ADD COLUMN IF NOT EXISTS cloned_from_version_id UUID REFERENCES agent_version(id);
-ALTER TABLE task_version     ADD COLUMN IF NOT EXISTS cloned_from_version_id UUID REFERENCES task_version(id);
-ALTER TABLE prompt_version   ADD COLUMN IF NOT EXISTS cloned_from_version_id UUID REFERENCES prompt_version(id);
-ALTER TABLE pipeline_version ADD COLUMN IF NOT EXISTS cloned_from_version_id UUID REFERENCES pipeline_version(id);
+-- Adjustments that must run after the primary CREATE TABLE statements
+-- above. Kept here so the main table definitions stay compact.
 
 -- Model management — link inference configs to the registered model
 -- catalog. Kept alongside the existing `model_name` VARCHAR column for
 -- transition; seed script backfills this FK from the text column.
 ALTER TABLE inference_config ADD COLUMN IF NOT EXISTS model_id UUID REFERENCES model(id);
 
--- Mock tables: add the discriminator column and the generalized mock_key
--- column on existing deployments. New deployments already have these from
--- the CREATE TABLE above — the IF NOT EXISTS guards make this a no-op.
--- The column rename tool_name → mock_key is expressed as an ADD + DO block
--- that copies values across and drops the old column, so existing rows
--- are preserved. Safe to re-run: the DO block is a no-op once mock_key
--- is the only column.
-ALTER TABLE test_case_mock
-    ADD COLUMN IF NOT EXISTS mock_kind VARCHAR(20) NOT NULL DEFAULT 'tool';
-ALTER TABLE test_case_mock
-    ADD COLUMN IF NOT EXISTS mock_key VARCHAR(200);
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.columns
-               WHERE table_name = 'test_case_mock' AND column_name = 'tool_name') THEN
-        UPDATE test_case_mock SET mock_key = tool_name WHERE mock_key IS NULL;
-        ALTER TABLE test_case_mock DROP COLUMN tool_name;
-    END IF;
-END $$;
-ALTER TABLE test_case_mock ALTER COLUMN mock_key SET NOT NULL;
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM information_schema.constraint_column_usage
-                   WHERE table_name = 'test_case_mock' AND constraint_name = 'test_case_mock_mock_kind_check') THEN
-        ALTER TABLE test_case_mock
-            ADD CONSTRAINT test_case_mock_mock_kind_check
-            CHECK (mock_kind IN ('tool', 'source', 'target'));
-    END IF;
-END $$;
-CREATE INDEX IF NOT EXISTS idx_tcm_kind ON test_case_mock(test_case_id, mock_kind);
-
-ALTER TABLE ground_truth_record_mock
-    ADD COLUMN IF NOT EXISTS mock_kind VARCHAR(20) NOT NULL DEFAULT 'tool';
-ALTER TABLE ground_truth_record_mock
-    ADD COLUMN IF NOT EXISTS mock_key VARCHAR(200);
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.columns
-               WHERE table_name = 'ground_truth_record_mock' AND column_name = 'tool_name') THEN
-        UPDATE ground_truth_record_mock SET mock_key = tool_name WHERE mock_key IS NULL;
-        ALTER TABLE ground_truth_record_mock DROP COLUMN tool_name;
-    END IF;
-END $$;
-ALTER TABLE ground_truth_record_mock ALTER COLUMN mock_key SET NOT NULL;
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM information_schema.constraint_column_usage
-                   WHERE table_name = 'ground_truth_record_mock' AND constraint_name = 'ground_truth_record_mock_mock_kind_check') THEN
-        ALTER TABLE ground_truth_record_mock
-            ADD CONSTRAINT ground_truth_record_mock_mock_kind_check
-            CHECK (mock_kind IN ('tool', 'source', 'target'));
-    END IF;
-END $$;
+-- Secondary index on test_case_mock after the primary CREATE TABLE
+-- above finalizes the mock_kind column.
+CREATE INDEX IF NOT EXISTS idx_tcm_kind  ON test_case_mock(test_case_id, mock_kind);
 CREATE INDEX IF NOT EXISTS idx_gtrm_kind ON ground_truth_record_mock(record_id, mock_kind);
-
--- Task sources/targets audit columns on agent_decision_log. Present in
--- the CREATE TABLE above for new deployments; ADD COLUMN IF NOT EXISTS
--- for existing deployments.
-ALTER TABLE agent_decision_log
-    ADD COLUMN IF NOT EXISTS source_resolutions JSONB;
-ALTER TABLE agent_decision_log
-    ADD COLUMN IF NOT EXISTS target_writes      JSONB;
 
 
 -- ============================================================
