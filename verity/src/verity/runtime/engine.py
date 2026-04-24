@@ -675,6 +675,13 @@ class ExecutionEngine:
         # is channel-gated (champion only), "log_only" forces dry run,
         # "write" forces. MockContext.target_blocks always wins.
         write_mode: Literal["auto", "log_only", "write"] = "auto",
+        # When True and the agent's declared output_schema is set, the
+        # engine injects a synthetic `submit_output` tool whose input
+        # is the agent's output_schema, and forces a `tool_choice` on
+        # the terminal turn so the final output is structurally
+        # guaranteed. Off by default — agents emit free-form text and
+        # `output` is best-effort-parsed (current behavior).
+        enforce_output_schema: bool = False,
         # Live-state pointer back to execution_run for runs dispatched
         # by the async worker. Threaded through to the decision log.
         execution_run_id: Optional[UUID] = None,
@@ -748,6 +755,52 @@ class ExecutionEngine:
         # writes if a connector explosion happens mid-target loop.
         target_writes: list[dict[str, Any]] = []
 
+        # ── OUTPUT-SCHEMA ENFORCEMENT ──────────────────────────
+        # When the caller opts in via enforce_output_schema=True AND
+        # the agent's declared output_schema is a valid JSON-Schema
+        # properties dict, inject a synthetic `submit_output` tool that
+        # the agent can call to terminate with a structurally-valid
+        # answer. If the agent's loop ends naturally without calling
+        # submit_output, an extra forced call is issued post-loop.
+        # Off by default — agents continue emitting free-form text.
+        submit_output_tool_def: Optional[dict] = None
+        if enforce_output_schema:
+            if not config.output_schema or not isinstance(config.output_schema, dict):
+                logger.warning(
+                    "enforce_output_schema=True for agent %s but no "
+                    "output_schema is declared on the version; falling back "
+                    "to free-form output.", agent_name,
+                )
+            elif not _is_valid_json_schema(config.output_schema):
+                # Shorthand schemas like {'field': 'string'} aren't accepted
+                # by the Claude tool input_schema validator. Fail-soft: log
+                # and run without enforcement rather than abort the run.
+                logger.warning(
+                    "enforce_output_schema=True for agent %s but the "
+                    "declared output_schema is not in valid JSON-Schema "
+                    "shape (e.g. shorthand types like 'string' instead of "
+                    "{'type': 'string'}); falling back to free-form output.",
+                    agent_name,
+                )
+            else:
+                submit_output_tool_def = {
+                    "name": "submit_output",
+                    "description": (
+                        "Submit your final structured output for this run. "
+                        "Calling this tool terminates the agent — there is no "
+                        "tool result; the call itself is the answer."
+                    ),
+                    "input_schema": {
+                        "type": "object",
+                        "properties": config.output_schema,
+                    },
+                }
+                tools = [*(tools or []), submit_output_tool_def]
+        # When the agent calls submit_output (or we force it post-loop),
+        # this captures the structured answer that becomes the run's
+        # output dict.
+        submit_output_input: Optional[dict] = None
+
         try:
             messages = [{"role": "user", "content": msg} for msg in user_messages]
             total_input_tokens = 0
@@ -810,10 +863,29 @@ class ExecutionEngine:
                     })
 
                 if response.stop_reason == "tool_use":
+                    # First pass: scan for submit_output. If present, it
+                    # terminates the run — capture the structured answer
+                    # and exit the loop. We don't dispatch other tools in
+                    # the same response (Claude shouldn't pair a final
+                    # answer with a tool call; if it does, the answer wins).
+                    if submit_output_tool_def is not None:
+                        for block in response.content:
+                            if (block.type == "tool_use"
+                                    and block.name == "submit_output"):
+                                submit_output_input = block.input or {}
+                                break
+                        if submit_output_input is not None:
+                            messages.append({"role": "assistant", "content": response.content})
+                            break
+
                     tool_results = []
                     for block in response.content:
                         if block.type == "tool_use":
-                            # Check authorization
+                            # Check authorization. submit_output is the
+                            # one synthetic tool that bypasses the
+                            # registered-tools list (handled above; this
+                            # branch only runs if there was no submit_output
+                            # block).
                             authorized_names = {t.name for t in config.tools}
                             if block.name not in authorized_names:
                                 tool_results.append({
@@ -857,8 +929,79 @@ class ExecutionEngine:
                 else:
                     break
 
-            output_text = _extract_text(response)
-            output = _try_parse_json(output_text)
+            # ── POST-LOOP FORCED submit_output (if enforcement on) ─
+            # If output enforcement is active and the agent ended its
+            # loop without calling submit_output (it stopped naturally
+            # with text, or it never produced text either), issue ONE
+            # more API call with tool_choice forcing submit_output. The
+            # agent must produce a structured answer in the schema's
+            # shape; that becomes the run's output.
+            if (
+                submit_output_tool_def is not None
+                and submit_output_input is None
+            ):
+                # Append the agent's last response so the forced call
+                # has full context to summarise.
+                if response is not None and hasattr(response, "content"):
+                    messages.append({"role": "assistant", "content": response.content})
+                forced_params = _build_api_params(
+                    config.inference_config,
+                    system_prompt,
+                    messages,
+                    tools=[submit_output_tool_def],
+                    tool_choice={"type": "tool", "name": "submit_output"},
+                )
+                forced_response = await self._gateway_llm_call(forced_params, mock)
+                # Token accounting for this extra turn — keeps the
+                # invocation log honest about what the run cost.
+                if hasattr(forced_response, "usage"):
+                    in_tok = forced_response.usage.input_tokens
+                    out_tok = forced_response.usage.output_tokens
+                    cw_tok = getattr(forced_response.usage, "cache_creation_input_tokens", 0) or 0
+                    cr_tok = getattr(forced_response.usage, "cache_read_input_tokens", 0) or 0
+                    total_input_tokens += in_tok
+                    total_output_tokens += out_tok
+                    total_cache_write_tokens += cw_tok
+                    total_cache_read_tokens += cr_tok
+                    real_api_turns += 1
+                    last_stop_reason = getattr(forced_response, "stop_reason", None)
+                    per_turn_usage.append({
+                        "turn": "forced_submit_output",
+                        "input_tokens": in_tok,
+                        "output_tokens": out_tok,
+                        "cache_write_tokens": cw_tok,
+                        "cache_read_tokens": cr_tok,
+                        "stop_reason": last_stop_reason,
+                        "request_id": getattr(forced_response, "id", None),
+                    })
+                if hasattr(forced_response, "content"):
+                    message_history.append({
+                        "role": "assistant",
+                        "content": _serialize_content_blocks(forced_response.content),
+                    })
+                    for block in forced_response.content:
+                        if (
+                            getattr(block, "type", None) == "tool_use"
+                            and getattr(block, "name", None) == "submit_output"
+                        ):
+                            submit_output_input = block.input or {}
+                            break
+                # Treat this as the response of record for downstream
+                # text extraction; an empty submit_output_input falls
+                # through to the legacy text-parse path below.
+                response = forced_response
+
+            # ── FINAL OUTPUT ────────────────────────────────
+            # When submit_output was called (organically or forced),
+            # its tool input IS the structured output. Otherwise fall
+            # back to the legacy best-effort text parse so agents
+            # without enforcement keep working.
+            if submit_output_input is not None:
+                output = submit_output_input
+                output_text = json.dumps(output, default=str)
+            else:
+                output_text = _extract_text(response)
+                output = _try_parse_json(output_text)
 
             # ── TARGET WRITES ────────────────────────────────
             # Fire any declared write_targets now that we have the

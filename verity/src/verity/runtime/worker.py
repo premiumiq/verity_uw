@@ -164,8 +164,9 @@ async def _dispatch_run(verity: Verity, run: dict[str, Any], worker_id: str) -> 
 
         # write_mode and enforce_output_schema flow through from the
         # submission row when the caller pinned them. Engine defaults
-        # apply otherwise.
+        # apply otherwise. enforce_output_schema is agent-only.
         write_mode = run.get("write_mode") or "auto"
+        enforce_output_schema = bool(run.get("enforce_output_schema"))
 
         if entity_kind == "task":
             result = await verity.execution.run_task(
@@ -191,6 +192,7 @@ async def _dispatch_run(verity: Verity, run: dict[str, Any], worker_id: str) -> 
                 application=application,
                 mock=mock_ctx,
                 write_mode=write_mode,
+                enforce_output_schema=enforce_output_schema,
                 execution_run_id=run_id,
             )
         else:
