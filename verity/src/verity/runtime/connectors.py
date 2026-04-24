@@ -66,7 +66,15 @@ class SourceResolutionError(ConnectorError):
 
 
 class TargetWriteError(ConnectorError):
-    """Raised when a declared target write fails (required=True)."""
+    """Raised when a declared target write fails (required=True).
+
+    Carries `partial_writes` so callers can still record the audit trail
+    for writes that completed or were logged before the failure.
+    """
+
+    def __init__(self, message: str, partial_writes: list | None = None):
+        super().__init__(message)
+        self.partial_writes = partial_writes or []
 
 
 # Module-level registry. Populated at app startup by the consuming app.

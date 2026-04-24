@@ -151,7 +151,7 @@ async def _get_loss_history(submission_id: str):
 
 
 async def _update_workflow_step(submission_id: str, step_name: str, status: str,
-                                  pipeline_run_id=None, completed_by=None):
+                                  workflow_run_id=None, completed_by=None):
     """Update a workflow step's status."""
     now = datetime.now(timezone.utc)
     async with await _get_conn() as conn:
@@ -165,9 +165,9 @@ async def _update_workflow_step(submission_id: str, step_name: str, status: str,
             elif status in ("complete", "failed", "skipped"):
                 await cur.execute(
                     """UPDATE workflow_step SET status = %s, completed_at = %s,
-                        completed_by = %s, pipeline_run_id = %s
+                        completed_by = %s, workflow_run_id = %s
                     WHERE submission_id = %s AND step_name = %s""",
-                    (status, now, completed_by, pipeline_run_id, submission_id, step_name),
+                    (status, now, completed_by, workflow_run_id, submission_id, step_name),
                 )
             else:
                 await cur.execute(
@@ -335,7 +335,7 @@ def create_uw_routes(verity) -> APIRouter:
         assessments = await _get_assessments(submission_id)
         review_count = sum(1 for e in extractions if e.get("needs_review"))
         next_action = _compute_next_action(sub, submission_id)
-        run_id = str(sub.get("last_risk_pipeline_run_id") or sub.get("last_doc_pipeline_run_id") or "")
+        run_id = str(sub.get("last_risk_workflow_run_id") or sub.get("last_doc_workflow_run_id") or "")
 
         pipeline_mode = await _get_setting("pipeline_mode", "mock")
         return templates.TemplateResponse(request, "submission_detail.html", {
@@ -393,7 +393,7 @@ def create_uw_routes(verity) -> APIRouter:
         await verity.ensure_connected()
         sub = await _get_submission(submission_id)
         trail = []
-        run_id = sub.get("last_risk_pipeline_run_id") or sub.get("last_doc_pipeline_run_id")
+        run_id = sub.get("last_risk_workflow_run_id") or sub.get("last_doc_workflow_run_id")
         if run_id:
             trail = await verity.get_audit_trail_by_run(str(run_id))
         return templates.TemplateResponse(request, "partials/_tab_audit_trail.html", {
@@ -480,7 +480,7 @@ def create_uw_routes(verity) -> APIRouter:
                                          completed_by=f"error: {str(e)[:200]}")
             return RedirectResponse(url=f"/submissions/{submission_id}", status_code=303)
 
-        run_id = str(result.pipeline_run_id)
+        run_id = str(result.workflow_run_id)
 
         # Check pipeline result — handle failure
         if result.status == "failed":
@@ -491,17 +491,17 @@ def create_uw_routes(verity) -> APIRouter:
                     break
             logger.error(f"Pipeline 1 failed for {submission_id}: {error_msg}")
             await _update_workflow_step(submission_id, "document_processing", "failed",
-                                         pipeline_run_id=run_id,
+                                         workflow_run_id=run_id,
                                          completed_by=f"error: {error_msg[:200]}")
             await _update_submission_status(submission_id, "intake",
-                                             last_doc_pipeline_run_id=run_id)
+                                             last_doc_workflow_run_id=run_id)
             return RedirectResponse(url=f"/submissions/{submission_id}", status_code=303)
 
         # Pipeline succeeded — update workflow
         await _update_workflow_step(submission_id, "document_processing", "complete",
-                                     pipeline_run_id=run_id, completed_by="system")
+                                     workflow_run_id=run_id, completed_by="system")
         await _update_submission_status(submission_id, "documents_processed",
-                                         last_doc_pipeline_run_id=run_id,
+                                         last_doc_workflow_run_id=run_id,
                                          execution_context_id=str(exec_ctx_id) if exec_ctx_id else None)
 
         # Write extraction results to uw_db from pipeline output.
@@ -657,7 +657,7 @@ async def _run_risk_assessment_internal(verity, submission_id: str, sub: dict, t
         return
 
     # Check pipeline result status
-    run_id = str(result.pipeline_run_id)
+    run_id = str(result.workflow_run_id)
 
     if result.status == "failed":
         # Pipeline ran but steps failed (e.g., Claude API overloaded)
@@ -668,9 +668,9 @@ async def _run_risk_assessment_internal(verity, submission_id: str, sub: dict, t
                 break
         logger.error(f"Pipeline 2 failed for {submission_id}: {error_msg}")
         await _update_workflow_step(submission_id, "triage", "failed",
-                                     pipeline_run_id=run_id, completed_by=f"error: {error_msg[:200]}")
+                                     workflow_run_id=run_id, completed_by=f"error: {error_msg[:200]}")
         await _update_submission_status(submission_id, "approved",
-                                         last_risk_pipeline_run_id=run_id)
+                                         last_risk_workflow_run_id=run_id)
         return
 
     # Pipeline succeeded — update workflow steps per actual step status
@@ -679,14 +679,14 @@ async def _run_risk_assessment_internal(verity, submission_id: str, sub: dict, t
             wf_name = "triage" if step.step_name == "triage_submission" else "appetite"
             if step.status == "complete":
                 await _update_workflow_step(submission_id, wf_name, "complete",
-                                             pipeline_run_id=run_id, completed_by="system")
+                                             workflow_run_id=run_id, completed_by="system")
             elif step.status == "failed":
                 await _update_workflow_step(submission_id, wf_name, "failed",
-                                             pipeline_run_id=run_id,
+                                             workflow_run_id=run_id,
                                              completed_by=f"error: {step.error_message or 'unknown'}"[:200])
             elif step.status == "skipped":
                 await _update_workflow_step(submission_id, wf_name, "skipped",
-                                             pipeline_run_id=run_id, completed_by="system")
+                                             workflow_run_id=run_id, completed_by="system")
 
     # Write assessment results to uw_db from pipeline output
     triage_step = next((s for s in result.all_steps if s.step_name == "triage_submission"), None)
@@ -700,12 +700,12 @@ async def _run_risk_assessment_internal(verity, submission_id: str, sub: dict, t
                 await cur.execute(
                     """INSERT INTO submission_assessment (
                         submission_id, assessment_type, result,
-                        risk_score, routing, confidence, reasoning, pipeline_run_id
+                        risk_score, routing, confidence, reasoning, workflow_run_id
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (submission_id, assessment_type) DO UPDATE SET
                         result = EXCLUDED.result, risk_score = EXCLUDED.risk_score,
                         routing = EXCLUDED.routing, confidence = EXCLUDED.confidence,
-                        reasoning = EXCLUDED.reasoning, pipeline_run_id = EXCLUDED.pipeline_run_id,
+                        reasoning = EXCLUDED.reasoning, workflow_run_id = EXCLUDED.workflow_run_id,
                         created_at = NOW()
                     """,
                     (submission_id, "triage", json.dumps(t),
@@ -719,12 +719,12 @@ async def _run_risk_assessment_internal(verity, submission_id: str, sub: dict, t
                 await cur.execute(
                     """INSERT INTO submission_assessment (
                         submission_id, assessment_type, result,
-                        determination, confidence, reasoning, pipeline_run_id
+                        determination, confidence, reasoning, workflow_run_id
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (submission_id, assessment_type) DO UPDATE SET
                         result = EXCLUDED.result, determination = EXCLUDED.determination,
                         confidence = EXCLUDED.confidence, reasoning = EXCLUDED.reasoning,
-                        pipeline_run_id = EXCLUDED.pipeline_run_id, created_at = NOW()
+                        workflow_run_id = EXCLUDED.workflow_run_id, created_at = NOW()
                     """,
                     (submission_id, "appetite", json.dumps(a),
                      a.get("determination"), a.get("confidence"),
@@ -738,7 +738,7 @@ async def _run_risk_assessment_internal(verity, submission_id: str, sub: dict, t
     )
     if all_complete:
         await _update_submission_status(submission_id, "assessed",
-                                         last_risk_pipeline_run_id=run_id)
+                                         last_risk_workflow_run_id=run_id)
     else:
         await _update_submission_status(submission_id, "approved",
-                                         last_risk_pipeline_run_id=run_id)
+                                         last_risk_workflow_run_id=run_id)

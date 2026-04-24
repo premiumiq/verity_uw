@@ -294,6 +294,72 @@ WHERE tvt.task_version_id = %(task_version_id)s
 ORDER BY tvt.execution_order, tvt.output_field_name;
 
 
+-- ── UNIFIED WIRING (SOURCES + TARGETS, TASK + AGENT) ──────────
+-- Replacement for list_task_version_sources / list_task_version_targets.
+-- These queries operate on the unified source_binding / write_target /
+-- target_payload_field tables that work for both tasks and agents.
+
+-- name: list_source_bindings
+-- Source bindings for a task or agent version, in execution_order.
+-- Returns the raw reference string; the runtime parses it into one of
+-- input.<path> | const:<v> | fetch:<connector>/<method>(input.<f>).
+SELECT
+    sb.id,
+    sb.owner_kind,
+    sb.owner_id,
+    sb.template_var,
+    sb.reference,
+    sb.required,
+    sb.execution_order,
+    sb.description,
+    sb.created_at
+FROM source_binding sb
+WHERE sb.owner_kind = %(owner_kind)s
+  AND sb.owner_id   = %(owner_id)s
+ORDER BY sb.execution_order, sb.template_var;
+
+
+-- name: list_write_targets
+-- Declared output writes for a task or agent version, in execution_order.
+-- connector_name is denormalised so the engine can look up the provider
+-- without a second query.
+SELECT
+    wt.id,
+    wt.owner_kind,
+    wt.owner_id,
+    wt.name,
+    wt.connector_id,
+    dc.name AS connector_name,
+    wt.write_method,
+    wt.container,
+    wt.required,
+    wt.execution_order,
+    wt.description,
+    wt.created_at
+FROM write_target wt
+JOIN data_connector dc ON dc.id = wt.connector_id
+WHERE wt.owner_kind = %(owner_kind)s
+  AND wt.owner_id   = %(owner_id)s
+ORDER BY wt.execution_order, wt.name;
+
+
+-- name: list_target_payload_fields
+-- The per-field payload assembly for one write_target. Each row is one
+-- entry in the payload dict the connector receives.
+SELECT
+    tpf.id,
+    tpf.write_target_id,
+    tpf.payload_field,
+    tpf.reference,
+    tpf.required,
+    tpf.execution_order,
+    tpf.description,
+    tpf.created_at
+FROM target_payload_field tpf
+WHERE tpf.write_target_id = %(write_target_id)s
+ORDER BY tpf.execution_order, tpf.payload_field;
+
+
 -- name: list_mcp_servers
 -- All registered MCP servers (governance UI, runtime startup).
 SELECT * FROM mcp_server WHERE active = TRUE ORDER BY name;

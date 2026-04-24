@@ -30,7 +30,8 @@ class DecisionLog(BaseModel):
     entity_version_id: UUID
     channel: DeploymentChannel
     mock_mode: bool = False
-    pipeline_run_id: Optional[UUID] = None
+    workflow_run_id: Optional[UUID] = None
+    execution_run_id: Optional[UUID] = None
     execution_context_id: Optional[UUID] = None
     application: str = "default"
     run_purpose: RunPurpose = RunPurpose.PRODUCTION

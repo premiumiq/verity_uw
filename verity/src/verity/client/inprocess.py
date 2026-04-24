@@ -176,7 +176,7 @@ class Verity:
         agent_name: str,
         context: dict[str, Any],
         channel: str = "production",
-        pipeline_run_id: Optional[UUID] = None,
+        workflow_run_id: Optional[UUID] = None,
         mock: Optional[MockContext] = None,
         stream: bool = False,
         execution_context_id: Optional[UUID] = None,
@@ -195,7 +195,7 @@ class Verity:
             agent_name=agent_name,
             context=context,
             channel=channel,
-            pipeline_run_id=pipeline_run_id,
+            workflow_run_id=workflow_run_id,
             mock=mock,
             stream=stream,
             execution_context_id=execution_context_id,
@@ -207,7 +207,7 @@ class Verity:
         task_name: str,
         input_data: dict[str, Any],
         channel: str = "production",
-        pipeline_run_id: Optional[UUID] = None,
+        workflow_run_id: Optional[UUID] = None,
         mock: Optional[MockContext] = None,
         stream: bool = False,
         execution_context_id: Optional[UUID] = None,
@@ -223,7 +223,7 @@ class Verity:
             task_name=task_name,
             input_data=input_data,
             channel=channel,
-            pipeline_run_id=pipeline_run_id,
+            workflow_run_id=workflow_run_id,
             mock=mock,
             stream=stream,
             execution_context_id=execution_context_id,
@@ -354,14 +354,14 @@ class Verity:
         await self.ensure_connected()
         return await self._gov.decisions_reader.get_audit_trail(execution_context_id)
 
-    async def get_audit_trail_by_run(self, pipeline_run_id: UUID) -> list[AuditTrailEntry]:
+    async def get_audit_trail_by_run(self, workflow_run_id: UUID) -> list[AuditTrailEntry]:
         """Get the full decision chain for a pipeline run (preferred — uses Verity-owned ID).
 
-        This is the correct way to query audit trails. Uses pipeline_run_id
+        This is the correct way to query audit trails. Uses workflow_run_id
         which is unique per execution — no cross-application collision.
         """
         await self.ensure_connected()
-        return await self._gov.decisions_reader.get_audit_trail_by_run(pipeline_run_id)
+        return await self._gov.decisions_reader.get_audit_trail_by_run(workflow_run_id)
 
     async def get_decision(self, decision_id: UUID) -> Optional[DecisionLogDetail]:
         """Get full details for a single decision."""

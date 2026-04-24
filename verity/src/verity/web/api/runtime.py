@@ -39,7 +39,7 @@ def build_runtime_router(verity) -> APIRouter:
                 agent_name=name,
                 context=req.context,
                 channel=req.channel,
-                pipeline_run_id=req.pipeline_run_id,
+                workflow_run_id=req.workflow_run_id,
                 execution_context_id=req.execution_context_id,
                 application=req.application,
             )
@@ -55,7 +55,7 @@ def build_runtime_router(verity) -> APIRouter:
                 task_name=name,
                 input_data=req.input_data,
                 channel=req.channel,
-                pipeline_run_id=req.pipeline_run_id,
+                workflow_run_id=req.workflow_run_id,
                 execution_context_id=req.execution_context_id,
                 application=req.application,
             )

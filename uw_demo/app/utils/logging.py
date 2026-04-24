@@ -27,7 +27,7 @@ from uuid import uuid4
 # ══════════════════════════════════════════════════════════════
 
 correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="")
-pipeline_run_id_var: ContextVar[str] = ContextVar("pipeline_run_id", default="")
+workflow_run_id_var: ContextVar[str] = ContextVar("workflow_run_id", default="")
 step_name_var: ContextVar[str] = ContextVar("step_name", default="")
 submission_id_var: ContextVar[str] = ContextVar("submission_id", default="")
 service_name_var: ContextVar[str] = ContextVar("service_name", default="unknown")
@@ -47,7 +47,7 @@ class ContextFilter(logging.Filter):
 
     def filter(self, record):
         record.correlation_id = correlation_id_var.get("")
-        record.pipeline_run_id = pipeline_run_id_var.get("")
+        record.workflow_run_id = workflow_run_id_var.get("")
         record.step_name = step_name_var.get("")
         record.submission_id = submission_id_var.get("")
         record.service = service_name_var.get("unknown")

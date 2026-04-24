@@ -2,7 +2,7 @@
 
 Resolves pipeline steps, executes in dependency order with parallel group
 support via asyncio.gather. Each step is a governed Verity execution
-(agent or task) sharing a pipeline_run_id for audit trail grouping.
+(agent or task) sharing a workflow_run_id for audit trail grouping.
 """
 
 import asyncio
@@ -17,7 +17,7 @@ from verity.contracts.decision import ExecutionResult
 from verity.contracts.pipeline import PipelineStep
 from verity.governance.registry import Registry
 from verity.runtime.engine import ExecutionEngine
-from verity.utils.logging import pipeline_run_id_var, step_name_var
+from verity.utils.logging import workflow_run_id_var, step_name_var
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class StepResult:
 @dataclass
 class PipelineResult:
     """Result of a full pipeline execution."""
-    pipeline_run_id: UUID
+    workflow_run_id: UUID
     pipeline_name: str
     version_number: int
     steps_completed: list[StepResult] = field(default_factory=list)
@@ -75,8 +75,8 @@ class PipelineExecutor:
         """
         start_ms = _now_ms()
         started_at = datetime.now(timezone.utc)
-        pipeline_run_id = uuid4()
-        pipeline_run_id_var.set(str(pipeline_run_id))
+        workflow_run_id = uuid4()
+        workflow_run_id_var.set(str(workflow_run_id))
 
         # Load pipeline config
         pipeline = await self.registry.get_pipeline_by_name(pipeline_name)
@@ -95,7 +95,7 @@ class PipelineExecutor:
 
         step_names = [s.step_name if isinstance(s, PipelineStep) else s.get("step_name", "?") for s in steps]
         logger.info("Pipeline run starting: %s (run_id=%s, steps=%s, mock=%s)",
-                     pipeline_name, str(pipeline_run_id)[:8], step_names, mock is not None)
+                     pipeline_name, str(workflow_run_id)[:8], step_names, mock is not None)
 
         # Attribution: same fallback chain as the decision-log writer —
         # explicit `application=` kwarg (from a REST runtime caller,
@@ -121,7 +121,7 @@ class PipelineExecutor:
             await self.registry.db.execute_returning(
                 "insert_pipeline_run_start",
                 {
-                    "id": str(pipeline_run_id),
+                    "id": str(workflow_run_id),
                     "pipeline_name": pipeline_name,
                     "application": resolved_application,
                     "started_at": started_at,
@@ -134,7 +134,7 @@ class PipelineExecutor:
         except Exception:
             logger.exception(
                 "Failed to write pipeline_run start row for %s (run_id=%s)",
-                pipeline_name, pipeline_run_id,
+                pipeline_name, workflow_run_id,
             )
 
         # Build execution plan: group by step_order, resolve dependencies
@@ -211,7 +211,7 @@ class PipelineExecutor:
             if len(runnable) == 1:
                 result = await self._execute_step(
                     runnable[0], context, accumulated_results,
-                    channel, pipeline_run_id, mock, execution_context_id,
+                    channel, workflow_run_id, mock, execution_context_id,
                     application,
                 )
                 accumulated_results[runnable[0].step_name] = result
@@ -224,7 +224,7 @@ class PipelineExecutor:
                 tasks = [
                     self._execute_step(
                         step, context, accumulated_results,
-                        channel, pipeline_run_id, mock, execution_context_id,
+                        channel, workflow_run_id, mock, execution_context_id,
                         application,
                     )
                     for step in runnable
@@ -264,7 +264,7 @@ class PipelineExecutor:
 
         logger.info("Pipeline run complete: %s (run_id=%s, status=%s, %dms, "
                      "completed=%d, failed=%d, skipped=%d)",
-                     pipeline_name, str(pipeline_run_id)[:8], overall_status,
+                     pipeline_name, str(workflow_run_id)[:8], overall_status,
                      duration_ms, len(completed), len(failed), len(skipped))
 
         # Update pipeline_run with the final lifecycle state. _execute_step
@@ -277,7 +277,7 @@ class PipelineExecutor:
             await self.registry.db.execute(
                 "update_pipeline_run_complete",
                 {
-                    "id": str(pipeline_run_id),
+                    "id": str(workflow_run_id),
                     "status": overall_status,
                     "completed_at": datetime.now(timezone.utc),
                     "duration_ms": duration_ms,
@@ -290,11 +290,11 @@ class PipelineExecutor:
         except Exception:
             logger.exception(
                 "Failed to update pipeline_run row to %s (run_id=%s)",
-                overall_status, pipeline_run_id,
+                overall_status, workflow_run_id,
             )
 
         return PipelineResult(
-            pipeline_run_id=pipeline_run_id,
+            workflow_run_id=workflow_run_id,
             pipeline_name=pipeline_name,
             version_number=version_number,
             steps_completed=completed,
@@ -311,7 +311,7 @@ class PipelineExecutor:
         context: dict[str, Any],
         accumulated_results: dict[str, StepResult],
         channel: str,
-        pipeline_run_id: UUID,
+        workflow_run_id: UUID,
         mock=None,
         execution_context_id=None,
         application: Optional[str] = None,
@@ -336,7 +336,7 @@ class PipelineExecutor:
                     context=step_context,
 
                     channel=channel,
-                    pipeline_run_id=pipeline_run_id,
+                    workflow_run_id=workflow_run_id,
                     step_name=step.step_name,
                     mock=mock,
                     execution_context_id=execution_context_id,
@@ -348,7 +348,7 @@ class PipelineExecutor:
                     input_data=step_context,
 
                     channel=channel,
-                    pipeline_run_id=pipeline_run_id,
+                    workflow_run_id=workflow_run_id,
                     step_name=step.step_name,
                     mock=mock,
                     execution_context_id=execution_context_id,
@@ -360,7 +360,7 @@ class PipelineExecutor:
                     input_data=step_context,
 
                     channel=channel,
-                    pipeline_run_id=pipeline_run_id,
+                    workflow_run_id=workflow_run_id,
                     step_name=step.step_name,
                     mock=mock,
                     execution_context_id=execution_context_id,

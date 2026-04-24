@@ -76,3 +76,74 @@ class TaskVersionTarget(BaseModel):
     execution_order: int = 1
     description: Optional[str] = None
     created_at: Optional[datetime] = None
+
+
+# ── UNIFIED WIRING (replaces TaskVersionSource / TaskVersionTarget) ──
+# A SourceBinding describes a pre-prompt input resolution for a task or
+# agent version; a WriteTarget describes a post-output write declaration
+# for either kind. WriteTargetPayloadField rows assemble the per-call
+# payload dict the connector receives.
+#
+# These three models drive the unified declarative-I/O path. The older
+# TaskVersionSource / TaskVersionTarget models are retained for the
+# data-migration window and will be removed once existing rows are
+# translated into the new tables.
+
+
+class SourceBinding(BaseModel):
+    """One pre-prompt input resolution for a task or agent version.
+
+    The reference string is the wiring DSL: `input.<path>`,
+    `const:<value>`, or `fetch:<connector>/<method>(input.<field>)`.
+    The runtime parses it into one of those three kinds and either
+    overlays a constant, copies a path from `input_data`, or invokes
+    the connector before binding to the prompt template variable.
+    """
+    id: UUID
+    owner_kind: str   # 'task_version' | 'agent_version'
+    owner_id: UUID
+    template_var: str
+    reference: str
+    required: bool = True
+    execution_order: int = 1
+    description: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+class WriteTarget(BaseModel):
+    """One declared output write on a task or agent version.
+
+    Carries the connector identity (id + denormalised name), the write
+    method, the optional static container, and the required/order
+    metadata. The actual payload is assembled per-call from
+    WriteTargetPayloadField rows that reference this target.
+    """
+    id: UUID
+    owner_kind: str   # 'task_version' | 'agent_version'
+    owner_id: UUID
+    name: str
+    connector_id: UUID
+    connector_name: Optional[str] = None   # populated by joined reads
+    write_method: str
+    container: Optional[str] = None
+    required: bool = False
+    execution_order: int = 1
+    description: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+class WriteTargetPayloadField(BaseModel):
+    """One key in the payload dict the connector receives for a target.
+
+    The reference string follows the same wiring DSL as SourceBinding,
+    but valid prefixes are `input.<path>`, `output.<path>`, or
+    `const:<value>` only. `fetch:` is not allowed on payload fields.
+    """
+    id: UUID
+    write_target_id: UUID
+    payload_field: str
+    reference: str
+    required: bool = True
+    execution_order: int = 1
+    description: Optional[str] = None
+    created_at: Optional[datetime] = None

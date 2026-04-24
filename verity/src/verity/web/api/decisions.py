@@ -64,16 +64,16 @@ def build_decisions_router(verity) -> APIRouter:
         return await verity.get_audit_trail(execution_context_id)
 
     @router.get(
-        "/audit-trail/run/{pipeline_run_id}",
+        "/audit-trail/run/{workflow_run_id}",
         response_model=list[AuditTrailEntry],
     )
     async def get_audit_trail_by_run(
-        pipeline_run_id: UUID,
+        workflow_run_id: UUID,
     ) -> list[AuditTrailEntry]:
         """All decisions from one pipeline_run — the preferred query
-        for replaying a single execution, since pipeline_run_id is
+        for replaying a single execution, since workflow_run_id is
         unique per run (no cross-application collision risk)."""
-        return await verity.get_audit_trail_by_run(pipeline_run_id)
+        return await verity.get_audit_trail_by_run(workflow_run_id)
 
     @router.post("/overrides")
     async def record_override(override: OverrideLogCreate) -> dict:

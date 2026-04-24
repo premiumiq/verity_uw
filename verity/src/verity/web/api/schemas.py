@@ -35,7 +35,7 @@ class RunAgentRequest(BaseModel):
         description="Link this run's decision log row to a pre-created "
                     "execution_context (business-level grouping).",
     )
-    pipeline_run_id: Optional[UUID] = Field(
+    workflow_run_id: Optional[UUID] = Field(
         None,
         description="Link this run to a parent pipeline run (normally "
                     "left null when calling the agent directly).",
@@ -61,7 +61,7 @@ class RunTaskRequest(BaseModel):
     )
     channel: str = "production"
     execution_context_id: Optional[UUID] = None
-    pipeline_run_id: Optional[UUID] = None
+    workflow_run_id: Optional[UUID] = None
     application: Optional[str] = Field(
         None,
         description="Attribution override for the decision log's "

@@ -195,6 +195,69 @@ DELETE FROM task_version_source WHERE task_version_id = %(task_version_id)s;
 DELETE FROM task_version_target WHERE task_version_id = %(task_version_id)s;
 
 
+-- ── UNIFIED WIRING INSERTS ──────────────────────────────────
+-- Replacement for insert_task_version_source / insert_task_version_target.
+-- Same shape works for tasks (owner_kind='task_version') and agents
+-- (owner_kind='agent_version').
+
+-- name: insert_source_binding
+-- One row per (owner, template_var) source declaration. The reference
+-- string carries the wiring DSL (input.<path>, const:<v>, or
+-- fetch:<connector>/<method>(input.<field>)).
+INSERT INTO source_binding (
+    owner_kind, owner_id, template_var, reference,
+    required, execution_order, description
+)
+VALUES (
+    %(owner_kind)s, %(owner_id)s, %(template_var)s, %(reference)s,
+    %(required)s, %(execution_order)s, %(description)s
+)
+RETURNING id, created_at;
+
+
+-- name: insert_write_target
+-- One row per declared output write on a task or agent version. The
+-- payload assembly lives in target_payload_field rows linked back here
+-- via write_target_id.
+INSERT INTO write_target (
+    owner_kind, owner_id, name,
+    connector_id, write_method, container,
+    required, execution_order, description
+)
+VALUES (
+    %(owner_kind)s, %(owner_id)s, %(name)s,
+    %(connector_id)s, %(write_method)s, %(container)s,
+    %(required)s, %(execution_order)s, %(description)s
+)
+RETURNING id, created_at;
+
+
+-- name: insert_target_payload_field
+-- One row per key in the payload dict for a write_target.
+INSERT INTO target_payload_field (
+    write_target_id, payload_field, reference,
+    required, execution_order, description
+)
+VALUES (
+    %(write_target_id)s, %(payload_field)s, %(reference)s,
+    %(required)s, %(execution_order)s, %(description)s
+)
+RETURNING id, created_at;
+
+
+-- name: delete_source_bindings_for_owner
+-- Convenience: clear all source bindings for a (owner_kind, owner_id).
+-- Used during re-registration to wipe and re-seed.
+DELETE FROM source_binding
+WHERE owner_kind = %(owner_kind)s AND owner_id = %(owner_id)s;
+
+
+-- name: delete_write_targets_for_owner
+-- Cascades to target_payload_field rows.
+DELETE FROM write_target
+WHERE owner_kind = %(owner_kind)s AND owner_id = %(owner_id)s;
+
+
 -- name: insert_agent_version_delegation
 -- Record that a parent agent version is authorized to delegate to a
 -- specific child agent (either by name, champion-tracking, or by a

@@ -30,7 +30,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Callable, Optional
+from typing import Any, AsyncGenerator, Callable, Literal, Optional
 from uuid import UUID, uuid4
 
 import anthropic
@@ -184,14 +184,14 @@ class ExecutionEngine:
         parent_agent_version_id: Optional[UUID] = None,
         parent_decision_id: Optional[UUID] = None,
         decision_depth: int = 0,
-        pipeline_run_id: Optional[UUID] = None,
+        workflow_run_id: Optional[UUID] = None,
         execution_context_id: Optional[UUID] = None,
         channel: str = "production",
     ) -> dict[str, Any]:
         """Gateway for all tool calls.
 
         The extra kwargs (parent_agent_version_id, parent_decision_id,
-        decision_depth, pipeline_run_id, execution_context_id, channel)
+        decision_depth, workflow_run_id, execution_context_id, channel)
         exist for FC-1's delegate_to_agent meta-tool — they flow down
         into _dispatch_builtin_tool so a spawned sub-agent inherits the
         parent's correlation ids and the correct depth. All other tool
@@ -263,7 +263,7 @@ class ExecutionEngine:
             parent_agent_version_id=parent_agent_version_id,
             parent_decision_id=parent_decision_id,
             decision_depth=decision_depth,
-            pipeline_run_id=pipeline_run_id,
+            workflow_run_id=workflow_run_id,
             execution_context_id=execution_context_id,
             channel=channel,
         )
@@ -273,7 +273,7 @@ class ExecutionEngine:
         parent_agent_version_id: Optional[UUID] = None,
         parent_decision_id: Optional[UUID] = None,
         decision_depth: int = 0,
-        pipeline_run_id: Optional[UUID] = None,
+        workflow_run_id: Optional[UUID] = None,
         execution_context_id: Optional[UUID] = None,
         channel: str = "production",
     ) -> dict[str, Any]:
@@ -311,7 +311,7 @@ class ExecutionEngine:
                 parent_agent_version_id=parent_agent_version_id,
                 parent_decision_id=parent_decision_id,
                 decision_depth=decision_depth,
-                pipeline_run_id=pipeline_run_id,
+                workflow_run_id=workflow_run_id,
                 execution_context_id=execution_context_id,
                 channel=channel,
             )
@@ -460,7 +460,7 @@ class ExecutionEngine:
         parent_agent_version_id: Optional[UUID] = None,
         parent_decision_id: Optional[UUID] = None,
         decision_depth: int = 0,
-        pipeline_run_id: Optional[UUID] = None,
+        workflow_run_id: Optional[UUID] = None,
         execution_context_id: Optional[UUID] = None,
         channel: str = "production",
     ) -> dict[str, Any]:
@@ -478,7 +478,7 @@ class ExecutionEngine:
                 parent_agent_version_id=parent_agent_version_id,
                 parent_decision_id=parent_decision_id,
                 decision_depth=decision_depth,
-                pipeline_run_id=pipeline_run_id,
+                workflow_run_id=workflow_run_id,
                 execution_context_id=execution_context_id,
                 channel=channel,
             )
@@ -501,7 +501,7 @@ class ExecutionEngine:
         parent_agent_version_id: Optional[UUID] = None,
         parent_decision_id: Optional[UUID] = None,
         decision_depth: int = 0,
-        pipeline_run_id: Optional[UUID] = None,
+        workflow_run_id: Optional[UUID] = None,
         execution_context_id: Optional[UUID] = None,
         channel: str = "production",
     ) -> dict[str, Any]:
@@ -609,7 +609,7 @@ class ExecutionEngine:
                 agent_name=child_name,
                 context=child_context,
                 channel=channel,
-                pipeline_run_id=pipeline_run_id,
+                workflow_run_id=workflow_run_id,
                 parent_decision_id=parent_decision_id,
                 decision_depth=next_depth,
                 step_name=f"delegated_from_depth_{decision_depth}",
@@ -661,7 +661,7 @@ class ExecutionEngine:
         context: dict[str, Any],
 
         channel: str = "production",
-        pipeline_run_id: Optional[UUID] = None,
+        workflow_run_id: Optional[UUID] = None,
         parent_decision_id: Optional[UUID] = None,
         decision_depth: int = 0,
         step_name: Optional[str] = None,
@@ -812,7 +812,7 @@ class ExecutionEngine:
                                 parent_agent_version_id=config.agent_version_id,
                                 parent_decision_id=self_decision_id,
                                 decision_depth=decision_depth,
-                                pipeline_run_id=pipeline_run_id,
+                                workflow_run_id=workflow_run_id,
                                 execution_context_id=execution_context_id,
                                 channel=channel,
                             )
@@ -847,7 +847,7 @@ class ExecutionEngine:
                 total_input_tokens=total_input_tokens,
                 total_output_tokens=total_output_tokens,
                 duration_ms=duration_ms,
-                channel=channel, pipeline_run_id=pipeline_run_id,
+                channel=channel, workflow_run_id=workflow_run_id,
                 parent_decision_id=parent_decision_id,
                 decision_depth=decision_depth, step_name=step_name,
                 status="complete", mock_mode=is_mocked,
@@ -903,7 +903,7 @@ class ExecutionEngine:
                 output={}, output_text="", tool_calls_made=[], message_history=[],
                 total_input_tokens=0, total_output_tokens=0,
                 duration_ms=duration_ms,
-                channel=channel, pipeline_run_id=pipeline_run_id,
+                channel=channel, workflow_run_id=workflow_run_id,
                 parent_decision_id=parent_decision_id,
                 decision_depth=decision_depth, step_name=step_name,
                 status="failed", error_message=str(e),
@@ -946,7 +946,7 @@ class ExecutionEngine:
         input_data: dict[str, Any],
 
         channel: str = "production",
-        pipeline_run_id: Optional[UUID] = None,
+        workflow_run_id: Optional[UUID] = None,
         parent_decision_id: Optional[UUID] = None,
         decision_depth: int = 0,
         step_name: Optional[str] = None,
@@ -954,6 +954,16 @@ class ExecutionEngine:
         stream: bool = False,
         execution_context_id: Optional[UUID] = None,
         application: Optional[str] = None,
+        # Governs declared-target writes after the LLM call succeeds.
+        #   "auto"     — channel-gated: only `champion` writes for real,
+        #                every other channel is log-only. Default.
+        #   "log_only" — forced dry run regardless of channel. Used by
+        #                replay, debugging, shadow comparisons.
+        #   "write"    — forced write regardless of channel. Caller must
+        #                have authority (production callers only).
+        # MockContext.target_blocks still takes precedence: any field in
+        # that set is log-only even under write_mode="write".
+        write_mode: Literal["auto", "log_only", "write"] = "auto",
     ) -> ExecutionResult:
         """Execute a task with single-turn structured output and mock support."""
         logger.info("Task execution starting: %s (step=%s, mock=%s)",
@@ -1052,6 +1062,24 @@ class ExecutionEngine:
                 "\n\n".join(p for p in reasoning_parts if p).strip() or None
             )
 
+            # ── TARGET WRITES ───────────────────────────────────────────
+            # Fire any declared output targets now that we have a valid
+            # output dict. Each target maps an output field to a connector
+            # write. The write gate (channel × write_mode × mock.target_blocks)
+            # decides whether to actually call the connector or just record
+            # a log-only intent. Per-target failures on required targets
+            # raise TargetWriteError and abort the task; partial writes
+            # already made are preserved on the raised exception so the
+            # decision log still captures them.
+            target_writes = await self._write_task_targets(
+                task_version_id=config.task_version_id,
+                task_name=task_name,
+                output=output if isinstance(output, dict) else {},
+                channel=channel,
+                write_mode=write_mode,
+                mock=mock,
+            )
+
             duration_ms = _now_ms() - start_ms
 
             log_result = await self._log_decision(
@@ -1062,13 +1090,14 @@ class ExecutionEngine:
                 total_input_tokens=response.usage.input_tokens,
                 total_output_tokens=response.usage.output_tokens,
                 duration_ms=duration_ms,
-                channel=channel, pipeline_run_id=pipeline_run_id,
+                channel=channel, workflow_run_id=workflow_run_id,
                 parent_decision_id=parent_decision_id,
                 decision_depth=decision_depth, step_name=step_name,
                 status="complete",
                 execution_context_id=execution_context_id,
                 application=application,
                 source_resolutions=source_resolutions or None,
+                target_writes=target_writes or None,
             )
 
             # Single-turn task — one API call, so per_turn_metadata is
@@ -1113,7 +1142,7 @@ class ExecutionEngine:
                 output={}, output_text="", tool_calls_made=[], message_history=[],
                 total_input_tokens=0, total_output_tokens=0,
                 duration_ms=duration_ms,
-                channel=channel, pipeline_run_id=pipeline_run_id,
+                channel=channel, workflow_run_id=workflow_run_id,
                 parent_decision_id=parent_decision_id,
                 decision_depth=decision_depth, step_name=step_name,
                 status="failed", error_message=str(e),
@@ -1122,6 +1151,11 @@ class ExecutionEngine:
                 source_resolutions=(
                     getattr(e, "partial_resolutions", None)
                     or locals().get("source_resolutions")
+                    or None
+                ),
+                target_writes=(
+                    getattr(e, "partial_writes", None)
+                    or locals().get("target_writes")
                     or None
                 ),
             )
@@ -1315,6 +1349,150 @@ class ExecutionEngine:
 
         return template_context, resolutions
 
+    async def _write_task_targets(
+        self,
+        task_version_id: UUID,
+        task_name: str,
+        output: dict[str, Any],
+        channel: str,
+        write_mode: Literal["auto", "log_only", "write"],
+        mock: Optional[MockContext],
+    ) -> list[dict[str, Any]]:
+        """Fire declared output targets for a TaskVersion.
+
+        Walks every row in task_version_target for this version, in
+        execution_order. For each target:
+          1. Look up the value to write at output[output_field_name].
+             Missing value → skip (required=False) or fail (required=True).
+          2. Compute the effective write mode: caller's write_mode,
+             overridden by the channel gate for "auto", overridden again
+             by MockContext.target_blocks to "log_only".
+          3. If the effective mode is "write", call the registered
+             connector's write() and record the returned handle. If
+             "log_only", record the intended write without calling the
+             connector.
+          4. Any connector exception on a required target raises
+             TargetWriteError, carrying partial_writes so the caller's
+             decision log still captures the audit trail.
+
+        Returns a list of write records suitable for the decision log's
+        target_writes JSONB column. Tasks with zero declared targets
+        short-circuit to [] with no DB round-trip.
+        """
+        target_rows = await self.registry.db.fetch_all(
+            "list_task_version_targets",
+            {"task_version_id": str(task_version_id)},
+        )
+        if not target_rows:
+            return []
+
+        from verity.runtime.connectors import (
+            get_provider,
+            ConnectorNotRegistered,
+            TargetWriteError,
+        )
+
+        writes: list[dict[str, Any]] = []
+
+        for row in target_rows:
+            output_field = row["output_field_name"]
+            connector_name = row["connector_name"]
+            write_method = row["write_method"]
+            container = row["target_container"]
+            required = row["required"]
+
+            value = output.get(output_field) if isinstance(output, dict) else None
+
+            # Compute what should actually happen. See _effective_write_mode.
+            effective, reason = _effective_write_mode(
+                write_mode=write_mode,
+                channel=channel,
+                mock_blocked=(mock.is_target_blocked(output_field) if mock else False),
+            )
+
+            base = {
+                "output_field": output_field,
+                "connector": connector_name,
+                "method": write_method,
+                "container": container,
+                "mode": effective,
+                "mode_reason": reason,
+                "mocked": bool(mock and mock.is_target_blocked(output_field)),
+            }
+
+            if value is None:
+                # No value produced — nothing to write. Required targets
+                # fail the task; optional targets just record a skip.
+                if required:
+                    writes.append({
+                        **base, "status": "failed",
+                        "failure_reason": "missing_output_value",
+                    })
+                    raise TargetWriteError(
+                        f"Task '{task_name}' declares required target "
+                        f"'{output_field}' ({connector_name}.{write_method}) "
+                        f"but the output did not contain that field.",
+                        partial_writes=writes,
+                    )
+                writes.append({**base, "status": "skipped_no_value"})
+                logger.info(
+                    "target_skipped task=%s field=%s reason=missing_value",
+                    task_name, output_field,
+                )
+                continue
+
+            size = _payload_size(value)
+
+            # Log-only path: record the intended write, don't call the
+            # connector. This is how validation/test runs audit what
+            # would-have-happened without producing real side effects.
+            if effective == "log_only":
+                writes.append({**base, "status": "logged", "payload_size": size})
+                logger.info(
+                    "target_logged task=%s field=%s connector=%s method=%s size=%s reason=%s",
+                    task_name, output_field, connector_name, write_method, size, reason,
+                )
+                continue
+
+            # Real write path.
+            try:
+                provider = get_provider(connector_name)
+                handle = await provider.write(write_method, container, value)
+            except ConnectorNotRegistered:
+                writes.append({
+                    **base, "status": "failed",
+                    "payload_size": size,
+                    "failure_reason": "connector_not_registered",
+                })
+                if required:
+                    raise
+                continue
+            except Exception as exc:
+                writes.append({
+                    **base, "status": "failed",
+                    "payload_size": size,
+                    "failure_reason": str(exc)[:200],
+                })
+                if required:
+                    raise TargetWriteError(
+                        f"Task '{task_name}' failed to write target "
+                        f"'{output_field}' via {connector_name}.{write_method}: {exc}",
+                        partial_writes=writes,
+                    ) from exc
+                continue
+
+            writes.append({
+                **base, "status": "wrote",
+                "payload_size": size,
+                "handle": handle,
+            })
+            logger.info(
+                "target_wrote task=%s field=%s connector=%s method=%s size=%s handle=%s",
+                task_name, output_field, connector_name, write_method, size, handle,
+            )
+
+        return writes
+
     # ══════════════════════════════════════════════════════════
     # TOOL EXECUTION (standalone, no LLM — for pipeline steps)
     # ══════════════════════════════════════════════════════════
@@ -1325,7 +1503,7 @@ class ExecutionEngine:
         input_data: dict[str, Any],
 
         channel: str = "production",
-        pipeline_run_id: Optional[UUID] = None,
+        workflow_run_id: Optional[UUID] = None,
         parent_decision_id: Optional[UUID] = None,
         decision_depth: int = 0,
         step_name: Optional[str] = None,
@@ -1378,7 +1556,7 @@ class ExecutionEngine:
                 inference_config_snapshot=snapshot,
                 
                 channel=DeploymentChannel(channel),
-                pipeline_run_id=pipeline_run_id,
+                workflow_run_id=workflow_run_id,
                 parent_decision_id=parent_decision_id,
                 decision_depth=decision_depth,
                 step_name=step_name,
@@ -1514,7 +1692,7 @@ class ExecutionEngine:
         total_output_tokens: int,
         duration_ms: int,
         channel: str,
-        pipeline_run_id: Optional[UUID],
+        workflow_run_id: Optional[UUID],
         parent_decision_id: Optional[UUID],
         decision_depth: int,
         step_name: Optional[str],
@@ -1580,7 +1758,7 @@ class ExecutionEngine:
             inference_config_snapshot=snapshot.model_dump() if hasattr(snapshot, 'model_dump') else snapshot,
             channel=DeploymentChannel(channel),
             mock_mode=mock_mode,
-            pipeline_run_id=pipeline_run_id,
+            workflow_run_id=workflow_run_id,
             parent_decision_id=parent_decision_id,
             decision_depth=decision_depth,
             step_name=step_name,
@@ -1696,6 +1874,38 @@ def _assemble_prompts(
 # the logged input with a stub {elided, bytes, preview}. Sized to hold
 # a generous prompt/template but catch anything PDF-sized.
 _LARGE_FIELD_BYTES = 8192
+
+
+def _effective_write_mode(
+    write_mode: Literal["auto", "log_only", "write"],
+    channel: str,
+    mock_blocked: bool,
+) -> tuple[Literal["write", "log_only"], str]:
+    """Resolve the write gate to a concrete (mode, reason) pair.
+
+    Precedence, from strongest to weakest:
+      1. MockContext.target_blocks — an explicit block always wins. Used
+         by validation/test runs to guarantee no side effects regardless
+         of channel or explicit write_mode.
+      2. Caller-supplied `write_mode`: "log_only" and "write" are both
+         explicit overrides with well-defined reasons.
+      3. "auto" mode: write iff channel is champion (the only production
+         channel), log-only for every other channel.
+
+    The returned reason string is stashed in the target_writes audit
+    record so operators can answer "why didn't this write?" without
+    re-deriving the logic.
+    """
+    if mock_blocked:
+        return "log_only", "mock_target_block"
+    if write_mode == "log_only":
+        return "log_only", "write_mode=log_only"
+    if write_mode == "write":
+        return "write", "write_mode=write"
+    # write_mode == "auto" — channel-gated.
+    if channel == "champion":
+        return "write", "auto_channel=champion"
+    return "log_only", f"auto_channel={channel}"
 
 
 def _redact_input_for_log(

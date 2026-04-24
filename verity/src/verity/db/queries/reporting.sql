@@ -177,7 +177,7 @@ SELECT
 -- rate don't decompose cleanly by application so we show them whole.
 SELECT
     (SELECT COUNT(*) FROM approval_record) AS total_approvals,
-    (SELECT COUNT(DISTINCT pipeline_run_id) FROM agent_decision_log WHERE pipeline_run_id IS NOT NULL) AS total_pipeline_runs,
+    (SELECT COUNT(DISTINCT workflow_run_id) FROM agent_decision_log WHERE workflow_run_id IS NOT NULL) AS total_pipeline_runs,
     (SELECT COUNT(*) FROM application) AS app_count,
     (SELECT COUNT(*) FROM agent_version WHERE lifecycle_state IN ('staging', 'shadow', 'challenger')) AS entities_in_review,
     (SELECT COUNT(*) FROM test_execution_log WHERE passed = TRUE) AS tests_passed,
@@ -188,9 +188,9 @@ SELECT
 -- Number of distinct pipeline runs tied to the selected apps (same OR
 -- predicate as dashboard_counts_scoped). Used by the Activity section's
 -- "Pipeline Runs" card.
-SELECT COUNT(DISTINCT pipeline_run_id) AS total_pipeline_runs
+SELECT COUNT(DISTINCT workflow_run_id) AS total_pipeline_runs
 FROM agent_decision_log
-WHERE pipeline_run_id IS NOT NULL
+WHERE workflow_run_id IS NOT NULL
   AND (application = ANY(%(app_names)s::text[])
        OR execution_context_id IN (
               SELECT id FROM execution_context

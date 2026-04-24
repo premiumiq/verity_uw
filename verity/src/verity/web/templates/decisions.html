@@ -5,7 +5,7 @@
   Shows entity, step, run ID, context, application, status, and timing.
 
   DATA PASSED BY ROUTE:
-  - decisions: list of DecisionLog entries (with pipeline_run_id, execution_context_ref, application)
+  - decisions: list of DecisionLog entries (with workflow_run_id, execution_context_ref, application)
   - total: total count of decisions
 -->
 {% extends "base.html" %}
@@ -56,9 +56,9 @@
 
             <!-- Run ID (short format: first 4...last 4) -->
             <td style="font-family: monospace; font-size: 0.7rem;">
-                {% if d.pipeline_run_id %}
-                    <a href="/admin/audit-trail/run/{{ d.pipeline_run_id }}" style="color: var(--verity-blue-deep);">
-                        {{ d.pipeline_run_id | short_id }}
+                {% if d.workflow_run_id %}
+                    <a href="/admin/audit-trail/run/{{ d.workflow_run_id }}" style="color: var(--verity-blue-deep);">
+                        {{ d.workflow_run_id | short_id }}
                     </a>
                 {% else %}
                     —

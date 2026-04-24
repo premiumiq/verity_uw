@@ -5,7 +5,7 @@
   This is the regulatory audit view.
 
   DATA PASSED BY ROUTE (one of):
-  - pipeline_run_id: UUID of one pipeline execution
+  - workflow_run_id: UUID of one pipeline execution
   - execution_context_id: UUID of a business context (spans multiple runs)
   - trail: list of AuditTrailEntry
 -->
@@ -25,8 +25,8 @@
 {% block content %}
 
 <div style="margin-bottom: 16px; font-size: 0.85rem; color: var(--verity-text-light);">
-    {% if pipeline_run_id %}
-    Pipeline Run: <span style="font-family: monospace;">{{ pipeline_run_id[:8] }}...{{ pipeline_run_id[-4:] }}</span>
+    {% if workflow_run_id %}
+    Pipeline Run: <span style="font-family: monospace;">{{ workflow_run_id[:8] }}...{{ workflow_run_id[-4:] }}</span>
     {% elif execution_context_id %}
     Execution Context: <span style="font-family: monospace;">{{ execution_context_id[:8] }}...{{ execution_context_id[-4:] }}</span>
     {% endif %}

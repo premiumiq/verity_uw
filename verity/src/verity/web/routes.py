@@ -748,17 +748,17 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
 
     # ── AUDIT TRAIL ───────────────────────────────────────────
 
-    @router.get("/audit-trail/run/{pipeline_run_id}", response_class=HTMLResponse)
-    async def audit_trail_by_run(request: Request, pipeline_run_id: str):
+    @router.get("/audit-trail/run/{workflow_run_id}", response_class=HTMLResponse)
+    async def audit_trail_by_run(request: Request, workflow_run_id: str):
         """Audit trail for one pipeline execution.
 
         Shows all decisions (steps) from a single pipeline run.
         """
         await verity.ensure_connected()
-        trail = await verity.get_audit_trail_by_run(UUID(pipeline_run_id))
+        trail = await verity.get_audit_trail_by_run(UUID(workflow_run_id))
         return _render(templates, request, "audit_trail.html",
             active_page="decisions",
-            pipeline_run_id=pipeline_run_id,
+            workflow_run_id=workflow_run_id,
             trail=trail,
         )
 
@@ -1048,7 +1048,7 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
 
     @router.get("/pipeline-runs", response_class=HTMLResponse)
     async def pipeline_runs_page(request: Request):
-        """Show all pipeline runs grouped by pipeline_run_id."""
+        """Show all pipeline runs grouped by workflow_run_id."""
         await verity.ensure_connected()
         runs = await verity.db.fetch_all("list_pipeline_runs")
         return _render(templates, request, "pipeline_runs.html",

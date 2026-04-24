@@ -16,7 +16,8 @@
 INSERT INTO agent_decision_log (
     id,
     entity_type, entity_version_id, prompt_version_ids,
-    inference_config_snapshot, channel, mock_mode, pipeline_run_id,
+    inference_config_snapshot, channel, mock_mode,
+    workflow_run_id, execution_run_id,
     parent_decision_id, decision_depth, step_name,
     input_summary, input_json, output_json, output_summary,
     reasoning_text, risk_factors, confidence_score, low_confidence_flag,
@@ -31,7 +32,8 @@ INSERT INTO agent_decision_log (
 VALUES (
     COALESCE(%(id)s::uuid, uuid_generate_v4()),
     %(entity_type)s, %(entity_version_id)s, %(prompt_version_ids)s,
-    %(inference_config_snapshot)s, %(channel)s, %(mock_mode)s, %(pipeline_run_id)s,
+    %(inference_config_snapshot)s, %(channel)s, %(mock_mode)s,
+    %(workflow_run_id)s, %(execution_run_id)s,
     %(parent_decision_id)s, %(decision_depth)s, %(step_name)s,
     %(input_summary)s, %(input_json)s, %(output_json)s, %(output_summary)s,
     %(reasoning_text)s, %(risk_factors)s, %(confidence_score)s, %(low_confidence_flag)s,
@@ -69,7 +71,7 @@ SELECT
     adl.entity_version_id,
     adl.channel,
     adl.mock_mode,
-    adl.pipeline_run_id,
+    adl.workflow_run_id,
     adl.execution_context_id,
     COALESCE(app.display_name, adl.application) AS application,
     adl.parent_decision_id,
@@ -116,7 +118,7 @@ SELECT
     adl.entity_version_id,
     adl.channel,
     adl.mock_mode,
-    adl.pipeline_run_id,
+    adl.workflow_run_id,
     adl.parent_decision_id,
     adl.decision_depth,
     adl.step_name,
@@ -198,16 +200,18 @@ ORDER BY adl.created_at DESC
 LIMIT %(limit)s;
 
 
--- name: list_decisions_by_pipeline_run
--- Audit trail by pipeline_run_id (Verity-owned UUID).
--- This is the correct way to query decisions for a specific execution run.
+-- name: list_decisions_by_workflow_run
+-- Audit trail by workflow_run_id (caller-supplied correlation id grouping
+-- multiple related task/agent calls into one logical workflow invocation).
+-- Renamed from list_decisions_by_pipeline_run now that Verity no longer
+-- owns pipelines; column was renamed workflow_run_id → workflow_run_id.
 SELECT
     adl.id,
     adl.entity_type,
     adl.entity_version_id,
     adl.channel,
     adl.mock_mode,
-    adl.pipeline_run_id,
+    adl.workflow_run_id,
     adl.parent_decision_id,
     adl.decision_depth,
     adl.step_name,
@@ -235,18 +239,18 @@ LEFT JOIN agent_version av ON av.id = adl.entity_version_id AND adl.entity_type 
 LEFT JOIN agent a ON a.id = av.agent_id
 LEFT JOIN task_version tv ON tv.id = adl.entity_version_id AND adl.entity_type = 'task'
 LEFT JOIN task t ON t.id = tv.task_id
-WHERE adl.pipeline_run_id = %(pipeline_run_id)s::uuid
+WHERE adl.workflow_run_id = %(workflow_run_id)s::uuid
 ORDER BY adl.decision_depth, adl.created_at;
 
 
 -- name: list_decisions_by_context
--- All decisions for an execution context (spans multiple pipeline runs).
+-- All decisions for an execution context (spans multiple workflow runs).
 SELECT
     adl.id,
     adl.entity_type,
     adl.entity_version_id,
     adl.channel,
-    adl.pipeline_run_id,
+    adl.workflow_run_id,
     adl.step_name,
     adl.output_summary,
     adl.confidence_score,
@@ -278,7 +282,7 @@ ORDER BY adl.created_at;
 -- users see progress like "2 / 5 steps logged so far" as the run
 -- unfolds.
 SELECT
-    pr.id AS pipeline_run_id,
+    pr.id AS workflow_run_id,
     pr.pipeline_name,
     COALESCE(app.display_name, pr.application) AS application,
     pr.status,
@@ -294,7 +298,7 @@ SELECT
     SUM(COALESCE(adl.duration_ms, 0)) AS logged_duration_ms
 FROM pipeline_run pr
 LEFT JOIN application app ON app.name = pr.application
-LEFT JOIN agent_decision_log adl ON adl.pipeline_run_id = pr.id
+LEFT JOIN agent_decision_log adl ON adl.workflow_run_id = pr.id
 LEFT JOIN agent_version av ON av.id = adl.entity_version_id AND adl.entity_type = 'agent'
 LEFT JOIN agent a ON a.id = av.agent_id
 LEFT JOIN task_version tv ON tv.id = adl.entity_version_id AND adl.entity_type = 'task'
@@ -309,7 +313,7 @@ LIMIT 50;
 -- name: insert_pipeline_run_start
 -- Written at PipelineExecutor entry with status='running'. The id
 -- is caller-supplied (matches the uuid4 already generated for
--- pipeline_run_id on the step decisions) so the agent_decision_log
+-- workflow_run_id on the step decisions) so the agent_decision_log
 -- FKs line up correctly.
 INSERT INTO pipeline_run (
     id, pipeline_name, application, status, started_at,

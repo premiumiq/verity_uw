@@ -74,15 +74,15 @@ class DecisionsReader:
         })
         return [_row_to_audit_entry(r) for r in rows]
 
-    async def get_audit_trail_by_run(self, pipeline_run_id: UUID) -> list[AuditTrailEntry]:
+    async def get_audit_trail_by_run(self, workflow_run_id: UUID) -> list[AuditTrailEntry]:
         """Get the full decision chain for a pipeline run.
 
         This is the CORRECT way to query audit trails — uses Verity's own
-        pipeline_run_id (unique per execution), not the business app's key.
+        workflow_run_id (unique per execution), not the business app's key.
         No cross-application collision possible.
         """
         rows = await self.db.fetch_all("list_decisions_by_pipeline_run", {
-            "pipeline_run_id": str(pipeline_run_id),
+            "workflow_run_id": str(workflow_run_id),
         })
         return [_row_to_audit_entry(r) for r in rows]
 

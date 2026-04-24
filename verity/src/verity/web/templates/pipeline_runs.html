@@ -1,12 +1,12 @@
 <!--
   PIPELINE RUNS PAGE — View all pipeline executions
 
-  Shows distinct pipeline runs grouped by pipeline_run_id,
+  Shows distinct pipeline runs grouped by workflow_run_id,
   with the steps that ran in each. This is the execution-level view
   that sits above individual decisions.
 
   DATA PASSED BY ROUTE:
-  - runs: list of dicts with pipeline_run_id, step count, timestamps, status
+  - runs: list of dicts with workflow_run_id, step count, timestamps, status
 -->
 {% extends "base.html" %}
 
@@ -44,8 +44,8 @@
         {% for run in runs %}
         <tr>
             <td style="font-family: monospace; font-size: 0.75rem;">
-                <a href="/admin/audit-trail/run/{{ run.pipeline_run_id }}" style="color: var(--verity-blue-deep);">
-                    {{ run.pipeline_run_id | short_id }}
+                <a href="/admin/audit-trail/run/{{ run.workflow_run_id }}" style="color: var(--verity-blue-deep);">
+                    {{ run.workflow_run_id | short_id }}
                 </a>
             </td>
             <td style="font-size: 0.8rem; font-weight: 500;">
@@ -104,7 +104,7 @@
             </td>
             <td>{{ run.started_at.strftime('%m-%d %H:%M') if run.started_at else '—' }}</td>
             <td>
-                <a href="/admin/audit-trail/run/{{ run.pipeline_run_id }}" class="verity-btn verity-btn-secondary verity-btn-sm">
+                <a href="/admin/audit-trail/run/{{ run.workflow_run_id }}" class="verity-btn verity-btn-secondary verity-btn-sm">
                     View Steps
                 </a>
             </td>

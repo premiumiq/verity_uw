@@ -2154,7 +2154,7 @@ async def seed_decisions(verity, agent_versions, task_versions):
          "triage_balanced", "claude-sonnet-4-20250514", 0.2, 4096),
     ]
 
-    # Fixed pipeline_run_id per submission — predictable so the UW app
+    # Fixed workflow_run_id per submission — predictable so the UW app
     # can reference them in SUBMISSIONS list for "View in Verity" links.
     # These are Verity-owned IDs, not business keys.
     PIPELINE_RUN_IDS = {
@@ -2174,9 +2174,9 @@ async def seed_decisions(verity, agent_versions, task_versions):
     seed_started_at = datetime.now(timezone.utc)
     synth_total_duration = sum(2000 + (i * 300) for i in range(len(step_configs)))
     for sub in submissions:
-        pipeline_run_id = PIPELINE_RUN_IDS[sub["id"]]
+        workflow_run_id = PIPELINE_RUN_IDS[sub["id"]]
         await verity.db.execute_returning("insert_pipeline_run_start", {
-            "id": pipeline_run_id,
+            "id": workflow_run_id,
             "pipeline_name": "uw_document_processing",
             "application": "uw_demo",
             "started_at": seed_started_at,
@@ -2184,7 +2184,7 @@ async def seed_decisions(verity, agent_versions, task_versions):
             "execution_context_id": None,
         })
         await verity.db.execute("update_pipeline_run_complete", {
-            "id": pipeline_run_id,
+            "id": workflow_run_id,
             "status": "complete",
             "completed_at": seed_started_at,
             "duration_ms": synth_total_duration,
@@ -2198,7 +2198,7 @@ async def seed_decisions(verity, agent_versions, task_versions):
     override_decisions = []
 
     for sub in submissions:
-        pipeline_run_id = PIPELINE_RUN_IDS[sub["id"]]
+        workflow_run_id = PIPELINE_RUN_IDS[sub["id"]]
         for step_name, entity_type, version_id, output_key, config_name, model, temp, max_tok in step_configs:
             output = sub[output_key]
 
@@ -2211,7 +2211,7 @@ async def seed_decisions(verity, agent_versions, task_versions):
                 prompt_version_ids=[],
                 inference_config_snapshot={"config_name": config_name, "model_name": model, "temperature": temp, "max_tokens": max_tok},
                 channel=DeploymentChannel.PRODUCTION,
-                pipeline_run_id=pipeline_run_id,
+                workflow_run_id=workflow_run_id,
                 parent_decision_id=None,
                 decision_depth=0,
                 step_name=step_name,

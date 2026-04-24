@@ -40,7 +40,11 @@ class DecisionLogCreate(BaseModel):
     inference_config_snapshot: dict[str, Any]
     channel: DeploymentChannel = DeploymentChannel.PRODUCTION
     mock_mode: bool = False
-    pipeline_run_id: Optional[UUID] = None
+    workflow_run_id: Optional[UUID] = None
+    # FK into the event-sourced execution_run lifecycle ledger. Populated
+    # for any decision produced from a run submitted through the async
+    # API; null for legacy synchronous calls.
+    execution_run_id: Optional[UUID] = None
     parent_decision_id: Optional[UUID] = None
     decision_depth: int = 0
     step_name: Optional[str] = None
