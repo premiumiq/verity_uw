@@ -1012,23 +1012,52 @@ class ExecutionEngine:
             # registered one) so tool-level mocking doesn't apply either.
             response = await self._gateway_llm_call(api_params, mock=mock)
 
-            # Extract output
-            if tool_choice and response.content:
-                output = {}
-                for block in response.content:
-                    if block.type == "tool_use" and block.name == "structured_output":
-                        output = block.input
-                        break
+            # Walk the response content blocks once. Claude's response is a
+            # list of typed pieces: `thinking` blocks (extended thinking
+            # mode), `text` blocks (narrative / chain-of-thought), and
+            # `tool_use` blocks (the structured answer when we forced
+            # structured_output via tool_choice).
+            #
+            # Reasoning is captured unconditionally from thinking + text
+            # blocks — a task either has a structured answer alongside
+            # the narrative (tool_choice path) or the narrative IS the
+            # answer (non-tool_choice path). We separate them below.
+            thinking_parts: list[str] = []
+            text_parts: list[str] = []
+            tool_output: dict = {}
+            for block in (response.content or []):
+                btype = getattr(block, "type", None)
+                if btype == "thinking":
+                    thinking_parts.append(getattr(block, "thinking", "") or "")
+                elif btype == "text":
+                    text_parts.append(getattr(block, "text", "") or "")
+                elif btype == "tool_use" and getattr(block, "name", None) == "structured_output":
+                    tool_output = getattr(block, "input", {}) or {}
+
+            if tool_choice:
+                # Structured output path: tool_use carries the answer,
+                # narrative text blocks (and any thinking blocks) are the
+                # reasoning alongside it.
+                output = tool_output
                 output_text = json.dumps(output)
+                reasoning_parts = thinking_parts + text_parts
             else:
-                output_text = _extract_text(response)
-                output = _try_parse_json(output_text)
+                # Free-form path: the concatenated text IS the answer.
+                # Only thinking blocks count as separate reasoning.
+                output_text = "\n\n".join(text_parts)
+                output = _try_parse_json(output_text) if output_text else {}
+                reasoning_parts = thinking_parts
+
+            reasoning_text: Optional[str] = (
+                "\n\n".join(p for p in reasoning_parts if p).strip() or None
+            )
 
             duration_ms = _now_ms() - start_ms
 
             log_result = await self._log_decision(
                 entity_type=EntityType.TASK, config=config, context=input_data,
                 output=output, output_text=output_text,
+                reasoning_text=reasoning_text,
                 tool_calls_made=[], message_history=[],
                 total_input_tokens=response.usage.input_tokens,
                 total_output_tokens=response.usage.output_tokens,
@@ -1508,6 +1537,12 @@ class ExecutionEngine:
         # agent_decision_log for later querying and replay.
         source_resolutions: Optional[list[dict]] = None,
         target_writes: Optional[list[dict]] = None,
+        # Explicit reasoning text captured by the caller. For tasks with
+        # structured output via tool_choice this is Claude's chain-of-thought
+        # text block emitted before the forced tool_use. For agents emitting
+        # a prose final turn this is that text. None means the model did
+        # not produce any narrative alongside the structured answer.
+        reasoning_text: Optional[str] = None,
     ) -> dict:
         """Create a decision log entry with full snapshot.
 
@@ -1547,7 +1582,16 @@ class ExecutionEngine:
             input_json=context if isinstance(context, dict) else None,
             output_json=output if isinstance(output, dict) else None,
             output_summary=output_text[:500] if output_text else None,
-            reasoning_text=(output.get("reasoning", output_text[:1000]) if isinstance(output, dict) else output_text[:1000]) if output_text else None,
+            # Reasoning precedence: explicit reasoning_text from the caller
+            # (captured from Claude's text block before a forced tool_use)
+            # wins; otherwise fall back to a `reasoning` field the structured
+            # output dict might carry. No silent fallback to output_text —
+            # that produced a duplicate of output_summary for tasks whose
+            # output had no reasoning field.
+            reasoning_text=(
+                reasoning_text
+                or (output.get("reasoning") if isinstance(output, dict) else None)
+            ),
             risk_factors=output.get("risk_factors") if isinstance(output, dict) else None,
             confidence_score=output.get("confidence") if isinstance(output, dict) else None,
             model_used=config.inference_config.model_name if hasattr(config, 'inference_config') else None,
