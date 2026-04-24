@@ -27,6 +27,7 @@ mock_mode=True is set whenever any caller-supplied mocking was active.
 import asyncio
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -980,9 +981,10 @@ class ExecutionEngine:
         # checked first, then the connector fetch is invoked. Resolution
         # is eager; failures are hard failures. See
         # verity.runtime.connectors for the provider contract.
-        template_context, source_resolutions = await self._resolve_task_sources(
-            task_version_id=config.task_version_id,
-            task_name=task_name,
+        template_context, source_resolutions = await self._resolve_sources(
+            version_id=config.task_version_id,
+            owner_kind="task_version",
+            entity_name=task_name,
             input_data=input_data,
             mock=mock,
         )
@@ -1071,9 +1073,11 @@ class ExecutionEngine:
             # raise TargetWriteError and abort the task; partial writes
             # already made are preserved on the raised exception so the
             # decision log still captures them.
-            target_writes = await self._write_task_targets(
-                task_version_id=config.task_version_id,
-                task_name=task_name,
+            target_writes = await self._write_targets(
+                version_id=config.task_version_id,
+                owner_kind="task_version",
+                entity_name=task_name,
+                input_data=input_data,
                 output=output if isinstance(output, dict) else {},
                 channel=channel,
                 write_mode=write_mode,
@@ -1171,217 +1175,223 @@ class ExecutionEngine:
     # TASK SOURCE RESOLUTION (pre-prompt, declarative I/O for Tasks)
     # ══════════════════════════════════════════════════════════
 
-    async def _resolve_task_sources(
+    async def _resolve_sources(
         self,
-        task_version_id: UUID,
-        task_name: str,
+        version_id: UUID,
+        owner_kind: str,   # 'task_version' | 'agent_version'
+        entity_name: str,
         input_data: dict[str, Any],
         mock: Optional[MockContext],
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        """Resolve declared data sources for a TaskVersion.
+        """Resolve declared source bindings for a task or agent version.
 
-        Walks every row in task_version_source for this version, in
-        execution_order. For each source:
-          1. Pull the caller-supplied reference from input_data under
-             the declared input_field_name.
-          2. If a source mock is registered for this field, bind its
-             payload to the mapped template variable and skip the
-             connector.
-          3. Otherwise, look up the registered provider for the source's
-             connector and call provider.fetch(method, ref). Bind the
-             returned payload to the mapped template variable.
+        Reads source_binding rows for (owner_kind, version_id), parses
+        each `reference` string in the wiring DSL, and assembles a
+        template context by overlaying the resolved values onto a copy
+        of input_data. Connector-fetch references hit the registered
+        provider; input./const: references are pure data lookups.
 
-        Returns (template_context, resolutions) where:
-          - template_context is input_data with resolved template vars
-            merged in (caller-supplied vars stay as-is).
-          - resolutions is a list of dicts describing what happened for
-            each source — feeds the decision log and the envelope's
-            telemetry.sources_resolved.
+        Returns (template_context, resolutions):
+          - template_context — input_data with resolved template_vars merged in.
+          - resolutions      — audit list, one entry per binding, with
+                                shape suitable for the decision log's
+                                source_resolutions JSONB column.
+
+        Mocking semantics: for `fetch:` references, the binding's input
+        field name (the part inside `input.<...>`) is used as the
+        MockContext key, preserving the existing per-source mock
+        registration shape.
 
         Raises:
-          - SourceResolutionError: a required source's ref was missing
-            or its connector fetch raised.
-          - ConnectorNotRegistered: the TaskVersion names a connector
-            that no provider has been registered for.
+          - SourceResolutionError: a required binding could not be
+            resolved (missing input value, connector failure, malformed
+            reference).
+          - ConnectorNotRegistered: the binding's connector isn't
+            registered.
 
-        Tasks with zero declared sources (the default today) short-circuit
-        to (input_data, []) with no DB calls or logging noise.
+        Entities with zero declared bindings short-circuit to
+        (input_data, []) with no DB or audit noise.
         """
-        # Fast path: avoid the DB round-trip when no sources are declared.
-        # Source rows are loaded per-call here — a per-version cache
-        # alongside TaskConfig resolution would trim the query on hot
-        # paths, but the current per-call read is simpler and not a
-        # measurable cost for UW's traffic.
-        source_rows = await self.registry.db.fetch_all(
-            "list_task_version_sources",
-            {"task_version_id": str(task_version_id)},
+        rows = await self.registry.db.fetch_all(
+            "list_source_bindings",
+            {"owner_kind": owner_kind, "owner_id": str(version_id)},
         )
-        if not source_rows:
+        if not rows:
             return dict(input_data), []
 
-        # Local imports avoid any top-level dependency reshuffle; these
-        # modules may not be imported in every Verity deployment profile.
         from verity.runtime.connectors import (
             get_provider,
             ConnectorNotRegistered,
             SourceResolutionError,
         )
 
+        async def _connector_fetch(connector_name: str, method: str, ref_value: Any) -> Any:
+            provider = get_provider(connector_name)
+            return await provider.fetch(method, ref_value)
+
         template_context = dict(input_data)
         resolutions: list[dict[str, Any]] = []
+        scopes = {"input": input_data}
 
-        for row in source_rows:
-            input_field = row["input_field_name"]
-            template_var = row["maps_to_template_var"]
-            connector_name = row["connector_name"]
-            fetch_method = row["fetch_method"]
+        for row in rows:
+            template_var = row["template_var"]
+            reference_str = row["reference"]
             required = row["required"]
 
-            ref = input_data.get(input_field)
-            if ref is None:
-                if required:
-                    resolutions.append({
-                        "input_field": input_field,
-                        "template_var": template_var,
-                        "connector": connector_name,
-                        "method": fetch_method,
-                        "status": "failed",
-                        "mocked": False,
-                        "failure_reason": "missing_ref",
-                    })
-                    raise SourceResolutionError(
-                        f"Task '{task_name}' declares required source "
-                        f"'{input_field}' (→ {{{{{template_var}}}}}) but the "
-                        f"caller did not provide a value under that key.",
-                        partial_resolutions=resolutions,
-                    )
-                # Optional source with no ref — skip silently, record for audit.
-                resolutions.append({
-                    "input_field": input_field,
-                    "template_var": template_var,
-                    "connector": connector_name,
-                    "method": fetch_method,
-                    "status": "skipped_no_ref",
-                    "mocked": False,
-                })
-                continue
-
-            # Source mock takes precedence over the real connector.
-            is_mocked, mock_payload = (False, None)
-            if mock is not None:
-                is_mocked, mock_payload = mock.get_source_response(input_field)
-
-            if is_mocked:
-                template_context[template_var] = mock_payload
-                size = _payload_size(mock_payload)
-                resolutions.append({
-                    "input_field": input_field,
-                    "template_var": template_var,
-                    "connector": connector_name,
-                    "method": fetch_method,
-                    "ref_summary": _ref_summary(ref),
-                    "status": "resolved",
-                    "mocked": True,
-                    "payload_size": size,
-                })
-                logger.info(
-                    "source_resolved task=%s field=%s connector=%s method=%s mocked=True size=%s",
-                    task_name, input_field, connector_name, fetch_method, size,
-                )
-                continue
-
-            # Real connector fetch. Any provider-side error is surfaced as
-            # SourceResolutionError so the Task fails cleanly and the
-            # decision log records the failure reason. We record a
-            # "failed" resolution entry on the list before re-raising so
-            # partial audit trail is preserved even when resolution blows
-            # up mid-stream — the caller stashes self._partial_resolutions
-            # into the decision log's source_resolutions column.
+            # Parse upfront — a bad reference is registration-level data,
+            # so a failure here is structural and must abort.
             try:
-                provider = get_provider(connector_name)
-                payload = await provider.fetch(fetch_method, ref)
+                parsed = _parse_reference(reference_str)
+            except ValueError as exc:
+                resolutions.append({
+                    "template_var": template_var,
+                    "reference": reference_str,
+                    "kind": "unknown",
+                    "status": "failed",
+                    "mocked": False,
+                    "failure_reason": f"parse_error: {exc}",
+                })
+                raise SourceResolutionError(
+                    f"{owner_kind} '{entity_name}' has a malformed source "
+                    f"reference for template_var={template_var!r}: {exc}",
+                    partial_resolutions=resolutions,
+                ) from exc
+
+            # Build a base record. Fetch-kind records carry the connector
+            # info so audit views can show 'edms.get_document_text' at a
+            # glance; input/const records carry just the kind.
+            base: dict[str, Any] = {
+                "template_var": template_var,
+                "reference": reference_str,
+                "kind": parsed.kind,
+            }
+            if parsed.kind == "fetch":
+                base["input_field"] = parsed.arg_path
+                base["connector"] = parsed.connector
+                base["method"] = parsed.method
+                # MockContext keys per-source mocks by the input field
+                # name; preserve that for backward compat.
+                if mock is not None:
+                    is_mocked, mock_payload = mock.get_source_response(parsed.arg_path)
+                    if is_mocked:
+                        template_context[template_var] = mock_payload
+                        size = _payload_size(mock_payload)
+                        resolutions.append({
+                            **base,
+                            "ref_summary": _ref_summary(input_data.get(parsed.arg_path)),
+                            "status": "resolved",
+                            "mocked": True,
+                            "payload_size": size,
+                        })
+                        logger.info(
+                            "source_resolved entity=%s template_var=%s "
+                            "kind=fetch connector=%s method=%s mocked=True size=%s",
+                            entity_name, template_var, parsed.connector,
+                            parsed.method, size,
+                        )
+                        continue
+
+            # Real resolution.
+            try:
+                value = await _resolve_reference(parsed, scopes, _connector_fetch)
             except ConnectorNotRegistered:
                 resolutions.append({
-                    "input_field": input_field,
-                    "template_var": template_var,
-                    "connector": connector_name,
-                    "method": fetch_method,
-                    "ref_summary": _ref_summary(ref),
+                    **base,
+                    "ref_summary": _ref_summary(
+                        input_data.get(parsed.arg_path) if parsed.kind == "fetch" else None
+                    ),
                     "status": "failed",
                     "mocked": False,
                     "failure_reason": "connector_not_registered",
                 })
                 raise
-            except Exception as exc:  # connector-level failure
+            except Exception as exc:
                 resolutions.append({
-                    "input_field": input_field,
-                    "template_var": template_var,
-                    "connector": connector_name,
-                    "method": fetch_method,
-                    "ref_summary": _ref_summary(ref),
+                    **base,
+                    "ref_summary": _ref_summary(
+                        input_data.get(parsed.arg_path) if parsed.kind == "fetch" else None
+                    ),
                     "status": "failed",
                     "mocked": False,
                     "failure_reason": str(exc)[:200],
                 })
                 raise SourceResolutionError(
-                    f"Task '{task_name}' failed to resolve source "
-                    f"'{input_field}' via {connector_name}.{fetch_method}"
-                    f"(ref={_ref_summary(ref)!r}): {exc}",
+                    f"{owner_kind} '{entity_name}' failed to resolve source "
+                    f"'{template_var}' via {reference_str!r}: {exc}",
                     partial_resolutions=resolutions,
                 ) from exc
 
-            template_context[template_var] = payload
-            size = _payload_size(payload)
-            resolutions.append({
-                "input_field": input_field,
-                "template_var": template_var,
-                "connector": connector_name,
-                "method": fetch_method,
-                "ref_summary": _ref_summary(ref),
-                "status": "resolved",
-                "mocked": False,
+            # Missing input/fetch arg path. Required → fail; optional → skip.
+            if value is _MISSING:
+                if required:
+                    resolutions.append({
+                        **base, "status": "failed", "mocked": False,
+                        "failure_reason": "missing_value",
+                    })
+                    raise SourceResolutionError(
+                        f"{owner_kind} '{entity_name}' declares required "
+                        f"source '{template_var}' (reference={reference_str!r}) "
+                        f"but the caller did not provide a resolvable value.",
+                        partial_resolutions=resolutions,
+                    )
+                resolutions.append({
+                    **base, "status": "skipped_no_ref", "mocked": False,
+                })
+                continue
+
+            template_context[template_var] = value
+            size = _payload_size(value)
+            resolution: dict[str, Any] = {
+                **base, "status": "resolved", "mocked": False,
                 "payload_size": size,
-            })
+            }
+            if parsed.kind == "fetch":
+                resolution["ref_summary"] = _ref_summary(
+                    input_data.get(parsed.arg_path)
+                )
+            resolutions.append(resolution)
             logger.info(
-                "source_resolved task=%s field=%s connector=%s method=%s mocked=False size=%s",
-                task_name, input_field, connector_name, fetch_method, size,
+                "source_resolved entity=%s template_var=%s kind=%s size=%s",
+                entity_name, template_var, parsed.kind, size,
             )
 
         return template_context, resolutions
 
-    async def _write_task_targets(
+    async def _write_targets(
         self,
-        task_version_id: UUID,
-        task_name: str,
+        version_id: UUID,
+        owner_kind: str,   # 'task_version' | 'agent_version'
+        entity_name: str,
+        input_data: dict[str, Any],
         output: dict[str, Any],
         channel: str,
         write_mode: Literal["auto", "log_only", "write"],
         mock: Optional[MockContext],
     ) -> list[dict[str, Any]]:
-        """Fire declared output targets for a TaskVersion.
+        """Fire declared output targets for a task or agent version.
 
-        Walks every row in task_version_target for this version, in
-        execution_order. For each target:
-          1. Look up the value to write at output[output_field_name].
-             Missing value → skip (required=False) or fail (required=True).
-          2. Compute the effective write mode: caller's write_mode,
-             overridden by the channel gate for "auto", overridden again
-             by MockContext.target_blocks to "log_only".
-          3. If the effective mode is "write", call the registered
-             connector's write() and record the returned handle. If
-             "log_only", record the intended write without calling the
-             connector.
-          4. Any connector exception on a required target raises
-             TargetWriteError, carrying partial_writes so the caller's
-             decision log still captures the audit trail.
+        For each write_target (in execution_order):
+          1. Compute the effective write mode (channel × write_mode ×
+             MockContext.target_blocks). See `_effective_write_mode`.
+          2. Load the per-field target_payload_field rows and assemble
+             the payload dict via `_build_target_payload` (resolves
+             references against {input, output}).
+          3. If effective mode is 'write', call the registered
+             connector's write(). If 'log_only', record the intended
+             write without calling the connector.
+
+        Connector exceptions on required targets raise TargetWriteError
+        carrying partial_writes so the caller's decision log still
+        captures the audit trail. Optional-target failures are recorded
+        but do not abort.
 
         Returns a list of write records suitable for the decision log's
-        target_writes JSONB column. Tasks with zero declared targets
+        target_writes JSONB column. Entities with zero declared targets
         short-circuit to [] with no DB round-trip.
         """
         target_rows = await self.registry.db.fetch_all(
-            "list_task_version_targets",
-            {"task_version_id": str(task_version_id)},
+            "list_write_targets",
+            {"owner_kind": owner_kind, "owner_id": str(version_id)},
         )
         if not target_rows:
             return []
@@ -1394,70 +1404,73 @@ class ExecutionEngine:
 
         writes: list[dict[str, Any]] = []
 
-        for row in target_rows:
-            output_field = row["output_field_name"]
+        # Sort by execution_order so the audit list reflects declared
+        # ordering. The SQL already orders, but a defensive sort keeps
+        # the semantics if the query shape changes.
+        for row in sorted(target_rows, key=lambda r: r.get("execution_order", 1)):
+            target_id = row["id"]
+            target_name = row["name"]
             connector_name = row["connector_name"]
             write_method = row["write_method"]
-            container = row["target_container"]
+            container = row["container"]
             required = row["required"]
 
-            value = output.get(output_field) if isinstance(output, dict) else None
-
-            # Compute what should actually happen. See _effective_write_mode.
+            mock_blocked = bool(mock and mock.is_target_blocked(target_name))
             effective, reason = _effective_write_mode(
-                write_mode=write_mode,
-                channel=channel,
-                mock_blocked=(mock.is_target_blocked(output_field) if mock else False),
+                write_mode=write_mode, channel=channel, mock_blocked=mock_blocked,
             )
 
             base = {
-                "output_field": output_field,
+                "target_name": target_name,
                 "connector": connector_name,
                 "method": write_method,
                 "container": container,
                 "mode": effective,
                 "mode_reason": reason,
-                "mocked": bool(mock and mock.is_target_blocked(output_field)),
+                "mocked": mock_blocked,
             }
 
-            if value is None:
-                # No value produced — nothing to write. Required targets
-                # fail the task; optional targets just record a skip.
+            # Assemble the payload by walking target_payload_field rows.
+            field_rows = await self.registry.db.fetch_all(
+                "list_target_payload_fields",
+                {"write_target_id": str(target_id)},
+            )
+            try:
+                payload = _build_target_payload(field_rows, input_data, output)
+            except ValueError as exc:
+                writes.append({
+                    **base, "status": "failed",
+                    "failure_reason": f"payload_assembly: {exc}",
+                })
                 if required:
-                    writes.append({
-                        **base, "status": "failed",
-                        "failure_reason": "missing_output_value",
-                    })
                     raise TargetWriteError(
-                        f"Task '{task_name}' declares required target "
-                        f"'{output_field}' ({connector_name}.{write_method}) "
-                        f"but the output did not contain that field.",
+                        f"{owner_kind} '{entity_name}' failed to assemble payload "
+                        f"for target '{target_name}': {exc}",
                         partial_writes=writes,
-                    )
-                writes.append({**base, "status": "skipped_no_value"})
+                    ) from exc
                 logger.info(
-                    "target_skipped task=%s field=%s reason=missing_value",
-                    task_name, output_field,
+                    "target_skipped entity=%s target=%s reason=%s",
+                    entity_name, target_name, exc,
                 )
                 continue
 
-            size = _payload_size(value)
+            size = _payload_size(payload)
 
-            # Log-only path: record the intended write, don't call the
-            # connector. This is how validation/test runs audit what
-            # would-have-happened without producing real side effects.
+            # Log-only path — record the intended write but skip the
+            # connector. Validation runs and non-champion channels land
+            # here.
             if effective == "log_only":
                 writes.append({**base, "status": "logged", "payload_size": size})
                 logger.info(
-                    "target_logged task=%s field=%s connector=%s method=%s size=%s reason=%s",
-                    task_name, output_field, connector_name, write_method, size, reason,
+                    "target_logged entity=%s target=%s connector=%s method=%s size=%s reason=%s",
+                    entity_name, target_name, connector_name, write_method, size, reason,
                 )
                 continue
 
-            # Real write path.
+            # Real write.
             try:
                 provider = get_provider(connector_name)
-                handle = await provider.write(write_method, container, value)
+                handle = await provider.write(write_method, container, payload)
             except ConnectorNotRegistered:
                 writes.append({
                     **base, "status": "failed",
@@ -1475,8 +1488,8 @@ class ExecutionEngine:
                 })
                 if required:
                     raise TargetWriteError(
-                        f"Task '{task_name}' failed to write target "
-                        f"'{output_field}' via {connector_name}.{write_method}: {exc}",
+                        f"{owner_kind} '{entity_name}' failed to write target "
+                        f"'{target_name}' via {connector_name}.{write_method}: {exc}",
                         partial_writes=writes,
                     ) from exc
                 continue
@@ -1487,8 +1500,8 @@ class ExecutionEngine:
                 "handle": handle,
             })
             logger.info(
-                "target_wrote task=%s field=%s connector=%s method=%s size=%s handle=%s",
-                task_name, output_field, connector_name, write_method, size, handle,
+                "target_wrote entity=%s target=%s connector=%s method=%s size=%s handle=%s",
+                entity_name, target_name, connector_name, write_method, size, handle,
             )
 
         return writes
@@ -1906,6 +1919,202 @@ def _effective_write_mode(
     if channel == "champion":
         return "write", "auto_channel=champion"
     return "log_only", f"auto_channel={channel}"
+
+
+# ══════════════════════════════════════════════════════════════
+# WIRING DSL — reference parsing and resolution
+# ══════════════════════════════════════════════════════════════
+# A wiring reference is a string that describes how one field in a
+# source binding (input resolution) or target payload field (output
+# write) gets its value. Four kinds:
+#
+#   input.<dotted.path[i]>
+#       Pull a value from the unit's own input dict.
+#   output.<dotted.path[i]>
+#       Pull a value from the unit's own structured output (target
+#       payload only — sources are resolved before output exists).
+#   const:<literal>
+#       Bake a literal in. The value is the part after the colon.
+#   fetch:<connector>/<method>(input.<field>)
+#       Resolve via a registered connector. Sources only — payloads
+#       can't fetch.
+#
+# Path grammar: dotted keys + bracketed integer indices,
+# e.g. `documents[0].kind`. No JSONPath, no arithmetic, no conditionals.
+
+# Sentinel for "the path didn't resolve in the supplied scope." Distinct
+# from None (which is a legitimate value a path can resolve to).
+_MISSING = object()
+
+
+@dataclass(frozen=True)
+class _ParsedReference:
+    """Typed result of parsing a wiring DSL reference string.
+
+    Only the fields relevant to `kind` are populated:
+      kind='input' | 'output' → path
+      kind='const'            → value
+      kind='fetch'            → connector, method, arg_path
+                                (arg_path is the dotted path inside input.*)
+    """
+    kind: str  # 'input' | 'output' | 'const' | 'fetch'
+    raw: str
+    path: Optional[str] = None
+    value: Optional[str] = None
+    connector: Optional[str] = None
+    method: Optional[str] = None
+    arg_path: Optional[str] = None
+
+
+# Pre-compiled to keep the parse hot path cheap.
+_FETCH_RE = re.compile(
+    r"^fetch:(?P<connector>[A-Za-z0-9_\-]+)/(?P<method>[A-Za-z0-9_]+)"
+    r"\(input\.(?P<arg>[A-Za-z0-9_.\[\]]+)\)$"
+)
+_BRACKET_INDEX_RE = re.compile(r"\[(\d+)\]")
+
+
+def _parse_reference(ref: str) -> _ParsedReference:
+    """Parse a wiring DSL reference string. Raises ValueError on malformed input."""
+    if not isinstance(ref, str):
+        raise ValueError(f"reference must be a string, got {type(ref).__name__}")
+    if ref.startswith("input."):
+        return _ParsedReference(kind="input", raw=ref, path=ref[len("input."):])
+    if ref.startswith("output."):
+        return _ParsedReference(kind="output", raw=ref, path=ref[len("output."):])
+    if ref.startswith("const:"):
+        return _ParsedReference(kind="const", raw=ref, value=ref[len("const:"):])
+    m = _FETCH_RE.match(ref)
+    if m:
+        return _ParsedReference(
+            kind="fetch", raw=ref,
+            connector=m.group("connector"),
+            method=m.group("method"),
+            arg_path=m.group("arg"),
+        )
+    raise ValueError(
+        f"Unknown reference shape: {ref!r}. Expected one of: "
+        "'input.<path>', 'output.<path>', 'const:<value>', "
+        "'fetch:<connector>/<method>(input.<field>)'."
+    )
+
+
+def _walk_path(obj: Any, path: str) -> Any:
+    """Walk a dotted+indexed path into a dict/list. Returns _MISSING if any segment is absent.
+
+    Examples:
+      _walk_path({"a": {"b": 1}}, "a.b") -> 1
+      _walk_path({"docs": [{"k": "x"}]}, "docs[0].k") -> "x"
+      _walk_path({}, "a.b") -> _MISSING
+    """
+    if not path:
+        return obj
+    # Normalize bracketed indices into dotted segments.
+    norm = _BRACKET_INDEX_RE.sub(r".\1", path)
+    cursor = obj
+    for part in norm.split("."):
+        if part == "":
+            continue
+        if isinstance(cursor, dict):
+            if part in cursor:
+                cursor = cursor[part]
+            else:
+                return _MISSING
+        elif isinstance(cursor, list):
+            try:
+                idx = int(part)
+            except ValueError:
+                return _MISSING
+            if 0 <= idx < len(cursor):
+                cursor = cursor[idx]
+            else:
+                return _MISSING
+        else:
+            # Hit a leaf before the path ended.
+            return _MISSING
+    return cursor
+
+
+async def _resolve_reference(
+    parsed: _ParsedReference,
+    scopes: dict[str, Any],
+    connector_fetch: Optional[Callable[..., Any]] = None,
+) -> Any:
+    """Resolve a parsed reference against the supplied scopes.
+
+    `scopes` is a bag like `{"input": <input_data>, "output": <output_data>}`.
+    Either key may be absent; missing scope is treated like a missing
+    path. Returns the resolved value, or _MISSING if the path didn't
+    resolve.
+
+    For `fetch:` references, the caller must pass `connector_fetch` —
+    an async callable `(connector_name, method, ref_value) -> payload`.
+    Source resolution wires this up to the registered ConnectorProvider;
+    target payload assembly never passes one (payloads can't fetch).
+    """
+    if parsed.kind == "const":
+        return parsed.value
+    if parsed.kind == "input":
+        return _walk_path(scopes.get("input", {}), parsed.path)
+    if parsed.kind == "output":
+        return _walk_path(scopes.get("output", {}), parsed.path)
+    if parsed.kind == "fetch":
+        if connector_fetch is None:
+            raise ValueError(
+                f"fetch: reference {parsed.raw!r} requires a connector_fetch "
+                "callable (only valid in source resolution, not target payloads)."
+            )
+        arg_value = _walk_path(scopes.get("input", {}), parsed.arg_path)
+        if arg_value is _MISSING:
+            return _MISSING
+        return await connector_fetch(parsed.connector, parsed.method, arg_value)
+    raise ValueError(f"Unsupported reference kind: {parsed.kind!r}")
+
+
+def _build_target_payload(
+    field_rows: list[dict[str, Any]],
+    input_data: dict[str, Any],
+    output: dict[str, Any],
+) -> dict[str, Any]:
+    """Assemble a write_target's payload dict from its target_payload_field rows.
+
+    Each row contributes one key to the returned dict. References may
+    be `input.*`, `output.*`, or `const:*` — `fetch:` is rejected
+    (payloads can't fetch). Missing-value handling per row:
+      required=True  → raise ValueError (caller turns into TargetWriteError)
+      required=False → omit the field
+
+    Synchronous: target payloads never need async work.
+    """
+    payload: dict[str, Any] = {}
+    sorted_rows = sorted(field_rows, key=lambda r: r.get("execution_order", 1))
+    for row in sorted_rows:
+        payload_field = row["payload_field"]
+        reference = row["reference"]
+        required = row.get("required", True)
+        parsed = _parse_reference(reference)
+        if parsed.kind == "fetch":
+            raise ValueError(
+                f"target_payload_field '{payload_field}' has fetch: reference "
+                f"{reference!r}; only input.*, output.*, const:* are allowed."
+            )
+        if parsed.kind == "const":
+            payload[payload_field] = parsed.value
+            continue
+        if parsed.kind == "input":
+            value = _walk_path(input_data, parsed.path)
+        else:  # 'output'
+            value = _walk_path(output, parsed.path)
+        if value is _MISSING:
+            if required:
+                raise ValueError(
+                    f"target_payload_field '{payload_field}' (reference="
+                    f"{reference!r}) could not be resolved against the "
+                    f"unit's input/output."
+                )
+            continue
+        payload[payload_field] = value
+    return payload
 
 
 def _redact_input_for_log(
