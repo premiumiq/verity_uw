@@ -1563,6 +1563,15 @@ class ExecutionEngine:
         else:
             version_id = getattr(config, 'id', None) or UUID(int=0)
 
+        # Strip bulky fields (e.g. base64 PDF bytes under `_documents`)
+        # from the logged input before it hits the DB. The original
+        # `context` is still used upstream for prompt assembly and tool
+        # calls — only the audit representation is trimmed.
+        sanitized_context, redaction_summary = _redact_input_for_log(
+            context if isinstance(context, dict) else None
+        )
+        summary_source = sanitized_context if sanitized_context is not None else context
+
         return await self.decisions.log_decision(DecisionLogCreate(
             id=id,
             entity_type=entity_type,
@@ -1578,8 +1587,8 @@ class ExecutionEngine:
             execution_context_id=execution_context_id,
             run_purpose=RunPurpose(run_purpose),
             reproduced_from_decision_id=reproduced_from_decision_id,
-            input_summary=str(context)[:500],
-            input_json=context if isinstance(context, dict) else None,
+            input_summary=str(summary_source)[:500],
+            input_json=sanitized_context,
             output_json=output if isinstance(output, dict) else None,
             output_summary=output_text[:500] if output_text else None,
             # Reasoning precedence: explicit reasoning_text from the caller
@@ -1605,6 +1614,7 @@ class ExecutionEngine:
             error_message=error_message,
             source_resolutions=source_resolutions,
             target_writes=target_writes,
+            redaction_applied=redaction_summary,
         ))
 
 
@@ -1680,6 +1690,86 @@ def _assemble_prompts(
         user_messages[0] = doc_blocks + [{"type": "text", "text": first_msg}]
 
     return system_prompt, user_messages
+
+
+# Any top-level string value larger than this many bytes is replaced in
+# the logged input with a stub {elided, bytes, preview}. Sized to hold
+# a generous prompt/template but catch anything PDF-sized.
+_LARGE_FIELD_BYTES = 8192
+
+
+def _redact_input_for_log(
+    context: Optional[dict],
+) -> tuple[Optional[dict], Optional[dict]]:
+    """Strip bulky fields from a logged context so the decision row stays
+    readable. Returns (sanitized_context, redaction_summary).
+
+    Two patterns are handled:
+      1. `_documents` — Verity protocol key (see _assemble_prompts) whose
+         entries carry base64 PDF/image bytes. Each entry with a `data`
+         field is replaced by a reference stub
+         {filename, media_type, bytes, elided}.
+      2. Any other top-level string value over _LARGE_FIELD_BYTES is
+         replaced with {elided, bytes, preview}.
+
+    When nothing is elided the original dict is returned unchanged and
+    the summary is None.
+    """
+    if not isinstance(context, dict):
+        return context, None
+
+    total_bytes = 0
+    fields: list[str] = []
+    sanitized = dict(context)  # shallow copy, top-level mutation only
+
+    # _documents protocol key — strip per-entry base64 bytes.
+    docs = sanitized.get("_documents")
+    if isinstance(docs, list) and docs:
+        new_docs = []
+        doc_elided = False
+        for doc in docs:
+            if isinstance(doc, dict) and isinstance(doc.get("data"), str):
+                size = len(doc["data"])
+                total_bytes += size
+                new_docs.append({
+                    "filename": doc.get("filename") or doc.get("name"),
+                    "media_type": doc.get("media_type"),
+                    "bytes": size,
+                    "elided": True,
+                })
+                doc_elided = True
+            else:
+                new_docs.append(doc)
+        if doc_elided:
+            sanitized["_documents"] = new_docs
+            fields.append("_documents")
+
+    # Oversized top-level strings.
+    for k, v in list(sanitized.items()):
+        if k == "_documents":
+            continue
+        if isinstance(v, str) and len(v) > _LARGE_FIELD_BYTES:
+            total_bytes += len(v)
+            sanitized[k] = {
+                "elided": True,
+                "bytes": len(v),
+                "preview": v[:80],
+            }
+            fields.append(k)
+
+    if not fields:
+        return context, None
+
+    summary: dict[str, Any] = {
+        "fields": fields,
+        "total_bytes_elided": total_bytes,
+    }
+    if "_documents" in fields and isinstance(sanitized.get("_documents"), list):
+        summary["documents_elided"] = sum(
+            1 for d in sanitized["_documents"]
+            if isinstance(d, dict) and d.get("elided")
+        )
+    return sanitized, summary
 
 
 def _substitute_variables(template: str, context: dict[str, Any]) -> str:

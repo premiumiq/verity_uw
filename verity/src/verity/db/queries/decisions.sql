@@ -25,7 +25,8 @@ INSERT INTO agent_decision_log (
     run_purpose, reproduced_from_decision_id,
     execution_context_id,
     hitl_required, status, error_message,
-    source_resolutions, target_writes
+    source_resolutions, target_writes,
+    redaction_applied
 )
 VALUES (
     COALESCE(%(id)s::uuid, uuid_generate_v4()),
@@ -39,7 +40,8 @@ VALUES (
     %(run_purpose)s, %(reproduced_from_decision_id)s,
     %(execution_context_id)s,
     %(hitl_required)s, %(status)s, %(error_message)s,
-    %(source_resolutions)s, %(target_writes)s
+    %(source_resolutions)s, %(target_writes)s,
+    %(redaction_applied)s
 )
 RETURNING id, created_at;
 
