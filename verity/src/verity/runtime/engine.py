@@ -670,6 +670,14 @@ class ExecutionEngine:
         stream: bool = False,
         execution_context_id: Optional[UUID] = None,
         application: Optional[str] = None,
+        # Same write_mode gate as run_task — controls whether declared
+        # targets actually fire after the agent's terminal turn. "auto"
+        # is channel-gated (champion only), "log_only" forces dry run,
+        # "write" forces. MockContext.target_blocks always wins.
+        write_mode: Literal["auto", "log_only", "write"] = "auto",
+        # Live-state pointer back to execution_run for runs dispatched
+        # by the async worker. Threaded through to the decision log.
+        execution_run_id: Optional[UUID] = None,
     ) -> ExecutionResult:
         """Execute an agent: resolve config, assemble prompts, run the agentic loop.
 
@@ -720,8 +728,25 @@ class ExecutionEngine:
             )
 
         config = await self.registry.get_agent_config(agent_name)
-        system_prompt, user_messages = _assemble_prompts(config.prompts, context)
+
+        # ── SOURCE RESOLUTION ──────────────────────────────────
+        # Resolve any declared source_binding rows for this agent
+        # version before the loop starts. Same helper run_task uses;
+        # template_context overlays the resolved values onto a copy of
+        # the caller-supplied context so prompt assembly sees both.
+        # Failures here are hard fails — the loop never starts.
+        template_context, source_resolutions = await self._resolve_sources(
+            version_id=config.agent_version_id,
+            owner_kind="agent_version",
+            entity_name=agent_name,
+            input_data=context,
+            mock=mock,
+        )
+        system_prompt, user_messages = _assemble_prompts(config.prompts, template_context)
         tools = _build_tool_definitions(config.tools)
+        # Initialised early so the failure handler can record partial
+        # writes if a connector explosion happens mid-target loop.
+        target_writes: list[dict[str, Any]] = []
 
         try:
             messages = [{"role": "user", "content": msg} for msg in user_messages]
@@ -834,6 +859,24 @@ class ExecutionEngine:
 
             output_text = _extract_text(response)
             output = _try_parse_json(output_text)
+
+            # ── TARGET WRITES ────────────────────────────────
+            # Fire any declared write_targets now that we have the
+            # parsed output. Same helper run_task uses; gate logic
+            # honors channel × write_mode × MockContext.target_blocks.
+            # Failures on required targets raise TargetWriteError; the
+            # except branch below preserves partial_writes for audit.
+            target_writes = await self._write_targets(
+                version_id=config.agent_version_id,
+                owner_kind="agent_version",
+                entity_name=agent_name,
+                input_data=context,
+                output=output if isinstance(output, dict) else {},
+                channel=channel,
+                write_mode=write_mode,
+                mock=mock,
+            )
+
             duration_ms = _now_ms() - start_ms
             # With LLM mocking removed, mock_mode in the log reflects
             # "any form of caller-supplied mocking was active" — which
@@ -854,6 +897,9 @@ class ExecutionEngine:
                 status="complete", mock_mode=is_mocked,
                 execution_context_id=execution_context_id,
                 application=application,
+                source_resolutions=source_resolutions or None,
+                target_writes=target_writes or None,
+                execution_run_id=execution_run_id,
             )
 
             # Model invocation log — one row per decision, tokens summed
@@ -910,6 +956,22 @@ class ExecutionEngine:
                 status="failed", error_message=str(e),
                 execution_context_id=execution_context_id,
                 application=application,
+                # Preserve partial audit if the failure happened mid-resolution
+                # or mid-target-write. SourceResolutionError /
+                # TargetWriteError carry partial_resolutions /
+                # partial_writes; otherwise fall back to whatever the loop
+                # had collected before raising.
+                source_resolutions=(
+                    getattr(e, "partial_resolutions", None)
+                    or locals().get("source_resolutions")
+                    or None
+                ),
+                target_writes=(
+                    getattr(e, "partial_writes", None)
+                    or locals().get("target_writes")
+                    or None
+                ),
+                execution_run_id=execution_run_id,
             )
             # Record partial token usage on failed runs too — the loop
             # may have completed N turns before raising, and that token
@@ -965,6 +1027,10 @@ class ExecutionEngine:
         # MockContext.target_blocks still takes precedence: any field in
         # that set is log-only even under write_mode="write".
         write_mode: Literal["auto", "log_only", "write"] = "auto",
+        # Live-state pointer back to execution_run for runs dispatched by
+        # the async worker. The decision_log row carries this so audit
+        # tooling can navigate from a decision back to its run record.
+        execution_run_id: Optional[UUID] = None,
     ) -> ExecutionResult:
         """Execute a task with single-turn structured output and mock support."""
         logger.info("Task execution starting: %s (step=%s, mock=%s)",
@@ -1102,6 +1168,7 @@ class ExecutionEngine:
                 application=application,
                 source_resolutions=source_resolutions or None,
                 target_writes=target_writes or None,
+                execution_run_id=execution_run_id,
             )
 
             # Single-turn task — one API call, so per_turn_metadata is
@@ -1162,6 +1229,7 @@ class ExecutionEngine:
                     or locals().get("target_writes")
                     or None
                 ),
+                execution_run_id=execution_run_id,
             )
             return ExecutionResult(
                 decision_log_id=log_result["decision_log_id"],
@@ -1734,6 +1802,10 @@ class ExecutionEngine:
         # a prose final turn this is that text. None means the model did
         # not produce any narrative alongside the structured answer.
         reasoning_text: Optional[str] = None,
+        # Live-state pointer back to execution_run when this decision was
+        # produced via the async run-submission path (worker-driven).
+        # None for legacy synchronous calls that bypass the worker.
+        execution_run_id: Optional[UUID] = None,
     ) -> dict:
         """Create a decision log entry with full snapshot.
 
@@ -1806,6 +1878,7 @@ class ExecutionEngine:
             source_resolutions=source_resolutions,
             target_writes=target_writes,
             redaction_applied=redaction_summary,
+            execution_run_id=execution_run_id,
         ))
 
 

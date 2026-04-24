@@ -162,6 +162,11 @@ async def _dispatch_run(verity: Verity, run: dict[str, Any], worker_id: str) -> 
             run_id, entity_kind, entity_name, channel, application,
         )
 
+        # write_mode and enforce_output_schema flow through from the
+        # submission row when the caller pinned them. Engine defaults
+        # apply otherwise.
+        write_mode = run.get("write_mode") or "auto"
+
         if entity_kind == "task":
             result = await verity.execution.run_task(
                 task_name=entity_name,
@@ -172,6 +177,8 @@ async def _dispatch_run(verity: Verity, run: dict[str, Any], worker_id: str) -> 
                 execution_context_id=execution_context_id,
                 application=application,
                 mock=mock_ctx,
+                write_mode=write_mode,
+                execution_run_id=run_id,
             )
         elif entity_kind == "agent":
             result = await verity.execution.run_agent(
@@ -183,6 +190,8 @@ async def _dispatch_run(verity: Verity, run: dict[str, Any], worker_id: str) -> 
                 execution_context_id=execution_context_id,
                 application=application,
                 mock=mock_ctx,
+                write_mode=write_mode,
+                execution_run_id=run_id,
             )
         else:
             raise ValueError(f"Unknown entity_kind: {entity_kind!r}")
