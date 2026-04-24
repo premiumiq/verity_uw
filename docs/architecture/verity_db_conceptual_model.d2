@@ -1,0 +1,208 @@
+# ═══════════════════════════════════════════════════════════════
+# Verity DB — Conceptual Model
+#
+# Two-level containers:
+#   Outer = the 6 product components of Verity.
+#   Inner = logical clusters of tables.
+#
+# Notation:
+#   {ISA}     = EER supertype — subclasses are disjoint.
+#   (poly)    = polymorphic FK at the physical layer
+#               (entity_type+id, owner_kind+id, scope_type+id).
+#   †         = deprecated or in the 2026-04-24 migration window.
+#
+# Keep this file aligned with verity/src/verity/db/schema.sql.
+# Render:  d2 verity_db_conceptual_model.d2 verity_db_conceptual_model.svg
+# ═══════════════════════════════════════════════════════════════
+
+direction: right
+
+# ── 1. APPLICATION REGISTRY ────────────────────────────────────
+app_registry: "1. Application Registry" {
+  style.fill: "#e9d8fd"
+  style.stroke: "#6b46c1"
+  style.font-size: 20
+
+  apps: "Apps & Scoping" {
+    application
+    application_entity: "application_entity\n(poly → Asset)"
+  }
+
+  context: "Execution Context" {
+    execution_context
+  }
+}
+
+# ── 2. ASSET REGISTRY ──────────────────────────────────────────
+asset_registry: "2. Asset Registry" {
+  style.fill: "#bee3f8"
+  style.stroke: "#2b6cb0"
+  style.font-size: 20
+
+  governed: "Governed Entities  {ISA}" {
+    style.stroke-width: 3
+    style.bold: true
+    agent
+    agent_version
+    task
+    task_version
+    prompt
+    prompt_version
+    tool
+    pipeline: "pipeline †"
+    pipeline_version: "pipeline_version †"
+  }
+
+  composition: "Composition & Delegation" {
+    entity_prompt_assignment: "entity_prompt_assignment\n(poly)"
+    agent_version_tool
+    task_version_tool
+    agent_version_delegation
+  }
+
+  wiring: "I/O Wiring" {
+    source_binding: "source_binding\n(owner poly)"
+    write_target: "write_target\n(owner poly)"
+    target_payload_field
+    legacy_src: "task_version_source †"
+    legacy_tgt: "task_version_target †"
+  }
+
+  integration: "Integration" {
+    inference_config
+    data_connector
+    mcp_server
+  }
+
+  models: "Model Registry" {
+    model
+    model_price
+    field_extraction_config
+  }
+}
+
+# ── 3. LIFECYCLE & APPROVAL ────────────────────────────────────
+lifecycle: "3. Lifecycle & Approval" {
+  style.fill: "#e9d8fd"
+  style.stroke: "#6b46c1"
+  style.font-size: 20
+
+  gates: "Approvals & Gates" {
+    approval_record: "approval_record\n(poly)"
+    metric_threshold
+  }
+
+  overrides: "Overrides" {
+    override_log: "override_log\n(poly)"
+  }
+
+  checks: "Promotion Checks" {
+    description_similarity_log
+  }
+}
+
+# ── 4. EXECUTION & DECISIONS ───────────────────────────────────
+execution: "4. Execution & Decisions" {
+  style.fill: "#fef3c7"
+  style.stroke: "#d97706"
+  style.font-size: 20
+
+  runs: "Run Tracking  (event-sourced)" {
+    execution_run
+    status: "execution_run_status"
+    completion: "execution_run_completion"
+    error: "execution_run_error"
+    current: "execution_run_current (view)"
+  }
+
+  decisions: "Decision Trail" {
+    agent_decision_log: "agent_decision_log\n(poly, self-ref)"
+  }
+
+  telemetry: "Telemetry" {
+    model_invocation_log
+  }
+
+  quota_block: "Quota Enforcement" {
+    quota: "quota\n(scope poly)"
+    quota_check
+  }
+
+  incidents: "Incidents" {
+    incident: "incident\n(poly)"
+  }
+
+  legacy_exec: "Legacy" {
+    pipeline_run: "pipeline_run †"
+  }
+}
+
+# ── 5. TESTING & VALIDATION ────────────────────────────────────
+testing: "5. Testing & Validation" {
+  style.fill: "#c6f6d5"
+  style.stroke: "#2f855a"
+  style.font-size: 20
+
+  authoring: "Test Authoring" {
+    test_suite
+    test_case
+    test_case_mock
+    test_execution_log: "test_execution_log\n(poly)"
+  }
+
+  gt: "Ground Truth" {
+    ground_truth_dataset: "ground_truth_dataset\n(poly)"
+    ground_truth_record
+    ground_truth_annotation
+    ground_truth_record_mock
+  }
+
+  scoring: "Scoring" {
+    validation_run: "validation_run\n(poly)"
+    validation_record_result
+    evaluation_run: "evaluation_run\n(poly)"
+  }
+}
+
+# ── 6. COMPLIANCE & DOCS ───────────────────────────────────────
+compliance: "6. Compliance & Docs" {
+  style.fill: "#fed7d7"
+  style.stroke: "#c53030"
+  style.font-size: 20
+
+  cards: "Model Cards" {
+    model_card: "model_card\n(poly)"
+  }
+
+  derived: "Derived Evidence\n(views over other components)" {
+    style.stroke-dash: 3
+    style.fill: "#ffffff"
+    note: "SR 11-7 / NAIC / NIST\nreports compiled from\nApprovals, Validations,\nDecisions, Overrides."
+  }
+}
+
+# ── ORPHAN: PLATFORM (not in any of the 6) ─────────────────────
+platform: "Platform  (cross-cutting)" {
+  style.fill: "#f7fafc"
+  style.stroke: "#718096"
+  style.stroke-dash: 3
+  platform_settings
+}
+
+# ═══════════════════════════════════════════════════════════════
+# Cross-component relationships
+# ═══════════════════════════════════════════════════════════════
+
+app_registry -> asset_registry: "scopes (poly)" {
+  style.stroke-dash: 3
+}
+app_registry -> execution: "originates"
+asset_registry -> execution: "invoked by"
+asset_registry -> lifecycle: "state transitions"
+asset_registry -> testing: "tested (poly)" {
+  style.stroke-dash: 3
+}
+testing -> lifecycle: "gates promotion"
+execution -> compliance: "decision evidence"
+lifecycle -> compliance: "approval evidence"
+testing -> compliance: "validation evidence"
