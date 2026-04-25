@@ -370,7 +370,14 @@ a:hover {
 /* Status badges */
 .verity-badge-complete { background: var(--verity-green-light); color: #3E6044; }
 .verity-badge-failed   { background: var(--verity-red-light);   color: #A23838; }
-.verity-badge-pending  { background: var(--verity-blue-light);      color: var(--verity-blue-dark); }
+.verity-badge-pending  { background: var(--verity-blue-light);  color: var(--verity-blue-dark); }
+
+/* Async-run lifecycle states surfaced by execution_run_current. */
+.verity-badge-submitted { background: var(--verity-blue-pale);  color: var(--verity-blue-deep); }
+.verity-badge-claimed   { background: var(--verity-blue-light); color: var(--verity-blue-dark); }
+.verity-badge-heartbeat { background: var(--verity-amber-light); color: #816014; }
+.verity-badge-released  { background: var(--verity-gray-light); color: var(--verity-text-light); }
+.verity-badge-cancelled { background: var(--verity-gray-pale);  color: var(--verity-text-light); border: 1px solid var(--verity-border); }
 
 
 /* ── BUTTONS ───────────────────────────────────────────────── */

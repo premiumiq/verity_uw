@@ -1,0 +1,170 @@
+{#
+  RUNS PAGE — unified list of every async task / agent run.
+
+  Reads from the execution_run_current view (via RunsReader.list_runs)
+  so the table shows the resolved current_status — submitted / claimed /
+  heartbeat / released / complete / cancelled / failed — regardless of
+  which lifecycle table holds the authoritative event.
+
+  DATA PASSED BY ROUTE:
+    runs             — list of ExecutionRunCurrent rows to display
+    total            — int, total rows matching the current filter set
+    filters          — dict of {status, entity_kind, entity_name,
+                        application, workflow_run_id, execution_context_id}
+                        the user supplied. Echoed back into the filter
+                        chips + sticky form inputs.
+    limit / offset   — pagination window
+    group_by         — optional grouping hint ('workflow_run' only today)
+#}
+{% extends "base.html" %}
+
+{% block title %}Runs — Verity{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <span>Runs</span>
+{% endblock %}
+
+{% block page_title %}Runs{% endblock %}
+
+{% block content %}
+
+<p class="verity-page-description">
+    Every async task or agent run dispatched through Verity. Rows drive
+    from the <code>execution_run_current</code> view — which combines
+    the submission row, the claim / heartbeat ledger, and the terminal
+    completion or error row — so the status below is the resolved
+    current state, not a snapshot of any single event table.
+</p>
+
+{#  Filter form — sticky. Omitted params become "no filter". Each
+    filter is AND'd server-side. Pagination params ride along so Next/
+    Prev don't drop the current filter set. #}
+<form method="get" action="/admin/runs" class="verity-action-bar" style="flex-wrap: wrap;">
+    <label class="verity-label" style="display: inline-flex; align-items: center; gap: 6px; margin-bottom: 0;">
+        Status
+        <select name="status" class="verity-select" style="width: auto;">
+            <option value="">any</option>
+            {% for s in ['submitted', 'claimed', 'heartbeat', 'released', 'complete', 'cancelled', 'failed'] %}
+            <option value="{{ s }}" {% if filters.status == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <label class="verity-label" style="display: inline-flex; align-items: center; gap: 6px; margin-bottom: 0;">
+        Kind
+        <select name="entity_kind" class="verity-select" style="width: auto;">
+            <option value="">any</option>
+            <option value="task"  {% if filters.entity_kind == 'task'  %}selected{% endif %}>task</option>
+            <option value="agent" {% if filters.entity_kind == 'agent' %}selected{% endif %}>agent</option>
+        </select>
+    </label>
+    <label class="verity-label" style="display: inline-flex; align-items: center; gap: 6px; margin-bottom: 0;">
+        Entity name
+        <input type="text" name="entity_name" class="verity-input" style="width: 160px;"
+               value="{{ filters.entity_name or '' }}">
+    </label>
+    <label class="verity-label" style="display: inline-flex; align-items: center; gap: 6px; margin-bottom: 0;">
+        Application
+        <input type="text" name="application" class="verity-input" style="width: 140px;"
+               value="{{ filters.application or '' }}">
+    </label>
+    <button type="submit" class="verity-btn verity-btn-primary verity-btn-sm">Apply</button>
+    <a href="/admin/runs" class="verity-btn verity-btn-secondary verity-btn-sm">Clear</a>
+</form>
+
+{#  Preserve any narrowing filters that aren't in the form above, so
+    the deep-link from UW ("View in Verity" → execution_context_id)
+    keeps working even if the user picks a status filter too. #}
+{% if filters.execution_context_id %}
+<div style="margin-bottom: 10px; font-size: 0.8rem;">
+    <span class="verity-badge verity-badge-candidate">scoped: execution_context {{ filters.execution_context_id | short_id }}</span>
+    <a href="/admin/runs" style="margin-left: 8px;">clear context filter</a>
+</div>
+{% endif %}
+{% if filters.workflow_run_id %}
+<div style="margin-bottom: 10px; font-size: 0.8rem;">
+    <span class="verity-badge verity-badge-candidate">scoped: workflow {{ filters.workflow_run_id | short_id }}</span>
+    <a href="/admin/runs" style="margin-left: 8px;">clear workflow filter</a>
+</div>
+{% endif %}
+
+<div style="margin-bottom: 12px; font-size: 0.85rem; color: var(--verity-text-light);">
+    {{ total }} run{{ '' if total == 1 else 's' }} match the current filter set
+</div>
+
+{% if runs %}
+<table class="verity-table">
+    <thead>
+        <tr>
+            <th>Started</th>
+            <th>Entity</th>
+            <th>Kind</th>
+            <th>Status</th>
+            <th>Duration</th>
+            <th>Workflow</th>
+            <th>Context</th>
+            <th>Channel</th>
+            <th>Application</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in runs %}
+        <tr class="clickable" onclick="window.location='/admin/runs/{{ r.id }}'">
+            <td style="font-size: 0.8rem;">
+                {# first_started_at = when worker first claimed; fall back to submitted_at #}
+                {{ (r.first_started_at or r.submitted_at).strftime('%m-%d %H:%M:%S') if (r.first_started_at or r.submitted_at) else '—' }}
+            </td>
+            <td>
+                <a href="/admin/runs/{{ r.id }}">{{ r.entity_name }}</a>
+            </td>
+            <td><span class="verity-badge verity-badge-{{ r.entity_kind }}">{{ r.entity_kind }}</span></td>
+            {# RunCurrentStatus inherits (str, Enum) so it renders as
+               the raw string ('complete', 'failed', etc.) in Jinja. #}
+            <td>
+                <span class="verity-badge verity-badge-{{ r.current_status }}">{{ r.current_status }}</span>
+                {% if r.mock_mode %}<span class="verity-badge verity-badge-draft" style="margin-left: 4px;">mock</span>{% endif %}
+            </td>
+            <td style="font-size: 0.8rem;">
+                {% if r.duration_ms %}{{ r.duration_ms }}ms
+                {% elif r.current_status in ['claimed', 'heartbeat'] %}<em>running…</em>
+                {% else %}—{% endif %}
+            </td>
+            <td style="font-family: monospace; font-size: 0.7rem;">
+                {% if r.workflow_run_id %}
+                <a href="/admin/workflows/{{ r.workflow_run_id }}">{{ r.workflow_run_id | short_id }}</a>
+                {% else %}—{% endif %}
+            </td>
+            <td style="font-family: monospace; font-size: 0.7rem; color: var(--verity-text-light);">
+                {{ r.execution_context_id | short_id if r.execution_context_id else '—' }}
+            </td>
+            <td style="font-size: 0.8rem;">{{ r.channel }}</td>
+            <td style="font-size: 0.8rem;">{{ r.application }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{#  Simple prev/next pagination. Preserves every filter in the query
+    string so next/prev don't drop narrowing context. #}
+<div style="margin-top: 16px; display: flex; gap: 8px; font-size: 0.85rem;">
+    {% if offset > 0 %}
+    <a class="verity-btn verity-btn-secondary verity-btn-sm"
+       href="?{{ filter_qs }}&limit={{ limit }}&offset={{ [0, offset - limit] | max }}">← Previous</a>
+    {% endif %}
+    {% if offset + runs | length < total %}
+    <a class="verity-btn verity-btn-secondary verity-btn-sm"
+       href="?{{ filter_qs }}&limit={{ limit }}&offset={{ offset + limit }}">Next →</a>
+    {% endif %}
+    <span style="color: var(--verity-text-light); padding: 6px 4px;">
+        {{ offset + 1 }}–{{ offset + runs | length }} of {{ total }}
+    </span>
+</div>
+
+{% else %}
+<div class="verity-empty">
+    <div style="font-size: 2rem; opacity: 0.3;">⊶</div>
+    <div class="verity-empty-message">No runs match this filter set.</div>
+</div>
+{% endif %}
+
+{% endblock %}

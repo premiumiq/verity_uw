@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 from typing import Optional
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -694,6 +694,85 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             entities=entities,
             decision_count=decision_row["cnt"] if decision_row else 0,
             override_count=override_row["cnt"] if override_row else 0,
+        )
+
+    # ── RUNS (unified view over execution_run_current) ─────────
+    # Replaces the descoped /admin/pipeline-runs page. Every async
+    # task / agent run submitted through the Verity worker surfaces
+    # here in one table, regardless of entity kind. Filters are
+    # AND'd; missing filters disable that constraint.
+
+    @router.get("/runs", response_class=HTMLResponse)
+    async def runs_list_page(
+        request: Request,
+        status: Optional[str] = None,
+        entity_kind: Optional[str] = None,
+        entity_name: Optional[str] = None,
+        application: Optional[str] = None,
+        channel: Optional[str] = None,
+        workflow_run_id: Optional[str] = None,
+        execution_context_id: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ):
+        await verity.ensure_connected()
+        # Malformed UUIDs in the query string surface as 400 rather
+        # than 500 — the listing page gets deep-linked from UW submission
+        # pages, and a typoed context id shouldn't look like a crash.
+        try:
+            workflow_uuid = UUID(workflow_run_id) if workflow_run_id else None
+            context_uuid = UUID(execution_context_id) if execution_context_id else None
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid UUID: {exc}")
+        filters = {
+            "status": status or None,
+            "entity_kind": entity_kind or None,
+            "entity_name": entity_name or None,
+            "application": application or None,
+            "channel": channel or None,
+            "workflow_run_id": workflow_uuid,
+            "execution_context_id": context_uuid,
+        }
+        # Pass the typed filters to the reader and the string-ish ones
+        # back to the template so the form inputs stay sticky.
+        runs = await verity.runs_reader.list_runs(
+            limit=limit, offset=offset,
+            status=filters["status"],
+            entity_kind=filters["entity_kind"],
+            entity_name=filters["entity_name"],
+            application=filters["application"],
+            channel=filters["channel"],
+            workflow_run_id=filters["workflow_run_id"],
+            execution_context_id=filters["execution_context_id"],
+        )
+        total = await verity.runs_reader.count_runs(
+            status=filters["status"],
+            entity_kind=filters["entity_kind"],
+            entity_name=filters["entity_name"],
+            application=filters["application"],
+            channel=filters["channel"],
+            workflow_run_id=filters["workflow_run_id"],
+            execution_context_id=filters["execution_context_id"],
+        )
+        # Build a query string that preserves every filter for the
+        # next/prev pagination links. urlencode skips None values.
+        from urllib.parse import urlencode
+        filter_qs = urlencode({
+            k: v for k, v in {
+                "status": status, "entity_kind": entity_kind,
+                "entity_name": entity_name, "application": application,
+                "channel": channel, "workflow_run_id": workflow_run_id,
+                "execution_context_id": execution_context_id,
+            }.items() if v
+        })
+        return _render(templates, request, "runs_list.html",
+            active_page="runs",
+            runs=runs,
+            total=total,
+            filters=filters,
+            limit=limit,
+            offset=offset,
+            filter_qs=filter_qs,
         )
 
     # ── DECISION LOG ──────────────────────────────────────────
