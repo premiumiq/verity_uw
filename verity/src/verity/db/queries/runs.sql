@@ -138,24 +138,50 @@ RETURNING id, failed_at;
 -- name: get_run_current
 -- Single-run state read. The view resolves status precedence
 -- (completion > error > latest status_event) so callers see one
--- current_status field.
-SELECT * FROM execution_run_current WHERE id = %(run_id)s;
+-- current_status field. Enriched with the entity's owner display_name
+-- (task.display_name or agent.display_name) and the application's
+-- display_name so the UI never has to render the raw internal name.
+SELECT
+    erc.*,
+    COALESCE(t.display_name, ag.display_name)  AS entity_display_name,
+    app.display_name                            AS application_display_name
+FROM execution_run_current erc
+LEFT JOIN task_version tv  ON tv.id = erc.entity_version_id  AND erc.entity_kind = 'task'
+LEFT JOIN task t           ON t.id  = tv.task_id
+LEFT JOIN agent_version av ON av.id = erc.entity_version_id  AND erc.entity_kind = 'agent'
+LEFT JOIN agent ag         ON ag.id = av.agent_id
+LEFT JOIN application app  ON app.name = erc.application
+WHERE erc.id = %(run_id)s;
 
 
 -- name: list_runs_current
 -- Filtered list backing the Runs UI. All filters are optional; passing
 -- NULL for a filter disables it. Sorted by submitted_at desc by default
 -- (most recent first). Pagination via limit/offset.
-SELECT *
-FROM execution_run_current
-WHERE (%(execution_context_id)s::uuid IS NULL OR execution_context_id = %(execution_context_id)s::uuid)
-  AND (%(workflow_run_id)s::uuid IS NULL OR workflow_run_id = %(workflow_run_id)s::uuid)
-  AND (%(entity_kind)s::text IS NULL OR entity_kind = %(entity_kind)s::text)
-  AND (%(entity_name)s::text IS NULL OR entity_name = %(entity_name)s::text)
-  AND (%(channel)s::text IS NULL OR channel::text = %(channel)s::text)
-  AND (%(application)s::text IS NULL OR application = %(application)s::text)
-  AND (%(status)s::text IS NULL OR current_status = %(status)s::text)
-ORDER BY submitted_at DESC
+--
+-- Enriched with entity_display_name (the task or agent's owner-facing
+-- display_name from task/agent tables) and application_display_name
+-- (from application.display_name). LEFT JOINs because demo data and
+-- ad-hoc test runs may reference rows that no longer exist; we surface
+-- raw fallbacks rather than hiding the run.
+SELECT
+    erc.*,
+    COALESCE(t.display_name, ag.display_name)  AS entity_display_name,
+    app.display_name                            AS application_display_name
+FROM execution_run_current erc
+LEFT JOIN task_version tv  ON tv.id = erc.entity_version_id  AND erc.entity_kind = 'task'
+LEFT JOIN task t           ON t.id  = tv.task_id
+LEFT JOIN agent_version av ON av.id = erc.entity_version_id  AND erc.entity_kind = 'agent'
+LEFT JOIN agent ag         ON ag.id = av.agent_id
+LEFT JOIN application app  ON app.name = erc.application
+WHERE (%(execution_context_id)s::uuid IS NULL OR erc.execution_context_id = %(execution_context_id)s::uuid)
+  AND (%(workflow_run_id)s::uuid IS NULL OR erc.workflow_run_id = %(workflow_run_id)s::uuid)
+  AND (%(entity_kind)s::text IS NULL OR erc.entity_kind = %(entity_kind)s::text)
+  AND (%(entity_name)s::text IS NULL OR erc.entity_name = %(entity_name)s::text)
+  AND (%(channel)s::text IS NULL OR erc.channel::text = %(channel)s::text)
+  AND (%(application)s::text IS NULL OR erc.application = %(application)s::text)
+  AND (%(status)s::text IS NULL OR erc.current_status = %(status)s::text)
+ORDER BY erc.submitted_at DESC
 LIMIT %(limit)s OFFSET %(offset)s;
 
 
@@ -170,6 +196,20 @@ WHERE (%(execution_context_id)s::uuid IS NULL OR execution_context_id = %(execut
   AND (%(channel)s::text IS NULL OR channel::text = %(channel)s::text)
   AND (%(application)s::text IS NULL OR application = %(application)s::text)
   AND (%(status)s::text IS NULL OR current_status = %(status)s::text);
+
+
+-- name: list_runs_filter_applications
+-- Distinct (name, display_name) pairs for every application that has
+-- at least one execution_run row. Drives the Application dropdown on
+-- the Runs UI — cheaper than listing every registered application,
+-- and avoids dropdown items that would yield zero results.
+SELECT DISTINCT
+    erc.application                AS name,
+    COALESCE(app.display_name,
+             erc.application)      AS display_name
+FROM execution_run_current erc
+LEFT JOIN application app ON app.name = erc.application
+ORDER BY display_name;
 
 
 -- name: get_run_lifecycle
@@ -224,19 +264,39 @@ ORDER BY occurred_at;
 
 -- name: list_runs_for_workflow
 -- Convenience: every run for one workflow_run_id, surfaced with its
--- current state. Drives the Workflow detail page.
-SELECT * FROM execution_run_current
-WHERE workflow_run_id = %(workflow_run_id)s
-ORDER BY submitted_at;
+-- current state. Drives the Workflow detail page. Enriched with
+-- display names so the page can render task/agent and application
+-- by their human-readable labels.
+SELECT
+    erc.*,
+    COALESCE(t.display_name, ag.display_name)  AS entity_display_name,
+    app.display_name                            AS application_display_name
+FROM execution_run_current erc
+LEFT JOIN task_version tv  ON tv.id = erc.entity_version_id  AND erc.entity_kind = 'task'
+LEFT JOIN task t           ON t.id  = tv.task_id
+LEFT JOIN agent_version av ON av.id = erc.entity_version_id  AND erc.entity_kind = 'agent'
+LEFT JOIN agent ag         ON ag.id = av.agent_id
+LEFT JOIN application app  ON app.name = erc.application
+WHERE erc.workflow_run_id = %(workflow_run_id)s
+ORDER BY erc.submitted_at;
 
 
 -- name: list_runs_for_execution_context
 -- Convenience: every run for one execution_context_id (i.e. one
 -- business entity, like a submission). Drives the submission's
 -- "View in Verity" deep-link.
-SELECT * FROM execution_run_current
-WHERE execution_context_id = %(execution_context_id)s
-ORDER BY submitted_at;
+SELECT
+    erc.*,
+    COALESCE(t.display_name, ag.display_name)  AS entity_display_name,
+    app.display_name                            AS application_display_name
+FROM execution_run_current erc
+LEFT JOIN task_version tv  ON tv.id = erc.entity_version_id  AND erc.entity_kind = 'task'
+LEFT JOIN task t           ON t.id  = tv.task_id
+LEFT JOIN agent_version av ON av.id = erc.entity_version_id  AND erc.entity_kind = 'agent'
+LEFT JOIN agent ag         ON ag.id = av.agent_id
+LEFT JOIN application app  ON app.name = erc.application
+WHERE erc.execution_context_id = %(execution_context_id)s
+ORDER BY erc.submitted_at;
 
 
 -- name: janitor_reclaim_stuck_runs

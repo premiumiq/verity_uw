@@ -156,6 +156,13 @@ class ExecutionRunCurrent(BaseModel):
     # Lifecycle helper — first time the run was claimed by any worker.
     first_started_at: Optional[datetime] = None
 
+    # Display-name enrichments (joined from task / agent / application
+    # in the listing queries). None when the join misses (e.g. a row
+    # whose entity version was deleted, or an application name with no
+    # matching application row).
+    entity_display_name: Optional[str] = None
+    application_display_name: Optional[str] = None
+
 
 class RunLifecycleEvent(BaseModel):
     """One event in get_run_lifecycle's unified timeline.

@@ -25,7 +25,6 @@ from verity.contracts.mock import MockContext
 from verity.governance.registry import Registry
 from verity.governance.testing_meta import Testing
 from verity.runtime.engine import ExecutionEngine
-from verity.runtime.fixture_backend import Fixture, FixtureEngine
 from verity.runtime.metrics import classification_metrics, field_accuracy, exact_match, schema_valid
 
 logger = logging.getLogger(__name__)
@@ -199,53 +198,46 @@ class TestRunner:
         for row in source_mock_rows:
             source_responses[row["mock_key"]] = row["mock_response"]
 
+        # Build MockContext for the run. Two modes here:
+        #   mock_llm=True  → step_responses pins the entity output to
+        #                    `expected`. The engine short-circuits the
+        #                    LLM call and sources/targets entirely;
+        #                    decision_log + execution_run rows still
+        #                    get written with mock_mode=True. Tests the
+        #                    plumbing (config resolution, prompt
+        #                    assembly, audit) — not model quality.
+        #   mock_llm=False → tool_responses + source_responses shape
+        #                    inputs but Claude is called for real.
+        #                    The meaningful mode for measuring whether
+        #                    a version produces the expected output.
+        step_name = f"test:{case_name}"
         if mock_llm:
-            # Cheap mode: route through FixtureEngine with the expected output
-            # as a pre-built fixture. No Claude call, no tool dispatch; the
-            # decision log is marked mock_mode=True. This tests the execution
-            # plumbing (config resolution, prompt assembly, decision logging),
-            # not model quality. Replaces the previous MockContext.llm_responses
-            # pattern now that llm_responses has been retired in favor of
-            # a dedicated engine.
-            engine = FixtureEngine(
-                registry=self.registry,
-                decisions=self.engine.decisions,
-                fixtures={f"test:{case_name}": Fixture(output=expected)},
-                application=self.engine.application,
+            mock = MockContext(step_responses={step_name: expected})
+        elif tool_responses or source_responses:
+            mock = MockContext(
+                tool_responses=tool_responses or None,
+                source_responses=source_responses or None,
             )
-            mock = None
         else:
-            # Real-LLM test: Claude is called; registered tool mocks shape
-            # agent inputs, source mocks replace Task connector fetches.
-            # This is the meaningful test mode — it measures whether the
-            # current agent/task version produces outputs matching expected
-            # given controlled tool/source data.
-            engine = self.engine
-            if tool_responses or source_responses:
-                mock = MockContext(
-                    tool_responses=tool_responses or None,
-                    source_responses=source_responses or None,
-                )
-            else:
-                mock = None
+            mock = None
 
         # Execute the entity
         try:
             if entity_type == "agent":
-                exec_result = await engine.run_agent(
+                exec_result = await self.engine.run_agent(
                     agent_name=case.get("entity_name", ""),
                     context=input_data,
                     channel=channel,
                     mock=mock,
-                    step_name=f"test:{case_name}",
+                    step_name=step_name,
                 )
             else:
-                exec_result = await engine.run_task(
+                exec_result = await self.engine.run_task(
                     task_name=case.get("entity_name", ""),
                     input_data=input_data,
                     channel=channel,
                     mock=mock,
-                    step_name=f"test:{case_name}",
+                    step_name=step_name,
                 )
             actual_output = exec_result.output or {}
             decision_log_id = exec_result.decision_log_id

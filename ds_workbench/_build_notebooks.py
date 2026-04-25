@@ -692,19 +692,19 @@ def build_compliance_decision_log_notebook() -> nbf.NotebookNode:
             ")"
         ),
         md(
-            "## Review results — trail by pipeline run\n"
+            "## Review results — trail by workflow run\n"
             "\n"
-            "Find a decision that ran as part of a pipeline (has a "
-            "`pipeline_run_id`), then pull the full trail of decisions "
-            "from that pipeline invocation.\n"
+            "Find a decision that ran as part of a workflow (has a "
+            "`workflow_run_id`), then pull the full trail of decisions "
+            "from that workflow invocation.\n"
         ),
         code(
-            "# Find a recent decision that was part of a pipeline run.\n"
-            "pipelined = next((d for d in decisions if d.get('pipeline_run_id')), None)\n"
-            "if pipelined is None:\n"
-            "    print('No pipelined decisions found in the recent feed — skipping trail view.')\n"
+            "# Find a recent decision that was part of a workflow run.\n"
+            "workflowed = next((d for d in decisions if d.get('workflow_run_id')), None)\n"
+            "if workflowed is None:\n"
+            "    print('No workflow-tagged decisions found in the recent feed — skipping trail view.')\n"
             "else:\n"
-            "    run_id = pipelined['pipeline_run_id']\n"
+            "    run_id = workflowed['workflow_run_id']\n"
             "    trail = v.audit_trail_by_run(run_id)\n"
             "    render_list(\n"
             "        trail,\n"

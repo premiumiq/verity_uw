@@ -100,6 +100,14 @@ class RunsReader:
         )
         return row["total"] if row else 0
 
+    async def list_filter_applications(self) -> list[dict]:
+        """Distinct (name, display_name) pairs for the Application filter
+        dropdown on the Runs UI. Sourced from the application table when
+        a row exists; falls back to the raw `application` string from
+        execution_run otherwise. Sorted by display_name.
+        """
+        return await self.db.fetch_all("list_runs_filter_applications", {})
+
     async def get_run_lifecycle(self, run_id: UUID) -> list[RunLifecycleEvent]:
         """Full event sequence for one run, in time order.
 

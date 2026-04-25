@@ -7,11 +7,13 @@ an ordered sequence of `verity.execution.run_task` /
 threaded through every call so all step audit rows cluster under one
 correlation id (queryable via the unified Runs view in Verity).
 
-Mock mode: when `use_mock=True` and a fixture exists for the
-submission, that step's output is returned via `FixtureEngine` rather
-than a real Claude call. The decision-log row is still written
-(mock_mode=True) so the audit trail is identical in shape — only the
-LLM round-trip is skipped.
+Mock mode: when `use_mock=True` and a step output exists for the
+submission, the engine short-circuits — Claude isn't called, source
+resolution is skipped, target writes are skipped, and the canned
+output is returned. Decision_log + execution_run rows still get
+written (mock_mode=True) so the audit shape is identical to a real
+run. Mock output dicts are built once per workflow into a
+MockContext.step_responses keyed by step_name.
 
 Two workflows live here:
   - run_doc_processing: classify → extract
@@ -21,9 +23,9 @@ Both return a `WorkflowResult` whose attributes (`workflow_run_id`,
 `status`, `all_steps`) match what `uw_demo/app/ui/routes.py` reads
 off pipeline results today, so the UI layer needs minimal change.
 
-Pre-built fixture data lives near the bottom of this file. Keyed by
-`step_name` (e.g. `classify_documents`, not the entity name) — that
-matches what FixtureEngine looks up.
+Pre-built canned outputs live near the bottom of this file. Keyed by
+`step_name` (e.g. `classify_documents`, not the entity name) — the
+same lookup MockContext.get_step_response uses.
 """
 
 from __future__ import annotations
@@ -35,7 +37,7 @@ from uuid import UUID, uuid4
 
 from verity.client.inprocess import Verity
 from verity.contracts.decision import ExecutionResult
-from verity.runtime.fixture_backend import Fixture, FixtureEngine
+from verity.contracts.mock import MockContext
 
 logger = logging.getLogger("uw_demo.workflows")
 
@@ -51,7 +53,7 @@ class StepRun:
     """One step in a multi-step workflow.
 
     `step_name` is the label this workflow gave the step (used by
-    FixtureEngine lookup and for audit clarity).
+    MockContext.step_responses lookup and for audit clarity).
     `execution_result` is what the engine returned; populated for
     every status except 'skipped'.
     `error_message` is duplicated from execution_result.error_message
@@ -96,13 +98,12 @@ async def run_doc_processing(
     Step 1 (classify_documents) runs the document_classifier task; its
     output is merged into the input for step 2.
     Step 2 (extract_fields) runs the field_extractor task.
-    A fixture map exists for submission ids 0000000{1..4} and is used
-    only when use_mock=True; otherwise both tasks call Claude live.
+    A canned-output map exists for submission ids 0000000{1..4} and is
+    used only when use_mock=True; otherwise both tasks call Claude live.
     """
     workflow_run_id = uuid4()
     all_steps: list[StepRun] = []
-
-    fixtures = _doc_processing_fixtures(submission_id) if use_mock else None
+    mock = _build_mock(_doc_processing_outputs(submission_id) if use_mock else None)
 
     classify = await _run_step(
         verity,
@@ -110,7 +111,7 @@ async def run_doc_processing(
         entity_name="document_classifier",
         input_data=pipeline_context,
         step_name="classify_documents",
-        fixture=(fixtures or {}).get("classify_documents"),
+        mock=mock,
         workflow_run_id=workflow_run_id,
         execution_context_id=execution_context_id,
     )
@@ -135,7 +136,7 @@ async def run_doc_processing(
         entity_name="field_extractor",
         input_data=extract_input,
         step_name="extract_fields",
-        fixture=(fixtures or {}).get("extract_fields"),
+        mock=mock,
         workflow_run_id=workflow_run_id,
         execution_context_id=execution_context_id,
     )
@@ -172,8 +173,7 @@ async def run_risk_assessment(
     """Two-step risk-assessment workflow: triage → appetite."""
     workflow_run_id = uuid4()
     all_steps: list[StepRun] = []
-
-    fixtures = _risk_assessment_fixtures(submission_id) if use_mock else None
+    mock = _build_mock(_risk_assessment_outputs(submission_id) if use_mock else None)
 
     triage = await _run_step(
         verity,
@@ -181,7 +181,7 @@ async def run_risk_assessment(
         entity_name="triage_agent",
         input_data=pipeline_context,
         step_name="triage_submission",
-        fixture=(fixtures or {}).get("triage_submission"),
+        mock=mock,
         workflow_run_id=workflow_run_id,
         execution_context_id=execution_context_id,
     )
@@ -204,7 +204,7 @@ async def run_risk_assessment(
         entity_name="appetite_agent",
         input_data=appetite_input,
         step_name="assess_appetite",
-        fixture=(fixtures or {}).get("assess_appetite"),
+        mock=mock,
         workflow_run_id=workflow_run_id,
         execution_context_id=execution_context_id,
     )
@@ -237,52 +237,36 @@ async def _run_step(
     entity_name: str,
     input_data: dict[str, Any],
     step_name: str,
-    fixture: Optional[Fixture],
+    mock: Optional[MockContext],
     workflow_run_id: UUID,
     execution_context_id: Optional[UUID],
 ) -> StepRun:
-    """Dispatch one step, building a StepRun from the engine's result.
+    """Dispatch one step through the engine, return a StepRun.
 
-    When `fixture` is supplied, FixtureEngine returns the pre-built
-    output and writes a decision row with mock_mode=True. Otherwise the
-    real ExecutionEngine drives the call.
+    The engine itself decides whether to short-circuit on a step mock
+    (`mock.step_responses`) or run for real — there's only one code
+    path here, regardless of mock vs live. Keeps audit shape identical
+    in both modes.
     """
     try:
-        if fixture is not None:
-            engine = _build_fixture_engine(verity, step_name, fixture)
-            if entity_kind == "task":
-                exec_result = await engine.run_task(
-                    task_name=entity_name,
-                    input_data=input_data,
-                    step_name=step_name,
-                    workflow_run_id=workflow_run_id,
-                    execution_context_id=execution_context_id,
-                )
-            else:
-                exec_result = await engine.run_agent(
-                    agent_name=entity_name,
-                    context=input_data,
-                    step_name=step_name,
-                    workflow_run_id=workflow_run_id,
-                    execution_context_id=execution_context_id,
-                )
+        if entity_kind == "task":
+            exec_result = await verity.execution.run_task(
+                task_name=entity_name,
+                input_data=input_data,
+                step_name=step_name,
+                mock=mock,
+                workflow_run_id=workflow_run_id,
+                execution_context_id=execution_context_id,
+            )
         else:
-            if entity_kind == "task":
-                exec_result = await verity.execution.run_task(
-                    task_name=entity_name,
-                    input_data=input_data,
-                    step_name=step_name,
-                    workflow_run_id=workflow_run_id,
-                    execution_context_id=execution_context_id,
-                )
-            else:
-                exec_result = await verity.execution.run_agent(
-                    agent_name=entity_name,
-                    context=input_data,
-                    step_name=step_name,
-                    workflow_run_id=workflow_run_id,
-                    execution_context_id=execution_context_id,
-                )
+            exec_result = await verity.execution.run_agent(
+                agent_name=entity_name,
+                context=input_data,
+                step_name=step_name,
+                mock=mock,
+                workflow_run_id=workflow_run_id,
+                execution_context_id=execution_context_id,
+            )
     except Exception as exc:
         # The engine catches its own internal exceptions and returns
         # ExecutionResult(status='failed'); reaching this branch means
@@ -309,36 +293,27 @@ async def _run_step(
     )
 
 
-def _build_fixture_engine(
-    verity: Verity, step_name: str, fixture: Fixture,
-) -> FixtureEngine:
-    """Construct a per-step FixtureEngine that writes through the same
-    governance plane as the live engine — decision log, model invocation
-    log, etc. Reuses the verity SDK's registry + decisions writer so
-    nothing about audit fidelity changes between mock and live.
+def _build_mock(
+    step_outputs: Optional[dict[str, dict]],
+) -> Optional[MockContext]:
+    """Wrap a per-step canned-output dict in a MockContext, or None.
 
-    A new engine per call is cheap (lightweight wiring class) and avoids
-    holding a long-lived FixtureEngine reference inside the SDK now that
-    pipeline_executor is gone.
+    Caller passes in {step_name: output_dict, ...} or None. When None,
+    the engine runs Claude for real. When a dict is supplied, the
+    engine short-circuits on each matching step_name and returns the
+    canned output verbatim.
     """
-    engine = FixtureEngine(
-        registry=verity._gov.registry,
-        decisions=verity._rt.decisions_writer,
-        fixtures={step_name: fixture},
-        application=verity.application,
-    )
-    # FixtureEngine doesn't dispatch tools, but accepts registrations
-    # for parity with the real engine. Sharing the dict means tools
-    # registered at app startup work in both paths.
-    engine.tool_implementations = verity._rt.execution.tool_implementations
-    return engine
+    if not step_outputs:
+        return None
+    return MockContext(step_responses=step_outputs)
 
 
 # ══════════════════════════════════════════════════════════════
 # DOC PROCESSING FIXTURES
-# Keyed by step_name (matches FixtureEngine lookup). Pre-built outputs
-# for the four seed submissions; returns None when no fixture exists,
-# which the caller treats as "fall back to live execution."
+# Keyed by step_name to match MockContext.step_responses lookup.
+# Pre-built outputs for the four seed submissions; returns None when
+# no fixture exists, which the caller treats as "fall back to live
+# execution."
 # ══════════════════════════════════════════════════════════════
 
 

@@ -1,0 +1,231 @@
+{#
+  RUN DETAIL — one execution_run with full lifecycle and envelope.
+
+  DATA PASSED BY ROUTE:
+    run       — ExecutionRunCurrent (view row)
+    lifecycle — list[RunLifecycleEvent] in time order
+    envelope  — ExecutionEnvelope (or None if still in-flight)
+    decision  — DecisionLogDetail (or None if run has no audit row)
+#}
+{% extends "base.html" %}
+
+{% block title %}Run {{ run.id | short_id }} — Verity{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/runs">Runs</a>
+    <span class="separator">›</span>
+    <span>{{ run.id | short_id }}</span>
+{% endblock %}
+
+{% block page_title %}
+    {{ run.entity_name }} <span class="verity-badge verity-badge-{{ run.entity_kind }}" style="margin-left: 8px;">{{ run.entity_kind }}</span>
+{% endblock %}
+
+{% block content %}
+
+{#  ── Header summary + current status ──────────────────────── #}
+<div class="verity-section">
+    <div class="verity-detail-grid">
+        <div class="verity-detail-label">Current status</div>
+        <div class="verity-detail-value">
+            <span class="verity-badge verity-badge-{{ run.current_status }}" style="font-size: 0.75rem;">{{ run.current_status }}</span>
+            {% if run.mock_mode %}<span class="verity-badge verity-badge-draft" style="margin-left: 4px;">mock</span>{% endif %}
+            {% if run.current_status in ['claimed', 'heartbeat'] %}
+            <span style="margin-left: 8px; color: var(--verity-text-light); font-size: 0.75rem;">
+                worker: {{ run.current_worker_id or '—' }}
+            </span>
+            {% endif %}
+        </div>
+
+        <div class="verity-detail-label">Run id</div>
+        <div class="verity-detail-value" style="font-family: monospace; font-size: 0.8rem;">{{ run.id }}</div>
+
+        <div class="verity-detail-label">Submitted</div>
+        <div class="verity-detail-value">
+            {{ run.submitted_at.strftime('%Y-%m-%d %H:%M:%S UTC') if run.submitted_at else '—' }}
+            {% if run.submitted_by %}<span style="color: var(--verity-text-light);"> by {{ run.submitted_by }}</span>{% endif %}
+        </div>
+
+        {% if run.first_started_at %}
+        <div class="verity-detail-label">First claimed</div>
+        <div class="verity-detail-value">{{ run.first_started_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}</div>
+        {% endif %}
+
+        {% if run.completed_at %}
+        <div class="verity-detail-label">Completed</div>
+        <div class="verity-detail-value">{{ run.completed_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}</div>
+        {% elif run.failed_at %}
+        <div class="verity-detail-label">Failed</div>
+        <div class="verity-detail-value">{{ run.failed_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}</div>
+        {% endif %}
+
+        {% if run.duration_ms %}
+        <div class="verity-detail-label">Duration</div>
+        <div class="verity-detail-value">{{ run.duration_ms }}ms</div>
+        {% endif %}
+
+        <div class="verity-detail-label">Channel</div>
+        <div class="verity-detail-value">{{ run.channel }}</div>
+
+        <div class="verity-detail-label">Application</div>
+        <div class="verity-detail-value">{{ run.application }}</div>
+
+        {% if run.workflow_run_id %}
+        <div class="verity-detail-label">Workflow</div>
+        <div class="verity-detail-value">
+            <a href="/admin/workflows/{{ run.workflow_run_id }}" style="font-family: monospace;">{{ run.workflow_run_id }}</a>
+        </div>
+        {% endif %}
+
+        {% if run.execution_context_id %}
+        <div class="verity-detail-label">Execution context</div>
+        <div class="verity-detail-value">
+            <a href="/admin/runs?execution_context_id={{ run.execution_context_id }}" style="font-family: monospace;">{{ run.execution_context_id }}</a>
+        </div>
+        {% endif %}
+
+        {% if run.parent_decision_id %}
+        <div class="verity-detail-label">Parent decision</div>
+        <div class="verity-detail-value">
+            <a href="/admin/decisions/{{ run.parent_decision_id }}" style="font-family: monospace;">{{ run.parent_decision_id }}</a>
+        </div>
+        {% endif %}
+
+        <div class="verity-detail-label">Entity version</div>
+        <div class="verity-detail-value">
+            {% if run.entity_kind == 'task' %}
+            <a href="/admin/tasks/{{ run.entity_name }}">{{ run.entity_name }}</a>
+            {% else %}
+            <a href="/admin/agents/{{ run.entity_name }}">{{ run.entity_name }}</a>
+            {% endif %}
+            <span style="color: var(--verity-text-light); font-family: monospace; font-size: 0.75rem; margin-left: 6px;">{{ run.entity_version_id | short_id }}</span>
+        </div>
+    </div>
+</div>
+
+{#  ── Error block (failure path) ───────────────────────────── #}
+{% if run.current_status == 'failed' %}
+<div class="verity-section">
+    <div class="verity-section-title">Error</div>
+    <div class="verity-card" style="border-color: var(--verity-red); background: var(--verity-red-light);">
+        {% if run.error_code %}
+        <div style="font-size: 0.75rem; font-weight: 600; color: #A23838; margin-bottom: 4px;">{{ run.error_code }}</div>
+        {% endif %}
+        <div class="verity-code" style="background: transparent; border: none; padding: 0;">{{ run.error_message or 'No error message recorded.' }}</div>
+    </div>
+</div>
+{% endif %}
+
+{#  ── Lifecycle timeline — every event in time order ────────── #}
+<div class="verity-section">
+    <div class="verity-section-title">Lifecycle ({{ lifecycle | length }} event{{ '' if lifecycle|length == 1 else 's' }})</div>
+    {% if lifecycle %}
+    <table class="verity-table">
+        <thead>
+            <tr>
+                <th>When</th>
+                <th>Table</th>
+                <th>Event</th>
+                <th>Worker</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for e in lifecycle %}
+            <tr>
+                <td style="font-size: 0.8rem; font-family: monospace;">
+                    {{ e.occurred_at.strftime('%H:%M:%S.%f')[:-3] if e.occurred_at else '—' }}
+                </td>
+                <td style="font-size: 0.8rem;">
+                    <span class="verity-badge verity-badge-{{ e.event_table }}" style="background: var(--verity-gray-pale); color: var(--verity-text-light);">{{ e.event_table }}</span>
+                </td>
+                <td><span class="verity-badge verity-badge-{{ e.event_kind }}">{{ e.event_kind }}</span></td>
+                <td style="font-size: 0.75rem; color: var(--verity-text-light);">{{ e.worker_id or '—' }}</td>
+                <td style="font-size: 0.8rem;">
+                    {% if e.error_code %}<strong>{{ e.error_code }}</strong>:
+                        {{ (e.error_message or '')[:120] }}{% if e.error_message and e.error_message|length > 120 %}…{% endif %}
+                    {% elif e.decision_log_id %}
+                        <a href="/admin/decisions/{{ e.decision_log_id }}">decision {{ e.decision_log_id | short_id }}</a>
+                        {% if e.duration_ms %} <span style="color: var(--verity-text-light);">({{ e.duration_ms }}ms)</span>{% endif %}
+                    {% elif e.notes %}
+                        {{ e.notes }}
+                    {% else %}—{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="verity-empty verity-empty-message">No lifecycle events recorded.</div>
+    {% endif %}
+</div>
+
+{#  ── Envelope (only when terminal) ─────────────────────────── #}
+{% if envelope %}
+<div class="verity-section">
+    <div class="verity-section-title">Envelope</div>
+
+    <div class="verity-detail-grid" style="margin-bottom: 12px;">
+        <div class="verity-detail-label">Status</div>
+        <div class="verity-detail-value"><span class="verity-badge verity-badge-{{ envelope.status }}">{{ envelope.status }}</span></div>
+
+        {% if envelope.provenance.decision_log_id %}
+        <div class="verity-detail-label">Decision log</div>
+        <div class="verity-detail-value">
+            <a href="/admin/decisions/{{ envelope.provenance.decision_log_id }}" style="font-family: monospace;">{{ envelope.provenance.decision_log_id }}</a>
+        </div>
+        {% endif %}
+
+        {% if envelope.telemetry.input_tokens or envelope.telemetry.output_tokens %}
+        <div class="verity-detail-label">Tokens</div>
+        <div class="verity-detail-value">
+            {{ envelope.telemetry.input_tokens or 0 }} in / {{ envelope.telemetry.output_tokens or 0 }} out
+        </div>
+        {% endif %}
+
+        {% if envelope.telemetry.tool_calls %}
+        <div class="verity-detail-label">Tool calls</div>
+        <div class="verity-detail-value">{{ envelope.telemetry.tool_calls }}</div>
+        {% endif %}
+
+        {% if envelope.telemetry.sources_resolved %}
+        <div class="verity-detail-label">Sources</div>
+        <div class="verity-detail-value">
+            {% for s in envelope.telemetry.sources_resolved %}
+            <span class="verity-badge verity-badge-staging" style="margin-right: 4px;">{{ s }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if envelope.telemetry.targets_fired %}
+        <div class="verity-detail-label">Targets fired</div>
+        <div class="verity-detail-value">
+            {% for t in envelope.telemetry.targets_fired %}
+            <span class="verity-badge verity-badge-champion" style="margin-right: 4px;">{{ t }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+
+    {% if envelope.output %}
+    <div class="verity-detail-label" style="margin-top: 12px;">Output</div>
+    <div class="verity-code">{{ envelope.output | tojson(indent=2) }}</div>
+    {% endif %}
+
+    {% if envelope.error %}
+    <div class="verity-detail-label" style="margin-top: 12px;">Error</div>
+    <div class="verity-code">{{ envelope.error | tojson(indent=2) }}</div>
+    {% endif %}
+</div>
+{% endif %}
+
+{#  ── Input ────────────────────────────────────────────────── #}
+{% if run.input_json %}
+<div class="verity-section">
+    <div class="verity-section-title">Input</div>
+    <div class="verity-code">{{ run.input_json | tojson(indent=2) }}</div>
+</div>
+{% endif %}
+
+{% endblock %}

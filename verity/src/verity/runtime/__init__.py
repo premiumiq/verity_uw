@@ -1,12 +1,11 @@
-"""Verity runtime plane — execution of agents, tasks, and pipelines.
+"""Verity runtime plane — execution of agents and tasks.
 
 This subpackage holds the execution machinery:
 
-- engine             — the agentic loop (will be swapped to Claude Agent SDK in Phase 3)
-- pipeline           — multi-step orchestrator with dependency resolution
+- engine             — the agentic loop (Claude Messages API, in-process)
+- worker             — async run worker that claims execution_run rows
 - test_runner        — executes test suites against entity versions
 - validation_runner  — runs entity versions against ground truth datasets
-- mock_context       — runtime-side helpers for caller-supplied mocks
 - metrics            — pure computation for F1, kappa, field accuracy, etc.
 - decisions_writer   — single write: log_decision() to governance's audit table
 - tool_registry      — the in-process Python callables dict for tool dispatch

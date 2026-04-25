@@ -765,6 +765,10 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
                 "execution_context_id": execution_context_id,
             }.items() if v
         })
+        # Dropdown options for the Application filter. Sourced from the
+        # runs themselves so the dropdown never offers a value that
+        # yields zero results.
+        application_options = await verity.runs_reader.list_filter_applications()
         return _render(templates, request, "runs_list.html",
             active_page="runs",
             runs=runs,
@@ -773,6 +777,60 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             limit=limit,
             offset=offset,
             filter_qs=filter_qs,
+            application_options=application_options,
+        )
+
+    @router.get("/runs/{run_id}", response_class=HTMLResponse)
+    async def run_detail_page(request: Request, run_id: str):
+        """Single-run drill-through: header, lifecycle timeline, envelope.
+
+        The page fetches three things:
+          - ExecutionRunCurrent (the view row)
+          - RunLifecycleEvent[] (every status/completion/error event)
+          - ExecutionEnvelope (present only when terminal)
+        It's okay for envelope to be None on in-flight runs — the
+        template renders just the header + lifecycle in that case.
+        """
+        await verity.ensure_connected()
+        try:
+            rid = UUID(run_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail=f"Invalid run UUID: {run_id!r}")
+        run = await verity.runs_reader.get_run(rid)
+        if not run:
+            return HTMLResponse("<h1>Run not found</h1>", status_code=404)
+        lifecycle = await verity.runs_reader.get_run_lifecycle(rid)
+        # Envelope only available for terminal runs. RunsReader.get_run_result
+        # returns None for in-flight, which the template handles.
+        envelope = await verity.runs_reader.get_run_result(rid)
+        return _render(templates, request, "run_detail.html",
+            active_page="runs",
+            run=run,
+            lifecycle=lifecycle,
+            envelope=envelope,
+        )
+
+    @router.get("/workflows/{workflow_run_id}", response_class=HTMLResponse)
+    async def workflow_detail_page(request: Request, workflow_run_id: str):
+        """All runs sharing one caller-supplied workflow_run_id.
+
+        Drives the "show me the whole multi-step workflow" drill-through.
+        Runs are returned in submitted_at order by
+        RunsReader.list_runs_for_workflow.
+        """
+        await verity.ensure_connected()
+        try:
+            wid = UUID(workflow_run_id)
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid workflow UUID: {workflow_run_id!r}",
+            )
+        runs = await verity.runs_reader.list_runs_for_workflow(wid)
+        return _render(templates, request, "workflow_detail.html",
+            active_page="runs",
+            workflow_run_id=wid,
+            runs=runs,
         )
 
     # ── DECISION LOG ──────────────────────────────────────────

@@ -1,0 +1,93 @@
+{#
+  WORKFLOW DETAIL — every run sharing one caller-supplied workflow_run_id.
+
+  A workflow_run_id is the correlation id apps generate to cluster
+  related task / agent calls into one logical invocation (e.g. UW's
+  doc_processing workflow = classify + extract). This page is the
+  "show me the whole multi-step run" drill-through.
+
+  DATA PASSED BY ROUTE:
+    workflow_run_id — UUID
+    runs            — list[ExecutionRunCurrent] in submitted_at order
+#}
+{% extends "base.html" %}
+
+{% block title %}Workflow {{ workflow_run_id | short_id }} — Verity{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/runs">Runs</a>
+    <span class="separator">›</span>
+    <span>Workflow {{ workflow_run_id | short_id }}</span>
+{% endblock %}
+
+{% block page_title %}Workflow run{% endblock %}
+
+{% block content %}
+
+<div class="verity-section">
+    <div class="verity-detail-grid">
+        <div class="verity-detail-label">Workflow run id</div>
+        <div class="verity-detail-value" style="font-family: monospace; font-size: 0.8rem;">{{ workflow_run_id }}</div>
+
+        <div class="verity-detail-label">Runs</div>
+        <div class="verity-detail-value">{{ runs | length }}</div>
+
+        {# When any run in the group has an execution_context_id, surface
+           it — lets the user jump to the broader submission view. #}
+        {% set ctx = (runs | selectattr('execution_context_id') | list | first) %}
+        {% if ctx %}
+        <div class="verity-detail-label">Execution context</div>
+        <div class="verity-detail-value">
+            <a href="/admin/runs?execution_context_id={{ ctx.execution_context_id }}" style="font-family: monospace;">{{ ctx.execution_context_id }}</a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% if runs %}
+<div class="verity-section">
+    <div class="verity-section-title">Steps (in submission order)</div>
+    <table class="verity-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Submitted</th>
+                <th>Entity</th>
+                <th>Kind</th>
+                <th>Status</th>
+                <th>Duration</th>
+                <th>Application</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in runs %}
+            <tr class="clickable" onclick="window.location='/admin/runs/{{ r.id }}'">
+                <td style="font-size: 0.8rem; color: var(--verity-text-light);">{{ loop.index }}</td>
+                <td style="font-size: 0.8rem;">
+                    {{ r.submitted_at.strftime('%H:%M:%S') if r.submitted_at else '—' }}
+                </td>
+                <td><a href="/admin/runs/{{ r.id }}">{{ r.entity_name }}</a></td>
+                <td><span class="verity-badge verity-badge-{{ r.entity_kind }}">{{ r.entity_kind }}</span></td>
+                <td>
+                    <span class="verity-badge verity-badge-{{ r.current_status }}">{{ r.current_status }}</span>
+                    {% if r.mock_mode %}<span class="verity-badge verity-badge-draft" style="margin-left: 4px;">mock</span>{% endif %}
+                </td>
+                <td style="font-size: 0.8rem;">
+                    {% if r.duration_ms %}{{ r.duration_ms }}ms
+                    {% elif r.current_status in ['claimed', 'heartbeat'] %}<em>running…</em>
+                    {% else %}—{% endif %}
+                </td>
+                <td style="font-size: 0.8rem;">{{ r.application }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="verity-empty">
+    <div class="verity-empty-message">No runs carry this workflow_run_id.</div>
+</div>
+{% endif %}
+
+{% endblock %}

@@ -1,32 +1,37 @@
-"""MockContext — tool-level mock control passed from caller to runtime.
+"""MockContext — caller-supplied mock control for an execution.
 
 MockContext is constructed by the caller (UW app, test runner, validation
-runner) and passed into the runtime's execute_* methods. It lets the
-caller specify mock tool outputs for a live LLM run so the agent reasons
-against controlled tool data instead of hitting external systems.
+runner) and passed into the runtime's run_* methods. It controls every
+flavour of mocking the runtime supports — from "skip the LLM call
+entirely and use this canned answer" down to "fake just this one tool's
+output."
 
-LLM-level mocking (previously `MockContext.llm_responses`) was retired in
-Phase 3d. For deterministic no-LLM execution, use `FixtureEngine` instead
-(see `verity.runtime.fixture_backend`) — it's a separate engine, honestly
-marked `mock_mode=True` in the decision log, and doesn't pretend to be
-the real ExecutionEngine.
-
-What MockContext covers today:
+What MockContext covers:
+  - step_responses   — per-step / per-entity canned answers. When set,
+                       the engine skips Claude AND skips source resolution
+                       AND skips target writes for matching runs — the
+                       supplied dict IS the structured output. Keyed by
+                       step_name first (workflow steps), then entity_name
+                       as fallback. This is how UW's mock-mode demo runs
+                       complete instantly without burning Anthropic
+                       tokens.
   - tool_responses   — per-tool canned outputs, keyed by tool name. Tools
                        NOT in this dict make real calls (unless
                        mock_all_tools=True or the tool's DB
-                       mock_mode_enabled flag is set).
+                       mock_mode_enabled flag is set). Used during real
+                       LLM runs to control specific tool outputs.
   - mock_all_tools   — when True, ALL tools return their DB-registered
                        `mock_responses` entry (one per tool). Specific
                        entries in `tool_responses` still override.
   - source_responses — per-source canned payloads, keyed by the Task's
-                       declared `input_field_name`. When a Task has a
-                       declared source whose input_field_name matches,
-                       the connector fetch is skipped and this payload
-                       is bound to the mapped template variable.
-  - target_blocks    — set of output_field_names whose declared target
-                       writes should be skipped (log-only). Used by test
-                       and validation runners to prevent side effects.
+                       declared input field name. When a Task has a
+                       declared source whose input field matches, the
+                       connector fetch is skipped and this payload is
+                       bound to the mapped template variable.
+  - target_blocks    — set of target names whose declared writes should
+                       be suppressed (logged but not executed). Used by
+                       test and validation runners to prevent side
+                       effects.
   - sub_agent_mocks  — per-sub-agent MockContexts (for FC-1 sub-agent
                        delegation when that ships).
 
@@ -73,10 +78,23 @@ class MockContext:
     production tools.
     """
 
+    # ── STEP / ENTITY MOCK ────────────────────────────────────
+    # Per-run canned answers — the heaviest form of mocking. When the
+    # engine finds a match here it skips Claude entirely AND skips
+    # source resolution AND skips target writes. The matching value
+    # IS the structured output the run returns.
+    #
+    # Lookup order: step_name first (set when called from a multi-step
+    # workflow), then entity_name as a fallback. A non-empty match on
+    # either key is honored. Decision_log row is still written; the
+    # mock_mode flag flips to True. Tokens / duration are zero.
+    step_responses: Optional[dict[str, Any]] = None
+
     # ── TOOL MOCK ─────────────────────────────────────────────
     # Per-tool mock responses. Key = tool name, value = response dict.
     # Tools NOT in this dict make real calls (unless mock_all_tools=True
-    # or the tool's DB flag mock_mode_enabled=True).
+    # or the tool's DB flag mock_mode_enabled=True). Only meaningful on
+    # real LLM runs — step_responses bypasses tool dispatch entirely.
     #
     # For multi-call scenarios (same tool called twice), the value can
     # be a list — each call consumes the next response in order.
@@ -153,6 +171,28 @@ class MockContext:
             return False
         return output_field_name in self.target_blocks
 
+    def get_step_response(
+        self, step_name: Optional[str], entity_name: str,
+    ) -> tuple[bool, Any]:
+        """Look up a per-run canned answer.
+
+        Returns (is_mocked, response). is_mocked=True signals that the
+        engine should skip Claude / sources / targets and use `response`
+        as the structured output verbatim.
+
+        Lookup order: step_name first when supplied (workflows pass it
+        per step), then entity_name. The two-tier lookup lets a workflow
+        pin a specific step's output without affecting other invocations
+        of the same entity.
+        """
+        if not self.step_responses:
+            return (False, None)
+        if step_name and step_name in self.step_responses:
+            return (True, self.step_responses[step_name])
+        if entity_name in self.step_responses:
+            return (True, self.step_responses[entity_name])
+        return (False, None)
+
     def get_sub_agent_mock(self, agent_name: str) -> Optional["MockContext"]:
         """Get the MockContext for a sub-agent invocation."""
         if self.sub_agent_mocks and agent_name in self.sub_agent_mocks:
@@ -168,11 +208,10 @@ class MockContext:
         the responses are ordered in a list.
 
         Previously this method also rebuilt LLM responses from the stored
-        message_history (via a `mock_llm` parameter). That capability was
-        retired in Phase 3d along with `MockContext.llm_responses`. For
-        deterministic no-LLM replay of a prior decision, use
-        `FixtureEngine` with a Fixture built from the decision's
-        output_json instead.
+        message_history. That capability was retired along with
+        `MockContext.llm_responses`. For deterministic no-LLM replay of a
+        prior decision, build a MockContext with `step_responses` keyed
+        by the entity name and the decision's `output_json` as the value.
         """
         tool_responses: Optional[dict] = None
         if hasattr(decision, "tool_calls_made") and decision.tool_calls_made:

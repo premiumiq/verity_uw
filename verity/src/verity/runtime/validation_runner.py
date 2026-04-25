@@ -27,7 +27,6 @@ from verity.db.connection import Database
 from verity.governance.registry import Registry
 from verity.governance.testing_meta import Testing
 from verity.runtime.engine import ExecutionEngine
-from verity.runtime.fixture_backend import Fixture, FixtureEngine
 from verity.runtime.metrics import (
     check_thresholds,
     classification_metrics,
@@ -339,50 +338,41 @@ class ValidationRunner:
             # the mapped field. Otherwise, use the stored value as-is.
             source_responses[key] = raw
 
-        # Pick engine based on mock_llm. See test_runner for the same pattern
-        # and rationale.
+        # Build MockContext for the run. mock_llm=True uses
+        # step_responses to pin the entity output to `expected`,
+        # short-circuiting the LLM call; the engine still writes
+        # decision_log + execution_run rows with mock_mode=True.
+        # mock_llm=False shapes inputs via tool/source mocks and
+        # calls Claude for real (the meaningful validation mode).
+        # Same pattern as TestRunner.
+        step_name = f"validation:record_{record_index}"
         if mock_llm:
-            # Cheap mode: route through FixtureEngine. Verifies the plumbing,
-            # does not measure model quality. Real validation uses mock_llm=False.
-            engine = FixtureEngine(
-                registry=self.registry,
-                decisions=self.engine.decisions,
-                fixtures={
-                    f"validation:record_{record_index}": Fixture(output=expected),
-                },
-                application=self.engine.application,
+            mock = MockContext(step_responses={step_name: expected})
+        elif tool_responses or source_responses:
+            mock = MockContext(
+                tool_responses=tool_responses or None,
+                source_responses=source_responses or None,
             )
-            mock = None
         else:
-            # Real validation: Claude is called; tool mocks shape the agent's
-            # inputs; source mocks replace Task connector fetches with the
-            # stored payload. If neither is populated, mock=None.
-            engine = self.engine
-            if tool_responses or source_responses:
-                mock = MockContext(
-                    tool_responses=tool_responses or None,
-                    source_responses=source_responses or None,
-                )
-            else:
-                mock = None
+            mock = None
 
         # Execute
         try:
             if entity_type == "agent":
-                exec_result = await engine.run_agent(
+                exec_result = await self.engine.run_agent(
                     agent_name=entity_name,
                     context=input_data,
                     channel=channel,
                     mock=mock,
-                    step_name=f"validation:record_{record_index}",
+                    step_name=step_name,
                 )
             else:
-                exec_result = await engine.run_task(
+                exec_result = await self.engine.run_task(
                     task_name=entity_name,
                     input_data=input_data,
                     channel=channel,
                     mock=mock,
-                    step_name=f"validation:record_{record_index}",
+                    step_name=step_name,
                 )
             actual_output = exec_result.output or {}
             decision_log_id = exec_result.decision_log_id

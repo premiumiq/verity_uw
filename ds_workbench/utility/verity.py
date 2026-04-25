@@ -143,7 +143,7 @@ ENDPOINTS: dict[str, tuple[str, str]] = {
     "list_decisions":        ("GET",    "/api/v1/decisions"),
     "get_decision":          ("GET",    "/api/v1/decisions/{decision_id}"),
     "audit_trail_by_context":("GET",    "/api/v1/audit-trail/context/{execution_context_id}"),
-    "audit_trail_by_run":    ("GET",    "/api/v1/audit-trail/run/{pipeline_run_id}"),
+    "audit_trail_by_run":    ("GET",    "/api/v1/audit-trail/run/{workflow_run_id}"),
     "record_override":       ("POST",   "/api/v1/overrides"),
 
     # Reporting
@@ -405,10 +405,10 @@ class VerityAPI:
             path_params={"execution_context_id": str(execution_context_id)},
         )
 
-    def audit_trail_by_run(self, pipeline_run_id: str) -> list[dict]:
+    def audit_trail_by_run(self, workflow_run_id: str) -> list[dict]:
         return self.call(
             "audit_trail_by_run",
-            path_params={"pipeline_run_id": str(pipeline_run_id)},
+            path_params={"workflow_run_id": str(workflow_run_id)},
         )
 
     # Lifecycle

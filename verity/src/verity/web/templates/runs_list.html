@@ -65,8 +65,12 @@
     </label>
     <label class="verity-label" style="display: inline-flex; align-items: center; gap: 6px; margin-bottom: 0;">
         Application
-        <input type="text" name="application" class="verity-input" style="width: 140px;"
-               value="{{ filters.application or '' }}">
+        <select name="application" class="verity-select" style="width: auto;">
+            <option value="">any</option>
+            {% for opt in application_options %}
+            <option value="{{ opt.name }}" {% if filters.application == opt.name %}selected{% endif %}>{{ opt.display_name }}</option>
+            {% endfor %}
+        </select>
     </label>
     <button type="submit" class="verity-btn verity-btn-primary verity-btn-sm">Apply</button>
     <a href="/admin/runs" class="verity-btn verity-btn-secondary verity-btn-sm">Clear</a>
@@ -115,7 +119,7 @@
                 {{ (r.first_started_at or r.submitted_at).strftime('%m-%d %H:%M:%S') if (r.first_started_at or r.submitted_at) else '—' }}
             </td>
             <td>
-                <a href="/admin/runs/{{ r.id }}">{{ r.entity_name }}</a>
+                <a href="/admin/runs/{{ r.id }}">{{ r.entity_display_name or r.entity_name }}</a>
             </td>
             <td><span class="verity-badge verity-badge-{{ r.entity_kind }}">{{ r.entity_kind }}</span></td>
             {# RunCurrentStatus inherits (str, Enum) so it renders as
@@ -138,7 +142,7 @@
                 {{ r.execution_context_id | short_id if r.execution_context_id else '—' }}
             </td>
             <td style="font-size: 0.8rem;">{{ r.channel }}</td>
-            <td style="font-size: 0.8rem;">{{ r.application }}</td>
+            <td style="font-size: 0.8rem;">{{ r.application_display_name or r.application }}</td>
         </tr>
         {% endfor %}
     </tbody>

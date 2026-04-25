@@ -44,9 +44,11 @@ CREATE TABLE IF NOT EXISTS submission (
     -- triaged: Pipeline 2 step 1 complete
     -- assessed: Pipeline 2 complete (triage + appetite)
     status              TEXT NOT NULL DEFAULT 'intake',
-    -- Verity pipeline tracking
-    last_doc_pipeline_run_id  UUID,   -- most recent Pipeline 1 run
-    last_risk_pipeline_run_id UUID,   -- most recent Pipeline 2 run
+    -- Verity workflow-run correlation ids (caller-supplied UUIDs the
+    -- UW workflows generate per invocation; Verity sees them as
+    -- agent_decision_log.workflow_run_id values).
+    last_doc_workflow_run_id  UUID,   -- most recent doc-processing run
+    last_risk_workflow_run_id UUID,   -- most recent risk-assessment run
     execution_context_id      UUID,   -- Verity execution context
     -- Timestamps
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -79,7 +81,7 @@ CREATE TABLE IF NOT EXISTS submission_extraction (
     -- Finalized value (either extracted or overridden)
     -- Computed by the app: if overridden, use override_value; else use extracted_value
     -- Audit
-    pipeline_run_id     UUID,                     -- links to Verity decision log
+    workflow_run_id     UUID,                     -- workflow-run correlation id from the UW app
     source_document_id  UUID,                     -- EDMS document ID the field was extracted from
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     -- One extraction per field per submission
@@ -110,7 +112,7 @@ CREATE TABLE IF NOT EXISTS submission_assessment (
     confidence          REAL,
     reasoning           TEXT,
     -- Audit
-    pipeline_run_id     UUID,                      -- links to Verity decision log
+    workflow_run_id     UUID,                      -- workflow-run correlation id from the UW app
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     -- One assessment per type per submission (latest wins)
     UNIQUE(submission_id, assessment_type)
@@ -138,7 +140,7 @@ CREATE TABLE IF NOT EXISTS workflow_step (
     started_at          TIMESTAMPTZ,
     completed_at        TIMESTAMPTZ,
     completed_by        TEXT,                      -- who triggered or approved this step
-    pipeline_run_id     UUID,                      -- links to Verity decision log
+    workflow_run_id     UUID,                      -- workflow-run correlation id from the UW app
     notes               TEXT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(submission_id, step_name)

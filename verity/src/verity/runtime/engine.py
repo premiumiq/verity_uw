@@ -11,14 +11,12 @@ and runs the agentic loop in-process. Two gateways mediate external calls:
     mock_mode_enabled flag, then dispatches the registered Python callable.
 
 EXECUTION MODES:
-  1. Fully live (mock=None)                      — LLM + tools both real
-  2. Live LLM + caller-supplied tool mocks       — MockContext(tool_responses={...})
-  3. Live LLM + all tools from DB mock registry — MockContext(mock_all_tools=True)
-
-For deterministic no-LLM execution (demos, cheap tests), use the separate
-FixtureEngine in runtime/fixture_backend.py — it's not a mode of this
-engine. LLM-level mocking was retired in Phase 3d; see the FixtureEngine
-docstring for the replacement story.
+  1. Fully live (mock=None)                       — LLM + tools both real
+  2. Live LLM + caller-supplied tool mocks        — MockContext(tool_responses={...})
+  3. Live LLM + all tools from DB mock registry  — MockContext(mock_all_tools=True)
+  4. Step-level short-circuit (zero LLM, zero IO) — MockContext(step_responses={...})
+     The matching value IS the structured output; sources/targets are
+     skipped; a decision_log row is still written with mock_mode=True.
 
 All modes write a DecisionLogCreate row with the same 31-column shape.
 mock_mode=True is set whenever any caller-supplied mocking was active.
@@ -120,10 +118,10 @@ class ExecutionEngine:
     ) -> Any:
         """Gateway for the single Claude API call this engine makes per turn.
 
-        LLM-level mocking was retired in Phase 3d — there is no longer a
-        "canned LLM response" path in this engine. Callers that want
-        deterministic no-LLM execution use FixtureEngine, which is a
-        separate class entirely (see runtime/fixture_backend.py).
+        There is no LLM-level mocking path here. Callers that want
+        deterministic no-LLM execution pass `MockContext(step_responses={...})`
+        — the engine short-circuits before reaching this gateway and uses
+        the supplied dict as the structured output verbatim.
 
         The `mock` parameter is still accepted and forwarded to
         `_gateway_tool_call` for tool-level mocking. It has no effect on
@@ -136,8 +134,8 @@ class ExecutionEngine:
         if not self.client:
             raise RuntimeError(
                 "No Anthropic API key configured. Set ANTHROPIC_API_KEY to run "
-                "via this engine, or use FixtureEngine (runtime/fixture_backend.py) "
-                "for deterministic no-LLM execution with pre-built fixtures."
+                "via this engine, or pass MockContext(step_responses={...}) for "
+                "deterministic no-LLM execution."
             )
 
         max_retries = 3
@@ -688,9 +686,10 @@ class ExecutionEngine:
     ) -> ExecutionResult:
         """Execute an agent: resolve config, assemble prompts, run the agentic loop.
 
-        `mock` controls tool-level mocking only (see MockContext).
-        LLM-level mocking was retired in Phase 3d — use FixtureEngine
-        for deterministic no-LLM execution.
+        `mock` controls tool/source/target mocking and step-level
+        short-circuit (see MockContext). When `mock.step_responses`
+        names this agent or step, the engine returns the supplied dict
+        as the output without calling Claude.
 
         FC-1 additions:
           - Pre-generates this run's decision log id (self_decision_id)
@@ -735,6 +734,85 @@ class ExecutionEngine:
             )
 
         config = await self.registry.get_agent_config(agent_name)
+
+        # ── SYNC-PATH SELF-TRACKING ────────────────────────────
+        # Same rationale as run_task: surface this call in /admin/runs
+        # alongside worker-dispatched runs. Worker callers supply
+        # execution_run_id and have already written the request row;
+        # sync callers (UW workflows, validation runner, sub-agent
+        # delegation) get an execution_run row written here.
+        self_tracked_run_id: Optional[UUID] = None
+        if execution_run_id is None:
+            self_tracked_run_id = uuid4()
+            await self._open_self_tracked_run(
+                run_id=self_tracked_run_id,
+                entity_kind="agent",
+                entity_version_id=config.agent_version_id,
+                entity_name=agent_name,
+                channel=channel,
+                input_data=context,
+                execution_context_id=execution_context_id,
+                workflow_run_id=workflow_run_id,
+                parent_decision_id=parent_decision_id,
+                application=application or self.application,
+                mock_mode=(mock is not None),
+                write_mode=write_mode,
+                enforce_output_schema=enforce_output_schema,
+            )
+            execution_run_id = self_tracked_run_id
+
+        # ── STEP-LEVEL MOCK SHORT-CIRCUIT ──────────────────────
+        # See the matching block in run_task. Skips the agentic loop
+        # entirely (no Claude, no tool dispatch, no source/target work)
+        # when the caller supplied a canned answer for this step or
+        # entity name. Decision_log + run-tracking writes still happen
+        # so audit shape is identical to a real run.
+        is_step_mocked, step_mock_output = (False, None)
+        if mock is not None:
+            is_step_mocked, step_mock_output = mock.get_step_response(step_name, agent_name)
+
+        if is_step_mocked:
+            output = step_mock_output if isinstance(step_mock_output, dict) else {}
+            output_text = json.dumps(output, default=str)
+            duration_ms = _now_ms() - start_ms
+            log_result = await self._log_decision(
+                id=self_decision_id,
+                entity_type=EntityType.AGENT, config=config, context=context,
+                output=output, output_text=output_text,
+                tool_calls_made=[], message_history=[],
+                total_input_tokens=0, total_output_tokens=0,
+                duration_ms=duration_ms,
+                channel=channel, workflow_run_id=workflow_run_id,
+                parent_decision_id=parent_decision_id,
+                decision_depth=decision_depth, step_name=step_name,
+                status="complete", mock_mode=True,
+                execution_context_id=execution_context_id,
+                application=application,
+                source_resolutions=None, target_writes=None,
+                execution_run_id=execution_run_id,
+            )
+            if self_tracked_run_id is not None:
+                await self._close_self_tracked_run_complete(
+                    run_id=self_tracked_run_id,
+                    decision_log_id=log_result["decision_log_id"],
+                    duration_ms=duration_ms,
+                )
+            logger.info(
+                "Agent execution complete (step-mocked): %s (step=%s, %dms, depth=%d)",
+                agent_name, step_name or "standalone", duration_ms, decision_depth,
+            )
+            return ExecutionResult(
+                decision_log_id=log_result["decision_log_id"],
+                entity_type="agent", entity_name=agent_name,
+                version_label=config.version_label,
+                output=output, output_summary=output_text[:500],
+                reasoning_text=output.get("reasoning", "") if isinstance(output, dict) else "",
+                confidence_score=output.get("confidence") if isinstance(output, dict) else None,
+                risk_factors=output.get("risk_factors") if isinstance(output, dict) else None,
+                tool_calls=[],
+                input_tokens=0, output_tokens=0,
+                duration_ms=duration_ms, status="complete",
+            )
 
         # ── SOURCE RESOLUTION ──────────────────────────────────
         # Resolve any declared source_binding rows for this agent
@@ -1067,6 +1145,12 @@ class ExecutionEngine:
             logger.info("Agent execution complete: %s (%dms, %d tool calls, %d+%d tokens, depth=%d)",
                          agent_name, duration_ms, len(tool_calls_made),
                          total_input_tokens, total_output_tokens, decision_depth)
+            if self_tracked_run_id is not None:
+                await self._close_self_tracked_run_complete(
+                    run_id=self_tracked_run_id,
+                    decision_log_id=log_result["decision_log_id"],
+                    duration_ms=duration_ms,
+                )
             return ExecutionResult(
                 decision_log_id=log_result["decision_log_id"],
                 entity_type="agent", entity_name=agent_name,
@@ -1134,6 +1218,13 @@ class ExecutionEngine:
                 error_message=str(e),
                 per_turn_metadata=per_turn_usage or None,
             )
+            if self_tracked_run_id is not None:
+                await self._close_self_tracked_run_error(
+                    run_id=self_tracked_run_id,
+                    error_code=type(e).__name__,
+                    error_message=str(e)[:1000],
+                    decision_log_id=log_result.get("decision_log_id"),
+                )
             return ExecutionResult(
                 decision_log_id=log_result["decision_log_id"],
                 entity_type="agent", entity_name=agent_name,
@@ -1182,6 +1273,81 @@ class ExecutionEngine:
         invocation_started_at = datetime.now(timezone.utc)
         config = await self.registry.get_task_config(task_name)
 
+        # ── SYNC-PATH SELF-TRACKING ────────────────────────────────────
+        # Worker dispatch supplies execution_run_id (and has already
+        # written the request + status ledger). Sync callers don't —
+        # we write the execution_run row ourselves so this call shows
+        # up in /admin/runs alongside worker-dispatched runs. See the
+        # _open_self_tracked_run docstring for the rationale.
+        self_tracked_run_id: Optional[UUID] = None
+        if execution_run_id is None:
+            self_tracked_run_id = uuid4()
+            await self._open_self_tracked_run(
+                run_id=self_tracked_run_id,
+                entity_kind="task",
+                entity_version_id=config.task_version_id,
+                entity_name=task_name,
+                channel=channel,
+                input_data=input_data,
+                execution_context_id=execution_context_id,
+                workflow_run_id=workflow_run_id,
+                parent_decision_id=parent_decision_id,
+                application=application or self.application,
+                mock_mode=(mock is not None),
+                write_mode=write_mode,
+            )
+            execution_run_id = self_tracked_run_id
+
+        # ── STEP-LEVEL MOCK SHORT-CIRCUIT ──────────────────────────────
+        # If the caller supplied a step-level mock for this run (matched
+        # by step_name first, then task_name), the engine returns the
+        # canned answer without calling Claude, resolving sources, or
+        # firing targets. This is the path UW's mock mode takes — fast,
+        # deterministic, zero-token. The decision_log row + execution_run
+        # tracking still happen below, so /admin/runs and /admin/decisions
+        # show the same shape as a real run.
+        is_step_mocked, step_mock_output = (False, None)
+        if mock is not None:
+            is_step_mocked, step_mock_output = mock.get_step_response(step_name, task_name)
+
+        if is_step_mocked:
+            output = step_mock_output if isinstance(step_mock_output, dict) else {}
+            output_text = json.dumps(output, default=str)
+            duration_ms = _now_ms() - start_ms
+            log_result = await self._log_decision(
+                entity_type=EntityType.TASK, config=config, context=input_data,
+                output=output, output_text=output_text,
+                tool_calls_made=[], message_history=[],
+                total_input_tokens=0, total_output_tokens=0,
+                duration_ms=duration_ms,
+                channel=channel, workflow_run_id=workflow_run_id,
+                parent_decision_id=parent_decision_id,
+                decision_depth=decision_depth, step_name=step_name,
+                status="complete", mock_mode=True,
+                execution_context_id=execution_context_id,
+                application=application,
+                source_resolutions=None, target_writes=None,
+                execution_run_id=execution_run_id,
+            )
+            if self_tracked_run_id is not None:
+                await self._close_self_tracked_run_complete(
+                    run_id=self_tracked_run_id,
+                    decision_log_id=log_result["decision_log_id"],
+                    duration_ms=duration_ms,
+                )
+            logger.info(
+                "Task execution complete (step-mocked): %s (step=%s, %dms)",
+                task_name, step_name or "standalone", duration_ms,
+            )
+            return ExecutionResult(
+                decision_log_id=log_result["decision_log_id"],
+                entity_type="task", entity_name=task_name,
+                version_label=config.version_label,
+                output=output, output_summary=output_text[:500],
+                input_tokens=0, output_tokens=0,
+                duration_ms=duration_ms, status="complete",
+            )
+
         # ── SOURCE RESOLUTION ──────────────────────────────────────────
         # Before prompt assembly, resolve any declared data sources for
         # this TaskVersion. Each source maps a caller-supplied reference
@@ -1200,9 +1366,6 @@ class ExecutionEngine:
         system_prompt, user_messages = _assemble_prompts(config.prompts, template_context)
 
         try:
-            # Build messages — tasks are single-turn structured output via Claude.
-            # LLM-level mocking was retired in Phase 3d; use FixtureEngine for
-            # deterministic no-LLM task execution.
             messages = [{"role": "user", "content": msg} for msg in user_messages]
 
             # For tasks with output_schema in valid JSON Schema format,
@@ -1338,6 +1501,14 @@ class ExecutionEngine:
             logger.info("Task execution complete: %s (%dms, %d+%d tokens)",
                          task_name, duration_ms,
                          response.usage.input_tokens, response.usage.output_tokens)
+            # Close the self-tracked run (no-op if the worker is the
+            # caller, since execution_run_id was supplied externally).
+            if self_tracked_run_id is not None:
+                await self._close_self_tracked_run_complete(
+                    run_id=self_tracked_run_id,
+                    decision_log_id=log_result["decision_log_id"],
+                    duration_ms=duration_ms,
+                )
             return ExecutionResult(
                 decision_log_id=log_result["decision_log_id"],
                 entity_type="task", entity_name=task_name,
@@ -1374,6 +1545,13 @@ class ExecutionEngine:
                 ),
                 execution_run_id=execution_run_id,
             )
+            if self_tracked_run_id is not None:
+                await self._close_self_tracked_run_error(
+                    run_id=self_tracked_run_id,
+                    error_code=type(e).__name__,
+                    error_message=str(e)[:1000],
+                    decision_log_id=log_result.get("decision_log_id"),
+                )
             return ExecutionResult(
                 decision_log_id=log_result["decision_log_id"],
                 entity_type="task", entity_name=task_name,
@@ -1901,6 +2079,135 @@ class ExecutionEngine:
             logger.exception(
                 "Failed to write model_invocation_log for decision %s",
                 decision_log_id,
+            )
+
+    # ── SYNC-PATH RUN TRACKING ─────────────────────────────────
+    # Worker-dispatched runs already have an execution_run row written
+    # by the API (see web/api/runs.py + RunsWriter.submit) and a full
+    # status ledger written by the worker. Sync callers — UW workflows,
+    # validation runner, notebooks calling verity.execution.* directly —
+    # bypass that path entirely. The helpers below make every sync call
+    # leave the same minimum trail in the run-tracking tables so the
+    # /admin/runs page is the canonical "what happened" view regardless
+    # of how the call was kicked off.
+    #
+    # Sync runs get exactly two rows:
+    #   1. execution_run                  — the request, written at entry
+    #   2. execution_run_completion or _error — the terminal outcome
+    #
+    # No execution_run_status entries: a sync call has no claim queue,
+    # so 'submitted'/'claimed'/'heartbeat' events would be invented
+    # noise. The execution_run_current view resolves current_status from
+    # the terminal row (or falls back to 'submitted' until the terminal
+    # row lands), which is exactly what we want.
+
+    async def _open_self_tracked_run(
+        self,
+        *,
+        run_id: UUID,
+        entity_kind: str,                          # 'task' | 'agent'
+        entity_version_id: UUID,
+        entity_name: str,
+        channel: str,
+        input_data: Optional[dict],
+        execution_context_id: Optional[UUID],
+        workflow_run_id: Optional[UUID],
+        parent_decision_id: Optional[UUID],
+        application: str,
+        mock_mode: bool,
+        write_mode: Optional[str] = None,
+        enforce_output_schema: Optional[bool] = None,
+    ) -> None:
+        """INSERT the execution_run request row for a sync call."""
+        await self.registry.db.execute_returning(
+            "insert_execution_run",
+            {
+                "id": str(run_id),
+                "entity_kind": entity_kind,
+                "entity_version_id": str(entity_version_id),
+                "entity_name": entity_name,
+                "channel": channel,
+                "input_json": (
+                    json.dumps(input_data, default=str) if input_data else None
+                ),
+                "execution_context_id": (
+                    str(execution_context_id) if execution_context_id else None
+                ),
+                "workflow_run_id": (
+                    str(workflow_run_id) if workflow_run_id else None
+                ),
+                "parent_decision_id": (
+                    str(parent_decision_id) if parent_decision_id else None
+                ),
+                "application": application,
+                "mock_mode": mock_mode,
+                "write_mode": write_mode,
+                "enforce_output_schema": enforce_output_schema,
+                # Distinguish sync calls in audit views from worker-
+                # dispatched ones without inventing fake worker ids.
+                "submitted_by": "inproc",
+            },
+        )
+
+    async def _close_self_tracked_run_complete(
+        self,
+        run_id: UUID,
+        decision_log_id: Optional[UUID],
+        duration_ms: Optional[int],
+    ) -> None:
+        """INSERT the terminal-success row for a self-tracked sync run.
+
+        Failures here are logged but never raise — the run already
+        completed; failing to record the terminal row leaves the
+        execution_run_current view showing 'submitted' until somebody
+        notices, which is mildly confusing but not load-bearing.
+        Better than throwing on top of a successful call.
+        """
+        try:
+            await self.registry.db.execute_returning(
+                "insert_execution_run_completion",
+                {
+                    "execution_run_id": str(run_id),
+                    "final_status": "complete",
+                    "decision_log_id": (
+                        str(decision_log_id) if decision_log_id else None
+                    ),
+                    "duration_ms": duration_ms,
+                    "worker_id": None,
+                },
+            )
+        except Exception:
+            logger.exception(
+                "Failed to write execution_run_completion for self-tracked run %s",
+                run_id,
+            )
+
+    async def _close_self_tracked_run_error(
+        self,
+        run_id: UUID,
+        error_code: Optional[str],
+        error_message: str,
+        decision_log_id: Optional[UUID] = None,
+    ) -> None:
+        """INSERT the terminal-failure row for a self-tracked sync run."""
+        try:
+            await self.registry.db.execute_returning(
+                "insert_execution_run_error",
+                {
+                    "execution_run_id": str(run_id),
+                    "error_code": error_code,
+                    "error_message": error_message,
+                    "error_trace": None,
+                    "worker_id": None,
+                    "decision_log_id": (
+                        str(decision_log_id) if decision_log_id else None
+                    ),
+                },
+            )
+        except Exception:
+            logger.exception(
+                "Failed to write execution_run_error for self-tracked run %s",
+                run_id,
             )
 
     async def _log_decision(
