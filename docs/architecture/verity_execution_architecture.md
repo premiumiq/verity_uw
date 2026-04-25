@@ -1,14 +1,16 @@
 # Verity Execution Architecture — Tasks, Agents, Declarative I/O, Async Runs
 
-**Status:** Architecture decisions locked 2026-04-24. Supersedes the 2026-04-23 set.
+**Status:** Architecture decisions locked 2026-04-24. All phases (A–K)
+implemented and validated end-to-end against UW + EDMS as of 2026-04-25.
 **Scope:** How Verity shapes its two execution units (Task, Agent), how their
-inputs and outputs are declared and resolved, how runs are submitted and
-tracked asynchronously, and where orchestration stops being Verity's problem.
+inputs and outputs are declared and resolved, how content (text and binary)
+flows from data sources into LLM calls, how runs are submitted and tracked
+asynchronously, and where orchestration stops being Verity's problem.
 
-This document is the reference for Phases A–K of the execution-architecture
-plan. It supersedes `task_data_sources_targets.md` (pre-descope source/target
-design) and reshapes the 2026-04-23 version of this doc, which included
-pipelines as a first-class runtime entity.
+This document is the reference for the live architecture. It supersedes
+`task_data_sources_targets.md` (pre-descope source/target design) and the
+2026-04-23 version of this doc, which still included pipelines as a
+first-class runtime entity.
 
 ---
 
@@ -111,20 +113,72 @@ No `context.*` or `step.*` references exist — those were pipeline-scope only
 and pipelines are descoped. Each reference resolves entirely against the
 unit's own `input` and `output` dicts.
 
-### Example — task source
+### Modality — `binding_kind` decides where the value lands
 
-The field extractor declares `document_text` as a template variable that's
-filled from EDMS at execution time:
+A `source_binding` row carries a `binding_kind` discriminator that controls
+how the resolved value reaches the LLM:
+
+| `binding_kind`  | Resolved value type | Where it lands in the Claude call |
+|---|---|---|
+| `text` (default) | string | Bound to `{{template_var}}` in the prompt template, substituted before the API call. |
+| `content_blocks` | list of Claude content-block dicts | Prepended to the **first user message** as content blocks, ahead of the template-rendered text. The prompt template SHOULD NOT reference `{{template_var}}` for content_blocks bindings — the data does not flow through template substitution. |
+
+A binding declared with `binding_kind='content_blocks'` requires its connector
+method to return a list of content-block dicts in Claude's API shape:
+
+- `{"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": "<b64>"}}` — for PDFs.
+- `{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "<b64>"}}` — for images.
+- `{"type": "text", "text": "<contents>"}` — for plain text.
+
+This is the **only** path through which non-text content reaches the LLM.
+There is no side-channel: the runtime does not inspect input fields named
+`_documents` or any other reserved key, and `_assemble_prompts` never
+synthesises content blocks from `input_data` directly. Vision and multimodal
+behaviour is exclusively driven by declared source bindings.
+
+`source_resolutions` audit rows record `binding_kind` per binding so operators
+can see, per run, which path each declared source took (and how big the
+returned payload was, regardless of modality).
+
+### Example — text source (extractor)
+
+The field extractor's prompt template uses `{{document_text}}`. The binding
+fetches text from EDMS:
 
 ```yaml
 source_binding on task:field_extractor
   template_var: document_text
-  reference:    fetch:edms/get_document_text(input.document_ref)
+  reference:    fetch:edms/get_documents_text(input.documents)
+  binding_kind: text
+  required:     true
 ```
 
-When a caller invokes the task with `{document_ref: "<edms-uuid>", ...}`, the
-runtime walks to `input.document_ref`, calls `edms.get_document_text(<uuid>)`,
-and binds the result to `{{document_text}}` in the prompt template.
+When the caller invokes the task with `{documents: [{id: "<edms-uuid>", ...}, ...]}`,
+the runtime calls `edms.get_documents_text(<list>)` once, gets the
+concatenated extracted text, and substitutes it for `{{document_text}}` in the
+prompt template.
+
+### Example — content_blocks source (vision classifier)
+
+The document classifier needs to *see* PDFs and read text files; the connector
+returns one content block per ref, the runtime attaches them to the first
+user message, and the prompt template carries no document placeholder:
+
+```yaml
+source_binding on task:document_classifier
+  template_var: documents_content
+  reference:    fetch:edms/get_document_content_blocks(input.documents)
+  binding_kind: content_blocks
+  required:     true
+```
+
+For an input with `documents = [{id: "<pdf-uuid>", content_type: "application/pdf"}]`,
+the runtime calls `edms.get_document_content_blocks(<list>)`. The connector
+fetches per-ref `content_type` from EDMS metadata and emits the matching
+block shape (PDF → document, image → image, text → text). The classifier
+prompt receives `[<doc/image/text block>, <text-rendered prompt>]` as the
+first user message content array. Claude sees the document natively without
+any text extraction step in the prompt path.
 
 ### Example — task target payload
 
@@ -145,6 +199,33 @@ write_target on task:field_extractor
 
 The runtime assembles the payload dict by resolving each field's reference,
 then calls `edms.write("create_derived_json", container, {parent_id, derivative_type, data})`.
+
+### Target writes — the channel-gated `auto` mode
+
+Declared `write_target` rows fire after the LLM call (Task) or terminal turn
+(Agent). Whether the call to the connector's `write()` actually happens or
+gets recorded as a logged-only intent is decided per-run by an effective
+write-mode resolver. Precedence, strongest first:
+
+1. **`MockContext.target_blocks`** — explicit per-target block always wins.
+   Used by validation/test runners to guarantee no side effects regardless
+   of channel or `write_mode`.
+2. **Caller-supplied `write_mode`** kwarg on `run_task` / `run_agent`:
+   `"log_only"` and `"write"` are explicit overrides with named reasons.
+3. **`write_mode='auto'`** (the default) — channel-gated:
+   - `channel == 'production'` → writes fire.
+   - Any other channel (`development`, `staging`, `shadow`, `evaluation`) →
+     logged only.
+
+The `target_writes` audit JSONB on the decision row carries
+`mode_reason` (e.g. `"auto_channel=production"`, `"write_mode=log_only"`,
+`"mock_target_block"`) so operators can answer "why didn't this write?"
+without re-deriving the policy.
+
+The `auto`-mode gate explicitly tests against `production` (the canonical
+live-traffic deployment_channel value). It does **not** key off lifecycle
+state — a version's `lifecycle_state` of `champion` does not by itself enable
+writes; only being executed on the `production` channel does.
 
 ### Admit-time validation
 
@@ -205,6 +286,25 @@ Given a submission reference like `submission:SUB-001`, the app looks up its
   the tree from a root decision.
 - **Live state of a submitted run** — join through `execution_run_id` to the
   `execution_run_current` view.
+
+### Mocking — three independent concerns, no fall-through to live LLM
+
+Verity supports three kinds of caller-supplied mocking through `MockContext`,
+each addressing a different concern. They compose — a single run can use any
+combination — but they do not *fall through* to one another. The semantics
+are explicit on purpose, because a missing fixture should never silently
+turn into a real Claude call (and a real bill).
+
+| Field | Targets | Lookup behaviour |
+|---|---|---|
+| `step_responses` | The full LLM call | Keyed by `step_name` first, then `entity_name`. **Hard semantics:** when this dict is non-empty and no key matches, the engine raises `MockMissingError` — supplying step_responses means "this run is fully scripted," and a missing fixture is a bug, not a license to fall through to live Claude. The engine closes the self-tracked run with an error event before propagating, so the failure is visible in `/admin/runs`. |
+| `tool_responses` | Individual tool calls | Keyed by tool name. Tools NOT in this dict make real calls (or use the tool's DB-registered `mock_mode_enabled` default). This is the path for partial mocking — "mock this one tool, run the rest live." |
+| `source_responses` | Source binding fetches | Keyed by the binding's input field name. Skips the connector fetch and uses the supplied payload verbatim. Coexists with `binding_kind`: a content_blocks binding's mock value must already be a list of content-block dicts. |
+
+A run that uses `step_responses` exclusively never calls Claude, never resolves
+sources, never fires targets. The engine still writes a `decision_log` row
+with `mock_mode=True` and an `execution_run` row tagged `submitted_by='inproc'`
+so the audit shape is identical to a live run.
 
 ### Run tracking is event-sourced
 
@@ -310,37 +410,62 @@ Specifically, Verity does **not**:
 ### What the app writes
 
 Multi-step workflows are plain Python in the consuming app. The submission
-doc-processing workflow looks like:
+doc-processing workflow runs **per document**: classify each one, extract
+from each one classified as a D&O application. Every call gets its own
+audit row + its own EDMS write where applicable.
 
 ```python
-async def run_doc_workflow(submission_id, document_ref):
+async def run_doc_workflow(submission_id):
     wf_run_id = uuid4()
     ctx_id = await verity.register_execution_context(f"submission:{submission_id}")
 
-    classify = await verity.run_task(
-        "document_classifier",
-        {"document_ref": document_ref},
-        execution_context_id=ctx_id,
-        workflow_run_id=wf_run_id,
-    )
-    extract = await verity.run_task(
-        "field_extractor",
-        {
-            "document_ref": document_ref,
-            "document_type": classify.output["doc_type"],
-            "destination_document_id": document_ref,
-            "derivative_type": "field_extraction",
-        },
-        execution_context_id=ctx_id,
-        workflow_run_id=wf_run_id,
-    )
-    return {"classify": classify, "extract": extract}
+    # EDMS returns originals only by default (lineage children are
+    # filtered out — they're an implementation detail of upload +
+    # auto-extraction, not items the caller needs to reason about).
+    documents = await edms.list_documents(f"submission:{submission_id}")
+
+    for doc in documents:
+        classify = await verity.run_task(
+            "document_classifier",
+            {
+                "submission_id": submission_id,
+                "lob": "DO",
+                "named_insured": "...",
+                "documents": [doc],   # single-element list per call
+            },
+            step_name=f"classify_documents:{doc['filename']}",
+            execution_context_id=ctx_id,
+            workflow_run_id=wf_run_id,
+        )
+        if classify.output.get("document_type") == "do_application":
+            await verity.run_task(
+                "field_extractor",
+                {
+                    "submission_id": submission_id,
+                    "named_insured": "...",
+                    "documents": [doc],
+                },
+                step_name=f"extract_fields:{doc['filename']}",
+                execution_context_id=ctx_id,
+                workflow_run_id=wf_run_id,
+            )
 ```
 
-The workflow is readable, version-controlled in the app repo, integrates with
-whatever scheduler / retry / async infrastructure the app already has, and
-produces the full Verity audit trail because every call threads
-`execution_context_id` + `workflow_run_id`.
+Things to notice:
+
+- The app passes **only EDMS document references** in `input.documents` —
+  `id`, `filename`, `content_type`, `document_type`. No base64 PDFs, no
+  inlined extracted text. The audit `input_json` shows exactly that small
+  reference list, not "elided" placeholders.
+- Each task version's source_binding decides what to fetch from each
+  reference. Classifier uses `binding_kind='content_blocks'` (PDFs go to
+  Claude vision); extractor uses `binding_kind='text'` (extracted text bound
+  to `{{document_text}}`). Both bindings are declarative — the workflow code
+  is unchanged when modality changes.
+- The workflow is readable, version-controlled in the app repo, integrates
+  with whatever scheduler / retry / async infrastructure the app already
+  has, and produces the full Verity audit trail because every call threads
+  `execution_context_id` + `workflow_run_id` and a unique `step_name`.
 
 ### What Verity still contributes
 
@@ -439,7 +564,7 @@ The shape borrows deliberately from established specs:
 
 ---
 
-## Locked decisions (2026-04-24)
+## Locked decisions (2026-04-24, validated 2026-04-25)
 
 Supersedes the 2026-04-23 set.
 
@@ -456,68 +581,101 @@ Supersedes the 2026-04-23 set.
    references.
 4. **Wiring is split into two purpose-named tables**: `source_binding` and
    `target_payload_field` (the latter subordinate to `write_target`).
-5. **Agent output enforcement is opt-in per run** —
+5. **`source_binding.binding_kind` decides modality.** `text` substitutes the
+   resolved value into `{{template_var}}`; `content_blocks` prepends the
+   resolved value (a list of Claude content-block dicts) to the first user
+   message. There is no parallel side-channel — the runtime never inspects
+   reserved input keys for vision content.
+6. **Agent output enforcement is opt-in per run** —
    `run_agent(enforce_output_schema=True)` injects a `submit_output` tool and
    forces `tool_choice` on the terminal turn. Off by default.
-6. **Async runs with event-sourced tracking.** Submit/poll/cancel over REST;
+7. **Async runs with event-sourced tracking.** Submit/poll/cancel over REST;
    external worker pool; all lifecycle state is append-only across four
    tables (`execution_run`, `execution_run_status`, `execution_run_completion`,
    `execution_run_error`) surfaced through the `execution_run_current` view.
-7. **Submission audit continues via `execution_context_id`.** Multi-step
+8. **Submission audit continues via `execution_context_id`.** Multi-step
    workflow grouping continues via caller-supplied `workflow_run_id` (renamed
    from `pipeline_run_id`).
-8. **Flat envelope.** No nested `steps[]`. Parent/child linkage is
+9. **Flat envelope.** No nested `steps[]`. Parent/child linkage is
    `parent_run_id` on each envelope; app-level workflow envelopes are the
    app's construction.
-9. **EDMS document references fully preserved.** Callers pass a `document_ref`
-   on `input` as today; a source_binding with a `fetch:edms/...` reference
-   resolves it. Same capability, new configuration surface.
-10. **FC-3 (Agent Hooks / Pre-Post Middleware) remains deferred indefinitely.**
+10. **Apps pass references, not content.** Callers put EDMS document
+    references (or other resource refs) into `input` and let declared
+    source_bindings fetch the actual content via the connector at execution
+    time. Audit `input_json` carries the references, not inlined binaries
+    or extracted text. EDMS reinforces this contract by returning *originals*
+    only from its `/documents` listing by default; lineage children
+    (auto-extracted text, JSON derivatives) are an opt-in.
+11. **`step_responses` mocks are strict.** When `MockContext.step_responses`
+    is supplied and no key matches the requested step, the engine raises
+    `MockMissingError`. Mock mode never falls through to a real Claude call.
+    Partial mocking (mock some tools, run others live) is the role of
+    `tool_responses`, not `step_responses`.
+12. **Write-mode `auto` gates on `channel='production'`.** Declared targets
+    fire only on the production deployment_channel under `auto` mode; every
+    other channel logs the intended write without invoking the connector.
+    Lifecycle-state `champion` is an orthogonal concept and does not by
+    itself enable writes.
+13. **FC-3 (Agent Hooks / Pre-Post Middleware) remains deferred indefinitely.**
     See `future_capabilities.md`.
 
 ---
 
-## Implementation order
+## Implementation order — completed 2026-04-25
 
-Existing Phase 2/3 work (task sources + EDMS connector) is preserved
-conceptually but migrates to the new schema. Former Phase 7/8
-(pipeline-specific wiring) disappear.
+All phases below have shipped, are on the `main` branch, and were
+validated end-to-end against a live Claude run + real EDMS write on the
+UW demo. Existing Phase 2/3 work (task sources + EDMS connector) was
+preserved conceptually and migrated to the new schema; former Phase 7/8
+(pipeline-specific wiring) was deleted.
 
-- **Phase A — Schema foundations.** Create all new tables plus the
-  `execution_run_current` view. Add `agent_version.input_schema`. Rename
-  `pipeline_run_id` → `workflow_run_id`. Add `execution_run_id` FK on
+- ✅ **Phase A — Schema foundations.** All new tables plus the
+  `execution_run_current` view. `agent_version.input_schema`.
+  `pipeline_run_id` → `workflow_run_id`. `execution_run_id` FK on
   `agent_decision_log`.
-- **Phase B — Data migration.** Convert `task_version_source` →
-  `source_binding`; convert `task_version_target` → `write_target` +
-  `target_payload_field`. Drop the old tables.
-- **Phase C — Async primitive + worker.** `POST /runs` + lifecycle endpoints,
-  `verity-worker` service, SDK `submit_*` / `get_run` / `wait_for_run` /
-  `cancel_run`. Existing `run_task` / `run_agent` become sync sugar over the
-  async primitive.
-- **Phase D — Unified runtime I/O.** Generic `_resolve_sources` /
-  `_write_targets` / `_resolve_reference` against the new tables. Refactor
-  `run_task` to use them.
-- **Phase E — Agent parity.** Add source resolution + target writes to
-  `run_agent`. Thread `execution_run_id` through.
-- **Phase F — Agent output enforcement.** `enforce_output_schema=True` +
-  `submit_output` tool injection on terminal turn.
-- **Phase G — Envelope unification.** One envelope shape for task and agent
-  returns.
-- **Phase H — Pipeline descope.** Delete pipeline runtime, contracts, models,
-  queries, UI pages. Rewrite uw_demo pipeline code as plain Python in
-  `workflows.py`.
-- **Phase I — Runs UI.** New `/runs`, `/runs/{id}`, `/workflows/{id}` pages.
-  Drop `/pipelines/*`. Wire the UW "View in Verity" deep-link to
-  `/runs?execution_context_id=<ctx>&group_by=workflow_run`.
-- **Phase J — EDMS write endpoint + extractor target.** EDMS
-  `POST /documents/{parent_id}/derived` route;
-  `EdmsProvider.write("create_derived_json", ...)`; register the extractor's
-  `write_target` + payload fields.
-- **Phase K — Doc rewrite.** Land this document; mark
-  `task_data_sources_targets.md` superseded; update cross-references in
-  `registry_runtime_split_plan.md`.
+- ✅ **Phase B — Data migration.** `task_version_source` →
+  `source_binding`; `task_version_target` → `write_target` +
+  `target_payload_field`. Old tables dropped.
+- ✅ **Phase C — Async primitive + worker.** `POST /runs` + lifecycle
+  endpoints, `verity-worker` service, SDK `submit_*` / `get_run` /
+  `wait_for_run` / `cancel_run`. Existing `run_task` / `run_agent` are now
+  sync sugar over the async primitive.
+- ✅ **Phase D — Unified runtime I/O.** Generic `_resolve_sources` /
+  `_write_targets` / `_resolve_reference` against the new tables.
+- ✅ **Phase E — Agent parity.** Source resolution + target writes wired
+  in `run_agent`. `execution_run_id` threaded through.
+- ✅ **Phase F — Agent output enforcement.** `enforce_output_schema=True`
+  injects a `submit_output` tool on the terminal turn.
+- ✅ **Phase G — Envelope unification.** One canonical envelope shape for
+  task and agent returns.
+- ✅ **Phase H — Pipeline descope.** Pipeline runtime, contracts, models,
+  queries, and UI pages deleted. UW orchestration moved to plain Python
+  in `uw_demo/app/workflows.py`.
+- ✅ **Phase I — Runs UI.** `/admin/runs`, `/admin/runs/{id}`,
+  `/admin/workflows/{id}` pages live. `/pipelines/*` retired. The
+  `/admin/runs` listing renders entity + application by display name and
+  exposes a registered-applications dropdown filter.
+- ✅ **Phase J — EDMS write endpoint + extractor target + multimodal.**
+  EDMS `POST /documents/{parent_id}/derived` (creates JSON-derivative
+  child + lineage row). `EdmsProvider.write("create_derived_json", ...)`.
+  Field-extractor `write_target` + payload fields registered. Validated
+  end-to-end against EDMS on `channel=production`.
 
-Phases are mostly sequential (A precedes B, C, D; B precedes D; D precedes E;
-E precedes F; H depends on D+E+G so uw_demo has a replacement path when
-pipelines vanish; I depends on C+H; J is independent; K last). Each is
-independently deployable.
+  Extensions that landed during Phase J validation:
+  - `source_binding.binding_kind` (`text` | `content_blocks`) — vision
+    and multimodal flow through declarative source bindings rather than
+    a side-channel input field. The classifier uses content_blocks; the
+    extractor uses text.
+  - EDMS `GET /documents` defaults to originals only (`include_derivatives=false`)
+    — lineage children (auto-extracted text, JSON derivatives) are
+    omitted unless explicitly requested.
+  - UW `run_doc_processing` iterates per-document — one classifier call
+    per doc, one extractor call per doc classified as `do_application`.
+    Each call is its own audit row with a unique `step_name`.
+  - `MockContext.step_responses` is strict — missing fixture raises
+    `MockMissingError` rather than falling through to a live Claude
+    call. The strict-miss closes the self-tracked run with an error
+    event before propagating.
+- ✅ **Phase K — Doc rewrite.** This document; product vision and
+  technical design synced; `task_data_sources_targets.md` superseded;
+  cross-references updated in `registry_runtime_split_plan.md`.

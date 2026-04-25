@@ -129,11 +129,13 @@ The Governance plane does not call LLMs. It does not execute tools. It does not 
 
 ### 2. Verity Runtime (shipped)
 
-The execution surface. It owns the agentic loop, tool calling, pipeline execution, sub-agent delegation, MCP client, the model invocation log, and the decision log writer.
+The execution surface. It owns two execution units — **Tasks** (single LLM call with structured output) and **Agents** (the agentic loop with tool calling and sub-agent delegation) — plus the connector layer that resolves declared input sources and fires declared output writes, the MCP client, the model invocation log, and the decision log writer.
 
-When the business app calls `verity.execution.run_agent(...)`, the Runtime resolves the champion version from Governance, assembles the prompt and tool authorizations, calls the LLM, handles the tool-use loop, and - as a non-negotiable side effect - writes one decision log entry per invocation.
+When the business app calls `verity.execution.run_task(...)` or `verity.execution.run_agent(...)`, the Runtime resolves the champion version from Governance, resolves declared `source_binding` rows (fetching content via connectors at execution time), assembles the prompt, calls the LLM, handles the tool-use loop if any, fires declared `write_target` rows post-output, and — as a non-negotiable side effect — writes one decision log entry per invocation.
 
 The Runtime plane is constrained by Governance: inference parameters are pulled from the resolved config, tool calls are checked against the authorization list, and every call increments the model invocation log used for usage and spend.
+
+Multi-step workflows (classify → extract → assess → write-back) are **not** a Runtime concern. They live in app code, calling `run_task` / `run_agent` and threading a caller-supplied `workflow_run_id` through every call so all related decisions cluster under one correlation id in the audit. See `verity_execution_architecture.md` for the contract.
 
 ### 3. Verity Agents (future)
 
@@ -159,12 +161,13 @@ Verity Agents will themselves be Verity-governed agents - registered, versioned,
 |  +------------------+                    |
 |  | Verity SDK       |                    |
 |  |  Runtime:        |                    |
-|  |   Execution      |----> Claude API    |
-|  |   Pipeline       |                    |
-|  |   Decisions(W)   |--+                 |
+|  |   Tasks/Agents   |----> Claude API    |
+|  |   Connectors     |--+                 |
+|  |   Runs (async)   |  |                 |
+|  |   Decisions(W)   |  |                 |
 |  |                  |  |                 |
-|  |  Governance:     |  |                 |
-|  |   Registry       |<-+                 |
+|  |  Governance:     |<-+                 |
+|  |   Registry       |                    |
 |  |   Lifecycle      |----> verity_db     |
 |  |   Decisions(R)   |                    |
 |  |   Reporting      |                    |
@@ -216,16 +219,30 @@ Whether the Verity Runtime or an external orchestrator is doing the execution, e
     channel:                   "production" | "staging" | "shadow" | ...
     mock_mode:                 bool
 
-    pipeline_run_id:           UUID | null
+    workflow_run_id:           UUID | null  // app-supplied, groups
+                                             // all decisions from one
+                                             // multi-step workflow run
+    execution_run_id:          UUID | null  // links to event-sourced
+                                             // execution_run table
     parent_decision_id:        UUID | null
     decision_depth:            int
     step_name:                 str | null
 
     input_summary:             str | null
-    input_json:                {...} | null
+    input_json:                {...} | null  // refs only — content
+                                             // never inlined; arrives
+                                             // via source_binding fetches
     output_summary:            str | null
     output_json:               {...} | null
     reasoning_text:            str | null
+    source_resolutions:        [...] | null  // per-binding audit:
+                                             // {template_var, kind,
+                                             //  binding_kind, status,
+                                             //  payload_size, ...}
+    target_writes:             [...] | null  // per-target audit:
+                                             // {target_name, mode,
+                                             //  mode_reason, status,
+                                             //  handle, ...}
     risk_factors:              [...] | null
     confidence_score:          float | null
     low_confidence_flag:       bool
@@ -256,11 +273,11 @@ This is the hard requirement. Anything that executes agents under the Verity gov
 
 ### The Scenario
 
-A commercial insurance submission arrives for a financial services company applying for General Liability coverage. The underwriting application - powered by Verity - processes it through two governed pipelines.
+A commercial insurance submission arrives for a D&O liability application. The underwriting application — powered by Verity — processes it through two app-orchestrated workflows: document processing first, then risk assessment.
 
 ### Step 1: Documents Enter the System
 
-The broker uploads an ACORD 125 application form and a loss run report to the EDMS. EDMS stores the files in MinIO, extracts text from each document, and tracks the lineage (original PDF -> extracted text).
+The broker uploads a D&O application PDF, a board resolution, and a loss run report to EDMS. EDMS stores the files in MinIO, runs text extraction once per document and stores the result as a lineage child, and tags the originals.
 
 ```
 Broker uploads documents
@@ -275,62 +292,87 @@ Broker uploads documents
 +------------------+
 ```
 
-### Step 2: The Document-Processing Pipeline Runs
+### Step 2: The Document-Processing Workflow Runs (per-document)
 
-The underwriting app creates an execution context in Verity (`context_ref="submission:SUB-001"`) and triggers the `uw_document_processing` pipeline. Verity Governance resolves the champion version of each step; Verity Runtime executes them in order.
-
-```
-UW App: run_pipeline("uw_document_processing", context=submission:SUB-001)
-        |
-        v
-Governance: resolve champions
-        - pipeline uw_document_processing v1
-        - task document_classifier (champion)
-        - task field_extractor (champion)
-        |
-        v
-Runtime: execute 2 governed steps
-        Step 1: classify_documents
-                task = document_classifier (classification)
-                input = each uploaded document's extracted text
-                output = {document_type, confidence, classification_notes}
-                -> one decision_log row per document + one
-                   model_invocation_log row with token cost
-        Step 2: extract_fields  (depends on classify_documents)
-                task = field_extractor (extraction)
-                input = the document classified as "gl_application"
-                tool calls (governed): get_document_text()
-                                       store_extraction_result()
-                output = 20 structured fields + per-field confidence
-        |
-        v
-pipeline_run row: status=running -> complete, steps_complete=2/2
-```
-
-### Step 3: The Risk-Assessment Pipeline Runs
-
-Once fields are extracted and confirmed, the UW app triggers the `uw_risk_assessment` pipeline against the same execution context. This pipeline runs agents rather than single-turn tasks - they loop, call tools, and reason.
+The underwriting app creates an execution context in Verity (`context_ref="submission:SUB-001"`), generates a fresh `workflow_run_id`, and pulls the document index from EDMS — `GET /documents?context_ref=submission:SUB-001` returns the **originals only** (lineage children are filtered out by default). The app then iterates the documents, calling Verity per-document.
 
 ```
-Runtime: execute 2 governed steps
-        Step 1: triage_submission
-                agent = triage_agent (materiality: high)
-                tool calls (governed, every call authorized
-                  against the version's tool authorization list):
-                    get_submission_context(submission_id)
-                    get_loss_history(submission_id)
-                    get_enrichment_data(submission_id)
-                    store_triage_result(...)  [write]
-                output = {risk_score, routing, narrative, risk_factors}
-        Step 2: assess_appetite  (depends on triage_submission,
-                                  error_policy: continue_with_flag)
-                agent = appetite_agent (materiality: high)
-                tool calls: get_submission_context,
-                            get_document_text (guidelines),
-                            update_appetite_status [write]
-                output = {appetite_determination, cited_sections, notes}
-        |
-        v
+UW App orchestration (plain Python, threading workflow_run_id):
+
+for each document in submission's EDMS index:
+    classify = await verity.run_task(
+        "document_classifier",
+        input = {
+            submission_id: ...,
+            lob: ..., named_insured: ...,
+            documents: [{id, filename, content_type, document_type}],
+        },
+        step_name = f"classify_documents:{filename}",
+        execution_context_id, workflow_run_id,
+    )
+    if classify.output["document_type"] == "do_application":
+        await verity.run_task(
+            "field_extractor",
+            input = {submission_id, named_insured, documents: [<that doc>]},
+            step_name = f"extract_fields:{filename}",
+            execution_context_id, workflow_run_id,
+        )
+
+What Verity does on each call:
+   Governance: resolve champion task version
+   Runtime:    resolve declared source_bindings
+                 - classifier: binding_kind='content_blocks',
+                               fetch:edms/get_document_content_blocks(input.documents)
+                               -> Claude sees the PDF as a vision content
+                                  block (or text/image as appropriate)
+                 - extractor:  binding_kind='text',
+                               fetch:edms/get_documents_text(input.documents)
+                               -> document text bound to {{document_text}}
+   Runtime:    call Claude (one decision_log row + one model_invocation_log row)
+   Runtime:    fire declared write_targets
+                 - extractor: create_derived_json against EDMS, payload
+                              built per target_payload_field rows; the
+                              JSON-derivative becomes a child document
+                              of the source PDF on lineage
+   Runtime:    insert event-sourced execution_run lifecycle rows
+```
+
+The audit clusters under one workflow_run_id: N classify rows + M extract rows, all tagged with `submission:SUB-001` via execution_context_id. Each row's `input_json` carries the EDMS reference list — not inlined PDFs or extracted text.
+
+### Step 3: The Risk-Assessment Workflow Runs
+
+Once fields are extracted and confirmed, the UW app starts a second workflow against the same execution context. This workflow runs agents rather than single-turn tasks — they loop, call tools, and reason. It generates its own `workflow_run_id` and threads it through both calls.
+
+```
+UW App orchestration:
+
+triage = await verity.run_agent(
+    "triage_agent",
+    context = {submission_id, ...},
+    execution_context_id, workflow_run_id,
+)
+appetite = await verity.run_agent(
+    "appetite_agent",
+    context = {submission_id, **triage.output},
+    execution_context_id, workflow_run_id,
+)
+
+What Verity does:
+   Step 1: triage_agent (materiality: high)
+       tool calls (governed, every call authorized
+         against the agent_version's tool authorization list):
+           get_submission_context(submission_id)
+           get_loss_history(submission_id)
+           get_enrichment_data(submission_id)
+           store_triage_result(...)        [write — gated by channel
+                                              and target_blocks]
+       output = {risk_score, routing, narrative, risk_factors}
+   Step 2: appetite_agent (materiality: high)
+       tool calls: get_submission_context,
+                   get_document_text (guidelines),
+                   update_appetite_status  [write]
+       output = {appetite_determination, cited_sections, notes}
+
 Every LLM call:   decision_log row + model_invocation_log row
 Every tool call:  captured inside the decision's tool_calls_made
 Sub-agents:       parent_decision_id set BEFORE the parent row is
@@ -339,6 +381,8 @@ Sub-agents:       parent_decision_id set BEFORE the parent row is
 Cost:             joined through v_model_invocation_cost at point
                   in time (SCD-2 on model_price)
 ```
+
+Both workflows share the same `execution_context_id`, so the submission-level audit returns every decision from every workflow invocation in one query.
 
 ### Step 4: Every Decision is Logged
 
@@ -352,7 +396,9 @@ Verity writes a decision log entry per AI invocation - one per classified docume
 - Token counts (including prompt-cache hits) and execution duration
 - The execution context linking this to the submission
 - The application tag (`uw_demo`) for spend attribution
-- The pipeline_run_id for end-to-end audit trails
+- The workflow_run_id for end-to-end audit trails across one workflow invocation
+- The execution_run_id linking the audit row to the event-sourced run lifecycle (claim/heartbeat/terminal events)
+- Per-binding `source_resolutions` (which connector calls fired, sizes, modality) and per-target `target_writes` (mode, mode_reason, status, EDMS handle)
 
 In parallel, the `model_invocation_log` captures per-call model usage. Joined with `model_price` through `v_model_invocation_cost`, this powers the Usage & Spend dashboard and the soft quotas.
 
@@ -368,7 +414,7 @@ Six months later, a market conduct examiner asks: "Show me how submission SUB-00
 
 One query to Verity produces:
 
-- The complete pipeline executions (both pipelines, all 4 steps, with exact versions and pipeline_run status)
+- The complete workflow executions (both workflows, all per-document classifier + extractor calls plus triage and appetite, with exact versions and per-run lifecycle events)
 - The AI's reasoning at each step (with confidence scores and risk factors)
 - The human override (with documented rationale)
 - The exact prompt, inference config, and tool authorizations in effect (reproducible via version-pinned resolve)
@@ -431,7 +477,7 @@ Verity's compliance layer does not generate new data. It presents the governance
 
 Answers the first question regulators ask: what AI is in production, who owns it, and what version is live.
 
-Every agent, task, prompt, inference config, tool, MCP server, and pipeline is stored as a versioned database record - not hidden in code. Each asset has a display name, a machine name, a materiality tier, and a champion pointer to its current production version.
+Every agent, task, prompt, inference config, tool, and MCP server is stored as a versioned database record — not hidden in code. Each asset has a display name, a machine name, a materiality tier, and a champion pointer to its current production version. Declarative I/O wiring (source bindings, write targets, payload-field references) is part of the same versioned record set.
 
 The registry supports three resolution modes:
 - **Default:** Returns the current champion version
@@ -493,7 +539,7 @@ Every AI invocation is logged with:
 - Token counts (including prompt-cache hits), duration, and model used
 - The execution context (business operation link)
 - The application tag (for spend attribution)
-- The pipeline_run_id and parent_decision_id (for end-to-end audit trails, including sub-agents)
+- The workflow_run_id, execution_run_id, and parent_decision_id (for end-to-end audit trails across multi-step workflows and sub-agent delegation)
 - The run purpose (production, test, validation, audit rerun)
 - Mock mode flag
 - HITL-required flag
@@ -579,7 +625,8 @@ Status legend: **Shipped** = in production and exercised by the UW demo; **Parti
 
 | Capability | What it does | Status |
 |---|---|---|
-| Agent / task / prompt / inference-config / tool / MCP-server / pipeline registration | Versioned records with display name, materiality tier, ownership | Shipped |
+| Agent / task / prompt / inference-config / tool / MCP-server registration | Versioned records with display name, materiality tier, ownership | Shipped |
+| Declarative I/O wiring (`source_binding`, `write_target`, `target_payload_field`) | Reference grammar (`input.*`, `output.*`, `const:*`, `fetch:C/M(input.X)`) symmetric across Tasks and Agents; `binding_kind` (text \| content_blocks) drives modality | Shipped |
 | Application registration + entity-to-application mapping | Multi-tenant catalog; every decision is attributable to an application | Shipped |
 | Version composition (prompts + config + tools + delegations) bound to agent / task versions | Immutable after promotion | Shipped |
 | Champion resolution: current, date-pinned, version-pinned | SCD-2 temporal resolve | Shipped |
@@ -603,10 +650,10 @@ Status legend: **Shipped** = in production and exercised by the UW demo; **Parti
 | Hard quota enforcement at invocation time | | Coming |
 | Scheduled quota checker + Slack / email notifications | | Coming |
 | Decision log reader + detail view | Full I/O, tool calls, reasoning, message history, token cost | Shipped |
-| Audit trail by pipeline_run_id and execution_context_id | | Shipped |
+| Audit trail by workflow_run_id and execution_context_id | | Shipped |
 | Override logging (AI recommendation + human decision + reason code) | Separate record linked to original decision | Shipped |
 | Override analysis (rate, trends) | | Shipped |
-| Dashboard (assets, decisions, pipelines, overrides, cost this month) | Interactive charts | Shipped |
+| Dashboard (assets, decisions, runs, overrides, cost this month) | Interactive charts | Shipped |
 | Model inventory report | All champions with status | Shipped |
 | Model cards | Purpose, limitations, validation evidence | Shipped |
 | Regulatory evidence packages | Generated on demand | Partial |
@@ -620,11 +667,14 @@ Status legend: **Shipped** = in production and exercised by the UW demo; **Parti
 | Tool authorization enforcement | Checked per call against version's authorization list | Shipped |
 | Prompt assembly with template-variable substitution + validation | Missing-variable errors at execution time | Shipped |
 | Conditional prompt inclusion | Governance-tier-aware | Shipped |
-| Pipeline executor | Dependency resolution, parallel groups, error policies (`fail_pipeline`, `continue_with_flag`) | Shipped |
-| Pipeline run lifecycle (`pipeline_run` table, status: running / complete / partial / failed) | Accurate in-flight status with steps_complete tracking | Shipped |
+| Declarative source resolution at execution time | `source_binding` rows fetched / overlaid before prompt assembly; `binding_kind='text'` → `{{template_var}}` substitution; `binding_kind='content_blocks'` → Claude content blocks prepended to first user message (PDF / image / text). No side-channel | Shipped |
+| Declarative target writes after the LLM call | `write_target` + `target_payload_field` rows; payloads built by reference grammar; channel-gated (`auto` mode writes only on `production` channel; staging/shadow/eval log only) | Shipped |
+| Async run submission + event-sourced lifecycle | `POST /runs` returns immediately; external `verity-worker` claims via `FOR UPDATE SKIP LOCKED`; lifecycle is append-only across `execution_run`, `execution_run_status`, `execution_run_completion`, `execution_run_error`; surfaced via `execution_run_current` view | Shipped |
+| `verity-worker` service | Stateless, horizontally scalable, heartbeats every 30s; janitor reclaims stuck runs via `released` events | Shipped |
+| Sync sugar `run_task` / `run_agent` over the async primitive | In-process callers self-track their own `execution_run` row (tagged `submitted_by='inproc'`) so workers don't race | Shipped |
 | Sub-agent delegation at runtime | Parent-supplied decision id; `parent_decision_id`/`decision_depth` on child | Shipped |
 | MCP client integration | External MCP servers exposed as governed tools | Shipped |
-| MockContext / FixtureEngine | Mock LLM responses, mock tool responses, replay | Shipped |
+| MockContext (step / tool / source / target) | Step-level mocks are strict — missing fixture raises `MockMissingError`, never falls through to a live Claude call. Tool-level mocks support partial mocking | Shipped |
 | Execution context management | Business operation grouping | Shipped |
 | Run purpose tracking (production / test / validation / audit_rerun) | | Shipped |
 | Reproduced-from linking for audit reruns | `reproduced_from_decision_id` | Shipped |
@@ -645,11 +695,11 @@ Status legend: **Shipped** = in production and exercised by the UW demo; **Parti
 
 | Surface | What it does | Status |
 |---|---|---|
-| Python SDK (`verity.*`: registry / lifecycle / execution / pipeline_executor / decisions / reporting / testing / models / quotas) | In-process governance + runtime access | Shipped |
-| REST API at `/api/v1/*` (~78 operations: read / runtime / authoring / draft-edit / lifecycle / applications / models / usage / quotas / decisions / reporting) | Swagger UI at `/api/v1/docs`, OpenAPI at `/api/v1/openapi.json` | Shipped |
-| Admin Web UI (Jinja + HTMX + Tailwind) | Dashboard, Registry pages, Observability (decisions, pipeline runs, overrides, usage & spend, quotas), Governance (inventory, lifecycle, testing, ground truth, validation runs, incidents), Settings | Shipped |
+| Python SDK (`verity.*`: registry / lifecycle / execution / runs (submit/poll/cancel) / decisions / reporting / testing / models / quotas) | In-process governance + runtime access; sync `run_task` / `run_agent` is sugar over the async primitive | Shipped |
+| REST API at `/api/v1/*` (read / runtime / runs / authoring / draft-edit / lifecycle / applications / models / usage / quotas / decisions / reporting) | Swagger UI at `/api/v1/docs`, OpenAPI at `/api/v1/openapi.json` | Shipped |
+| Admin Web UI (Jinja + HTMX + Tailwind) | Dashboard, Registry pages, Observability (decisions, /admin/runs unified runs list, /admin/runs/{id} drill-through, /admin/workflows/{id}, overrides, usage & spend, quotas), Governance (inventory, lifecycle, testing, ground truth, validation runs, incidents), Settings | Shipped |
 | Detail pages per entity with version history | | Shipped |
-| Audit-trail viewer (by pipeline run / execution context) | | Shipped |
+| Audit-trail viewer (by execution context / workflow_run_id) | | Shipped |
 | Correlation IDs across services | Structured logging middleware | Shipped |
 | DS Workbench (JupyterLab Docker service) | Capability walkthroughs over the REST API; `ds_workbench` registered as an application for self-clean-up | Shipped |
 | Tool registration (function pointer or HTTP callback) | | Shipped |
@@ -708,7 +758,7 @@ Status legend: **Shipped** = in production and exercised by the UW demo; **Parti
 6. **Governance and Runtime are separable.** Today they share a process; tomorrow Governance can run as a sidecar to an external orchestrator - the Governance Contract is the boundary.
 7. **Shared services are independent.** EDMS, MDM, enrichment each own their database and APIs.
 8. **Declarative over imperative.** Verity's governance primitives (schemas, sources/targets, quotas, thresholds, mock kinds) are stored in the metamodel and validated at admit time. Imperative extension mechanisms — e.g. pre/post execution hooks (FC-3) — are deliberately NOT offered; they would sit outside the metamodel, unversioned and invisible to governance reviewers. See [future_capabilities.md § FC-3](future_capabilities.md) for the full rationale.
-9. **Orchestration lives in the application, not Verity.** Verity executes one unit of work at a time (Task, Agent, or Pipeline) and returns a canonical envelope. Triggers, chaining, waits, and retries across units are the consuming app's responsibility. See [verity_execution_architecture.md](verity_execution_architecture.md) for the full Task/Agent/Pipeline contracts and envelope spec.
+9. **Orchestration lives in the application, not Verity.** Verity executes exactly one unit of work at a time (Task or Agent — pipelines are descoped) and returns a canonical envelope. Multi-step workflows are plain Python in the consuming app, threading a caller-supplied `workflow_run_id` through every call so the audit clusters correctly. Triggers, chaining, waits, and retries across units are the app's responsibility. See [verity_execution_architecture.md](verity_execution_architecture.md) for the full Task/Agent contracts, declarative I/O grammar, and envelope spec.
 
 ---
 

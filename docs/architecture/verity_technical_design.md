@@ -8,7 +8,7 @@ This document describes the internal architecture of the Verity AI governance pl
 
 ## System Overview
 
-The Verity package is split into two planes. **Governance** owns the registry, lifecycle, decision-log reader, reporting, testing metadata, model management, and quotas. **Runtime** owns agent / task / tool execution, pipeline execution, the decision-log writer, MCP client, and mock / fixture backends. A thin `Coordinator` wires the two together. The business app consumes both via the `Verity` facade in `client/inprocess.py`.
+The Verity package is split into two planes. **Governance** owns the registry, lifecycle, decision-log reader, run-state reader, reporting, testing metadata, model management, and quotas. **Runtime** owns Task / Agent / Tool execution, the connector framework (declarative source resolution and target writes), the async run worker, the decision-log writer, MCP client, and mock-context handling. A thin `Coordinator` wires the two together. The business app consumes both via the `Verity` facade in `client/inprocess.py`.
 
 ```
 +----------------------------------------------------------------------------+
@@ -19,16 +19,15 @@ The Verity package is split into two planes. **Governance** owns the registry, l
 |  | governance/           |   | runtime/              |                     |
 |  |                       |   |                       |                     |
 |  | registry.py           |   | engine.py             |---> Claude API      |
-|  | lifecycle.py          |   | pipeline.py           |                     |
+|  | lifecycle.py          |   | worker.py             |                     |
 |  | decisions.py (reader) |   | decisions_writer.py   |                     |
+|  | runs.py     (reader)  |   | runs_writer.py        |                     |
 |  | reporting.py          |   | mcp_client.py         |                     |
 |  | testing_meta.py       |   | connectors.py         |                     |
-|  | models.py             |   | mock_context.py       |                     |
-|  | quotas.py             |   | fixture_backend.py    |                     |
-|  | coordinator.py  <-----+---+ test_runner.py        |                     |
-|  +----------+------------+   | validation_runner.py  |                     |
-|             |                | metrics.py            |                     |
-|             |                | runtime.py            |                     |
+|  | models.py             |   | test_runner.py        |                     |
+|  | quotas.py             |   | validation_runner.py  |                     |
+|  | coordinator.py  <-----+---+ metrics.py            |                     |
+|  +----------+------------+   | runtime.py            |                     |
 |             |                +-----------+-----------+                     |
 |             |                            |                                 |
 |  +----------+----------------------------+-----------+                     |
@@ -38,18 +37,18 @@ The Verity package is split into two planes. **Governance** owns the registry, l
 |  +----------+--------+   +------------------+   +----------------+         |
 |  | contracts/        |   | models/          |   | db/            |         |
 |  | decision.py       |   | agent.py         |   | connection.py  |         |
-|  | pipeline.py       |   | task.py          |   | schema.sql     |         |
+|  | run.py            |   | task.py          |   | schema.sql     |         |
 |  | inference.py      |   | prompt.py        |   | migrate.py     |         |
 |  | prompt.py         |   | decision.py      |   | queries/       |         |
 |  | tool.py           |   | lifecycle.py     |   |   registry.sql |         |
 |  | testing.py        |   | inference_config |   |   registration.sql      |
-|  | config.py         |   | pipeline.py      |   |   decisions.sql|         |
-|  | enums.py          |   | testing.py       |   |   lifecycle.sql|         |
-|  | mock.py           |   | reporting.py     |   |   reporting.sql|         |
-|  +-------------------+   | application.py   |   |   testing.sql  |         |
-|                          | model.py         |   |   models.sql   |         |
-|                          | quota.py         |   |   quotas.sql   |         |
-|                          | pipeline_run.py  |   |   runtime.sql  |         |
+|  | config.py         |   | run.py           |   |   decisions.sql|         |
+|  | enums.py          |   | connector.py     |   |   lifecycle.sql|         |
+|  | mock.py           |   | testing.py       |   |   reporting.sql|         |
+|  | envelope.py       |   | reporting.py     |   |   testing.sql  |         |
+|  +-------------------+   | application.py   |   |   models.sql   |         |
+|                          | model.py         |   |   quotas.sql   |         |
+|                          | quota.py         |   |   runs.sql     |         |
 |                          +------------------+   +----------------+         |
 |                                                                            |
 |  +----------------------------------------------------------------------+ |
@@ -61,12 +60,20 @@ The Verity package is split into two planes. **Governance** owns the registry, l
 |  |  middleware.py   - CorrelationMiddleware                             | |
 |  |  api/            - REST API (/api/v1/*)                              | |
 |  |      router.py                                                      | |
-|  |      registry.py / runtime.py / authoring.py / draft_edit.py        | |
-|  |      lifecycle.py / applications.py / decisions.py / reporting.py   | |
-|  |      models.py / usage.py / quotas.py / schemas.py                  | |
+|  |      registry.py / runtime.py / runs.py / authoring.py              | |
+|  |      draft_edit.py / lifecycle.py / applications.py /               | |
+|  |      decisions.py / reporting.py / models.py / usage.py /           | |
+|  |      quotas.py / schemas.py                                         | |
 |  +----------------------------------------------------------------------+ |
 +----------------------------------------------------------------------------+
 ```
+
+> **Note on descoped components.** Earlier revisions of this design described a
+> `runtime/pipeline.py` Pipeline Executor, `pipeline_run` / `pipeline` /
+> `pipeline_version` / `pipeline_step` tables, and an `execute_pipeline` SDK
+> method. These were descoped on 2026-04-24 — multi-step orchestration moved
+> entirely into the consuming app's code. References to them in this document
+> below have either been removed or kept with a "superseded" callout.
 
 **Plane responsibilities (the "Governance Contract"):**
 - Governance *owns* the data of record (registry, decisions, approvals, validation evidence) and *enforces* the rules (lifecycle gates, tool authorization, quota definitions).
@@ -93,7 +100,7 @@ verity = Verity(
 await verity.connect()
 ```
 
-**What it does:** Facade over Governance and Runtime. Holds shared instances of the `Database`, the Governance `Coordinator` (which in turn owns Registry / Lifecycle / DecisionsReader / Reporting / TestingMeta / Models / Quotas), and the `Runtime` (which owns ExecutionEngine / PipelineExecutor / DecisionsWriter / TestRunner / ValidationRunner / MCPClient).
+**What it does:** Facade over Governance and Runtime. Holds shared instances of the `Database`, the Governance `Coordinator` (which in turn owns Registry / Lifecycle / DecisionsReader / RunsReader / Reporting / TestingMeta / Models / Quotas), and the `Runtime` (which owns ExecutionEngine / RunsWriter / DecisionsWriter / TestRunner / ValidationRunner / MCPClient).
 
 **Module initialization (in constructor):**
 
@@ -115,20 +122,21 @@ Verity.__init__()
     |       application=application,
     |   )
     |       +-- self.execution          = ExecutionEngine(...)
-    |       +-- self.pipeline_executor  = PipelineExecutor(...)
+    |       +-- self.runs_writer        = RunsWriter(self.db)
+    |       +-- self.runs_reader        = RunsReader(self.db)
     |       +-- self.decisions_writer   = DecisionsWriter(self.db)
     |       +-- self.test_runner        = TestRunner(...)
     |       +-- self.validation_runner  = ValidationRunner(...)
     |       +-- self.mcp_client         = MCPClient(...)
     +-- Top-level attributes re-exported for ergonomic access:
             verity.registry, verity.lifecycle, verity.decisions,
-            verity.reporting, verity.testing, verity.models, verity.quotas,
-            verity.execution, verity.pipeline_executor
+            verity.runs_reader, verity.reporting, verity.testing,
+            verity.models, verity.quotas, verity.execution
 ```
 
 **Key dependency flow:** Runtime depends on Governance (to resolve configs, read authorizations, write decisions). Governance has no dependency on Runtime — that is the whole point of the split and the reason the Governance-as-sidecar topology is possible without rewriting the core.
 
-**Public surface:** ~100 methods across the sub-facades (registry, lifecycle, execution, pipeline_executor, decisions, reporting, testing, models, quotas, applications). The REST API at `/api/v1/*` is a thin JSON wrapper over this facade.
+**Public surface:** ~100 methods across the sub-facades (registry, lifecycle, execution, runs, decisions, reporting, testing, models, quotas, applications). The REST API at `/api/v1/*` is a thin JSON wrapper over this facade.
 
 ---
 
@@ -212,7 +220,7 @@ run_agent() / run_task() / run_tool()
 5. Return ExecutionResult
 ```
 
-**Used for:** Pipeline steps that are pure data operations (no LLM reasoning needed).
+**Used for:** App-orchestrated workflow steps that are pure data operations (no LLM reasoning needed).
 
 #### Decision Logging (`_log_decision`)
 
@@ -397,7 +405,7 @@ _set_champion(entity_type, current_version, new_version_id)
 
 ### 1.5 Decisions — Reader (`governance/decisions.py`) and Writer (`runtime/decisions_writer.py`)
 
-The decisions capability is split across the two planes by design. The **reader** (Governance) serves list, detail, audit-trail, and override queries — no writes. The **writer** (Runtime) is the single code path that produces `agent_decision_log` rows; every agent / task / tool invocation must route through it. Pipeline-run rows and model-invocation-log rows are also written here.
+The decisions capability is split across the two planes by design. The **reader** (Governance) serves list, detail, audit-trail, and override queries — no writes. The **writer** (Runtime) is the single code path that produces `agent_decision_log` rows; every agent / task / tool invocation must route through it. Model-invocation-log rows are also written here. Run-lifecycle rows (`execution_run`, `execution_run_status`, `execution_run_completion`, `execution_run_error`) live in a separate writer (`runtime/runs_writer.py`) — see §1.6.1.
 
 Audit trail management. Every AI invocation produces an immutable record.
 
@@ -423,13 +431,16 @@ log_decision(DecisionLogCreate)
 Two ways to query audit trails:
 
 ```
-get_audit_trail_by_run(pipeline_run_id)
-    WHERE adl.pipeline_run_id = :pipeline_run_id
-    → Shows one specific pipeline execution (4 steps)
+get_audit_trail_by_run(workflow_run_id)
+    WHERE adl.workflow_run_id = :workflow_run_id
+    → Shows every decision made during one workflow invocation (e.g.
+      all per-document classify + extract calls under one
+      app-supplied workflow_run_id)
 
 get_audit_trail(execution_context_id)
     WHERE adl.execution_context_id = :execution_context_id
-    → Shows ALL runs for a business context (e.g., all pipeline runs for a submission)
+    → Shows ALL runs for a business context (e.g., every workflow
+      invocation for a submission, across all workflow_run_ids)
 ```
 
 Both return `[AuditTrailEntry]` with: entity name, version, capability type, channel, reasoning, confidence, tool calls, duration, status.
@@ -438,117 +449,158 @@ Both return `[AuditTrailEntry]` with: entity name, version, capability type, cha
 
 ---
 
-### 1.6 Pipeline Executor (`runtime/pipeline.py`)
+### 1.6 Declarative I/O — Source bindings + Write targets (`runtime/engine.py`, `runtime/connectors.py`)
 
-Orchestrates multi-step pipelines with dependency resolution.
+**Replaces** the previously-documented Pipeline Executor (`runtime/pipeline.py`),
+which was deleted in the 2026-04-24 descope. Multi-step orchestration now
+lives in app code; Verity's runtime offers declarative I/O wiring around
+single Task / Agent calls instead.
 
-#### Execution Flow
+Each task or agent version can declare:
 
-```
-run_pipeline(pipeline_name, context, ...)
-    |
-    +-- Resolve pipeline champion version from registry
-    +-- Parse steps from pipeline_version.steps JSONB
-    +-- Generate pipeline_run_id (UUID)
-    +-- Build execution groups (group by step_order)
-    +-- For each group (sequential):
-    |     +-- If pipeline_failed: skip all steps in group
-    |     +-- Check dependencies (depends_on list vs accumulated_results)
-    |     +-- Evaluate conditions (condition dict vs context)
-    |     +-- If single step: execute directly
-    |     +-- If multiple steps: asyncio.gather(*tasks)
-    |     +-- Accumulate results (step output added to step_context for downstream)
-    +-- Determine overall status:
-          - All complete → "complete"
-          - pipeline_failed → "failed"
-          - Some failed → "partial"
-```
+- **`source_binding` rows** — input resolution that runs *before* prompt
+  assembly. Each row carries a `template_var`, a `reference` string in the
+  wiring DSL, and a `binding_kind`:
+  - `binding_kind='text'`: resolved value is a string, substituted into
+    `{{template_var}}` in the prompt.
+  - `binding_kind='content_blocks'`: resolved value is a list of Claude
+    content-block dicts (`document` for PDFs, `image` for images, `text` for
+    plain text); the runtime prepends them to the first user message ahead
+    of the template-rendered text. Vision and multimodal flow exclusively
+    through this path — there is no protocol side-channel.
+- **`write_target` rows** — output writes that run *after* the LLM call (or
+  agent's terminal turn). Each row names a connector, a write method, and is
+  paired with `target_payload_field` rows that build the payload via the
+  same wiring DSL (`input.*`, `output.*`, `const:*`).
 
-#### Step Context Propagation
+**Reference grammar** (`runtime/engine._resolve_reference`):
 
-Each step receives the original pipeline context PLUS outputs from all prior completed steps:
+| Kind | Syntax | Valid on |
+|---|---|---|
+| Input path | `input.<dotted.path[i]>` | source / payload |
+| Output path | `output.<dotted.path[i]>` | payload only |
+| Constant | `const:<value>` | source / payload |
+| Connector fetch | `fetch:<connector>/<method>(input.<field>)` | source only |
+
+**Engine entrypoints**:
+
+- `_resolve_sources(version_id, owner_kind, ...)` — returns
+  `(template_context, content_blocks, resolutions)`. Routes each resolved
+  value through `_attach_resolved_value` based on `binding_kind`.
+- `_assemble_prompts(prompts, context, content_blocks=...)` — substitutes
+  `{{template_var}}` placeholders, prepends content_blocks to first user
+  message.
+- `_write_targets(version_id, owner_kind, output, channel, write_mode, mock)`
+  — for each write_target, computes effective write mode via
+  `_effective_write_mode` (channel-gated; `auto` mode writes only on
+  `production`), assembles the payload via `_build_target_payload`, calls
+  `provider.write(method, container, payload)`. Failures of required targets
+  raise `TargetWriteError` carrying `partial_writes` for the audit row.
+
+**Provider contract** (`runtime/connectors.py`):
 
 ```python
-step_context = dict(context)  # original pipeline context
-for dep_name, dep_result in accumulated_results.items():
-    if dep_result.execution_result and dep_result.execution_result.output:
-        step_context[dep_name] = dep_result.execution_result.output
+class ConnectorProvider(Protocol):
+    async def fetch(self, method: str, ref: Any) -> Any: ...
+    async def write(self, method: str, container: Optional[str], payload: dict) -> Any: ...
 ```
 
-This means Step 3 (triage) can see the outputs of Step 1 (classify) and Step 2 (extract) in its context.
+UW's `EdmsProvider` implements this contract over EDMS REST: `fetch` serves
+`get_document_text` / `get_documents_text` / `get_document_metadata` /
+`get_document_children` / `get_document_content` /
+`get_document_content_blocks`; `write` serves `create_derived_json`.
 
-**What is NOT supported:**
-- Long-running async execution (all steps run synchronously in one request)
-- Pipeline-level status persistence (no pipeline_run table - only step-level decision logs)
-- Complex DAG patterns (only sequential groups with optional parallelism within a group)
-- Retry on failure
-- Dynamic step generation
-
-**Architecture decision pending:** Pipeline should become a lightweight container for cooperating agents/tasks, not a DAG orchestrator. See `project_pipeline_rethink.md`.
+**Audit**: every binding emits one entry under the decision row's
+`source_resolutions` (with `template_var`, `kind`, `binding_kind`, `status`,
+`payload_size`, optional `connector` / `method`); every target write emits
+one entry under `target_writes` (with `target_name`, `connector`, `method`,
+`mode`, `mode_reason`, `status`, `handle`).
 
 ---
 
-### 1.7 Mock Context (`runtime/mock_context.py`, `runtime/fixture_backend.py`)
+### 1.6.1 Async run lifecycle + worker (`runtime/worker.py`, `runtime/runs_writer.py`, `governance/runs.py`)
 
-Two independent mocking dimensions for testing.
+Run state is event-sourced across four append-only tables (`execution_run`,
+`execution_run_status`, `execution_run_completion`, `execution_run_error`)
+plus a view (`execution_run_current`). Reads come from the view; writes are
+exclusively INSERTs.
 
-#### Dimension 1: LLM Mocking
-
-```
-MockContext(llm_responses=[
-    {"risk_score": "Green", "confidence": 0.89},  # Simple: 1 response = skip loop
-])
-
-MockContext(llm_responses=[
-    {"type": "tool_use", "name": "get_submission", "input": {...}},  # Replay: tool request
-    {"risk_score": "Green", "confidence": 0.89},                      # Then final answer
-])
-```
-
-- `has_llm_mock`: True if responses provided
-- `is_simple_mock`: True if 1 response that's not a tool_use (skips entire agentic loop)
-- Responses consumed in order via `_llm_call_index`
-
-#### Dimension 2: Tool Mocking
+**Submission path:**
 
 ```
-MockContext(tool_responses={
-    "get_submission_context": {"named_insured": "Acme Corp", ...},
-    "get_loss_history": [                       # List = multi-call
-        {"year": 2023, "claims": 0},
-        {"year": 2024, "claims": 1},
-    ],
-})
+POST /api/v1/runs
+  → runs_writer.submit() in one transaction:
+    INSERT execution_run             (the request)
+    INSERT execution_run_status      (status='submitted')
+  → returns {run_id, status}
 ```
 
-- Per-tool by name. Tools NOT in the dict make REAL calls.
-- `mock_all_tools=True`: All tools use DB-registered mock responses
-- List values support multi-call patterns (consumed in order)
-
-#### Gateway Priority (when MockContext provided)
+**Worker claim cycle** (`runtime/worker.py`):
 
 ```
-_gateway_tool_call():
-    1. Check mock.tool_responses[tool_name]  → runtime mock
-    2. Check mock.mock_all_tools             → DB mock
-    3. Neither                               → REAL call (DB flag ignored)
+verity-worker loop:
+  claim_next_execution_run    (atomic):
+    SELECT candidate FOR UPDATE OF execution_run SKIP LOCKED
+      WHERE no terminal completion/error row
+        AND latest status_event ∈ ('submitted','released')
+        AND submitted_by != 'inproc'      ← skips sync engine self-tracks
+    INSERT execution_run_status (status='claimed', worker_id)
+  while running:
+    INSERT execution_run_status (status='heartbeat', worker_id) every 30s
+  on success: INSERT execution_run_completion(final_status='complete', decision_log_id, duration_ms)
+  on failure: INSERT execution_run_error(error_code, error_message, error_trace)
+  on shutdown mid-run: INSERT execution_run_status(status='released')
 ```
 
-When NO MockContext: check `tool.mock_mode_enabled` DB flag, then real call.
+A janitor inside each worker scans for runs whose latest status is
+`claimed` or `heartbeat` older than the heartbeat threshold and inserts
+`status='released'`, making them re-claimable.
 
-#### Replay from Decision Log
+**Sync sugar self-tracking** (`engine._open_self_tracked_run` /
+`_close_self_tracked_run_complete` / `_close_self_tracked_run_error`):
+when a caller invokes `verity.run_task` / `run_agent` synchronously
+(no `execution_run_id` supplied), the engine writes its OWN
+`execution_run` row tagged `submitted_by='inproc'` and closes it on
+completion/error. The worker's claim filter excludes `inproc` rows so the
+worker can never race the sync executor. Decision log + execution_run are
+both populated identically to a worker-dispatched run, so `/admin/runs`
+shows both shapes in one feed.
 
-```python
-mock = MockContext.from_decision_log(prior_decision, mock_llm=True, mock_tools=True)
-```
+---
 
-Reconstructs a MockContext from a stored decision's `message_history` and `tool_calls_made`. Three replay patterns:
+### 1.7 Mock Context (`contracts/mock.py`)
 
-| mock_llm | mock_tools | Use Case |
-|----------|-----------|----------|
-| True | True | Full replay: audit reproducibility |
-| False | True | New prompt test: real Claude + original tool data |
-| True | False | New tool test: original LLM behavior + new tool implementation |
+`MockContext` is the single, caller-supplied control surface for every
+flavour of mocking the runtime supports. Five fields, each addressing a
+different concern; they compose freely. **Important: there is no fall-through
+to a real Claude call** — see strict semantics on `step_responses`.
+
+| Field | Purpose |
+|---|---|
+| `step_responses` | Per-step / per-entity canned answers. The heaviest mock — engine skips Claude, source resolution, AND target writes. Lookup: step_name first, then entity_name. **Strict**: when this dict is non-empty and no key matches, the engine raises `MockMissingError`. Never falls through. |
+| `tool_responses` | Per-tool canned outputs by tool name. Tools NOT in the dict make real calls (or fall back to the tool's DB `mock_mode_enabled` flag if `mock_all_tools=False`). The path for partial mocking. |
+| `mock_all_tools` | When True, all tools without an explicit `tool_responses` entry use their DB-registered mock responses. |
+| `source_responses` | Per-source canned payloads keyed by the binding's input field name. Skips the connector fetch; the resolved value is the supplied payload. Coexists with `binding_kind` — a content_blocks binding mock must already be a list of content-block dicts. |
+| `target_blocks` | Set of write_target names whose declared writes should be suppressed (logged but not executed). Used by validation/test runs to guarantee no side effects. |
+
+`MockContext.from_decision_log(decision)` — replay helper that builds
+`tool_responses` from a prior decision's `tool_calls_made`. The previous
+LLM-replay path was retired; for deterministic no-LLM replay, build a
+MockContext with `step_responses` keyed by entity_name and the prior
+decision's `output_json` as the value.
+
+#### Strict step_responses — why no fall-through
+
+Supplying `step_responses` means *"this run is fully scripted."* A missing
+fixture is a bug, not a license to silently spend tokens on a real Claude
+call. The engine wraps the lookup in `run_task` and `run_agent` so a strict
+miss closes the self-tracked run with an error event before propagating —
+the failure is visible in `/admin/runs` as
+`failed: MockMissingError: <missing-key info>`.
+
+If you want partial mocking ("mock this one tool, run the rest live"),
+that's what `tool_responses` is for. Don't mix the two concepts in
+`step_responses`.
 
 ---
 
@@ -564,7 +616,7 @@ Testing is split across planes: Governance (`testing_meta.py`) owns **metadata r
 
 Dashboard and model inventory queries.
 
-**Methods:** dashboard_counts (asset + decision + override + pipeline + cost tiles), model_inventory_agents, model_inventory_tasks, override_analysis (grouped by reason_code over N days).
+**Methods:** dashboard_counts (asset + decision + override + run + cost tiles), model_inventory_agents, model_inventory_tasks, override_analysis (grouped by reason_code over N days).
 
 ---
 
@@ -651,15 +703,15 @@ class Database:
 
 ### 2.2 Schema (`db/schema.sql`)
 
-**~45 tables + 1 view** across 8 functional groups. All `*_version` tables (agent_version, task_version, prompt_version, pipeline_version) carry a `cloned_from_version_id UUID NULL` column so lineage is traceable when a draft is produced by the clone-and-edit workflow.
+**Roughly 45 tables + several views** across 9 functional groups. All `*_version` tables (agent_version, task_version, prompt_version) carry a `cloned_from_version_id UUID NULL` column so lineage is traceable when a draft is produced by the clone-and-edit workflow. Pipeline tables (`pipeline`, `pipeline_version`, `pipeline_step`, `pipeline_run`) were dropped in the 2026-04-24 descope.
 
-#### Asset Registry (14 tables)
+#### Asset Registry (15 tables)
 
 | Table | Purpose | Key Columns |
 |-------|---------|-------------|
 | inference_config | Named LLM parameter sets | name, model_name, temperature, max_tokens |
 | agent | Agent header (one per agent) | name, materiality_tier, current_champion_version_id |
-| agent_version | Agent versions with lifecycle | lifecycle_state, channel, inference_config_id, valid_from/to, cloned_from_version_id, decision_log_detail |
+| agent_version | Agent versions with lifecycle | lifecycle_state, channel, inference_config_id, input_schema, output_schema, valid_from/to, cloned_from_version_id, decision_log_detail |
 | task | Task header | name, capability_type, materiality_tier |
 | task_version | Task versions | lifecycle_state, channel, output_schema, cloned_from_version_id, decision_log_detail |
 | prompt | Prompt header | name, governance_tier |
@@ -669,7 +721,10 @@ class Database:
 | agent_version_tool | Tool authorization for agents | agent_version_id, tool_id |
 | task_version_tool | Tool authorization for tasks | task_version_id, tool_id |
 | agent_version_delegation | Authorizes parent→child sub-agent delegation | parent_agent_version_id, child_agent_name |
-| pipeline / pipeline_version | Pipeline definitions | steps JSONB, lifecycle_state, cloned_from_version_id |
+| data_connector | Connector providers (e.g. edms) registered for source/target wiring | name, provider_class, base_url |
+| source_binding | Per-version input declarations (text / content_blocks) | owner_kind, owner_id, template_var, reference, binding_kind, required, execution_order |
+| write_target | Per-version output write declarations | owner_kind, owner_id, name, connector_id, write_method, container, required |
+| target_payload_field | Per-field payload assembly under a write_target | write_target_id, payload_field, reference, required, execution_order |
 | mcp_server | Registered Model Context Protocol servers | name, url, auth_mode, lifecycle_state |
 
 #### Multi-App & Context (3 tables)
@@ -694,14 +749,26 @@ class Database:
 | validation_record_result | Per-record predictions for drill-down |
 | metric_threshold | Pass/fail thresholds per entity (with optional field_name for extraction) |
 
-#### Decisions & Audit (4 tables)
+#### Decisions & Audit (3 tables)
 
 | Table | Purpose |
 |-------|---------|
-| agent_decision_log | Every AI invocation (~35 columns: full snapshots + pipeline_run_id + parent_decision_id + decision_depth + step_name + application + decision_log_detail + redaction_applied + hitl_required + reproduced_from_decision_id) |
+| agent_decision_log | Every AI invocation (~35 columns: full snapshots + workflow_run_id + execution_run_id + parent_decision_id + decision_depth + step_name + application + decision_log_detail + redaction_applied + source_resolutions + target_writes + hitl_required + reproduced_from_decision_id) |
 | override_log | Human overrides of AI decisions |
 | approval_record | Lifecycle promotion approvals with evidence review flags |
-| pipeline_run | Pipeline-level run lifecycle (status: running / complete / partial / failed, steps_complete, steps_total, started_at / ended_at, application, execution_context_id) |
+
+#### Run Lifecycle (4 tables + 1 view, event-sourced)
+
+All four tables are append-only — no UPDATE on any row. The view computes
+the resolved current state by joining them.
+
+| Table / View | Purpose |
+|--------------|---------|
+| execution_run | The submission row (one per `POST /runs` or one per sync engine self-track). Never updated. Carries entity_kind / entity_version_id / channel / input_json / execution_context_id / workflow_run_id / application / submitted_by. |
+| execution_run_status | Lifecycle ledger: `submitted`, `claimed`, `heartbeat`, `released` events with worker_id and recorded_at. Never updated. |
+| execution_run_completion | Terminal-success row (final_status `complete` \| `cancelled`) with decision_log_id and duration_ms. UNIQUE on execution_run_id. |
+| execution_run_error | Terminal-failure row (error_code, error_message, error_trace, decision_log_id). UNIQUE on execution_run_id. |
+| execution_run_current (VIEW) | Joins the four tables to produce a resolved `current_status` plus the latest event metadata. The single source the API and UI read from. |
 
 #### Model Management (3 tables + 1 view)
 
@@ -745,7 +812,8 @@ class Database:
 | registration.sql | INSERT operations for all entity types (headers, versions, associations, MCP servers) |
 | authoring.sql | Draft-only updates (PATCH / PUT semantics), clone-a-version into new draft, replace prompt-assignments / tool-authorizations / delegations, draft DELETE |
 | lifecycle.sql | State transitions, champion setting + SCD-2 valid_from/to, deprecation, approval records, rollback |
-| decisions.sql | Decision logging, list / detail / audit-trail queries, overrides, pipeline_run lifecycle writes (start / complete / fail), application activity + purge |
+| decisions.sql | Decision logging, list / detail / audit-trail queries, overrides, application activity + purge |
+| runs.sql | Run lifecycle inserts (submit / claim / heartbeat / release / complete / error), `claim_next_execution_run` (atomic SELECT FOR UPDATE SKIP LOCKED + status insert), filtered list + count via `execution_run_current` view (joined to task / agent / application for display names) |
 | testing.sql | Test suites + cases, ground truth datasets / records / annotations, validation runs + per-record results, metric thresholds |
 | reporting.sql | Dashboard aggregations, model inventory, override analysis |
 | models.sql | Model registry CRUD, SCD-2 price history, invocation logging, usage aggregations for cost-over-time / by-model / by-application |
@@ -762,7 +830,7 @@ All defined as PostgreSQL ENUMs and mirrored as Python `str, Enum` classes:
 | deployment_channel | development, staging, shadow, evaluation, production |
 | materiality_tier | high, medium, low |
 | capability_type | classification, extraction, generation, summarisation, matching, validation |
-| entity_type | agent, task, prompt, pipeline, tool |
+| entity_type | agent, task, prompt, tool |
 | governance_tier | behavioural, contextual, formatting |
 | api_role | system, user, assistant_prefill |
 | metric_type | exact_match, schema_valid, field_accuracy, classification_f1, semantic_similarity, human_rubric |
@@ -791,9 +859,12 @@ All defined as PostgreSQL ENUMs and mirrored as Python `str, Enum` classes:
 | InferenceConfig | API call building | Model name, temperature, max tokens, extended params |
 | ExecutionResult | Return from all execution | decision_log_id, output, tokens, duration, status |
 | DecisionLogCreate | _log_decision | 31-field input for decision INSERT |
-| AuditTrailEntry | Audit trail queries | One step in a pipeline's audit trail |
-| MockContext | Testing/mocking | Two-dimensional mock control |
-| PipelineStep | Pipeline execution | Step definition (entity, order, dependencies, conditions) |
+| AuditTrailEntry | Audit trail queries | One decision in a workflow_run_id-scoped or context-scoped audit trail |
+| MockContext | Testing/mocking | Five-field mock control: step_responses (strict), tool_responses, mock_all_tools, source_responses, target_blocks |
+| MockMissingError | MockContext.get_step_response | Raised when step_responses is non-empty and no key matches — never falls through to live LLM |
+| SourceBinding / WriteTarget / WriteTargetPayloadField | Declarative I/O wiring | Per-version source / target / payload-field rows |
+| ExecutionRun / ExecutionRunStatus / ExecutionRunCompletion / ExecutionRunError / ExecutionRunCurrent | Async run lifecycle | Event-sourced run-tracking models |
+| ExecutionEnvelope / EnvelopeError | API + SDK return | Canonical flat envelope for every Task / Agent execution |
 | PromotionRequest | Lifecycle promotion | Target state + approver + evidence flags |
 
 ### Key Enums
@@ -833,11 +904,11 @@ Admin UI HTML routes served via Jinja2. Grouped to match the sidebar.
 
 | Route Group | Routes | Purpose |
 |-------------|--------|---------|
-| Home | `/` | Dashboard with asset counts, decision + override + pipeline charts, current-month cost tile |
-| Registry | `/applications`, `/pipelines`, `/agents`, `/tasks`, `/prompts`, `/configs`, `/tools`, `/mcp-servers`, `/models` and detail pages | Browse and detail pages for all entity types |
-| Observability | `/pipeline-runs`, `/decisions`, `/overrides`, `/usage`, `/quotas` | Decision log, pipeline run lifecycle, overrides, Usage & Spend, quota status |
+| Home | `/` | Dashboard with asset counts, decision + override + run charts, current-month cost tile |
+| Registry | `/applications`, `/agents`, `/tasks`, `/prompts`, `/configs`, `/tools`, `/mcp-servers`, `/models` and detail pages | Browse and detail pages for all entity types |
+| Observability | `/runs`, `/runs/{id}`, `/workflows/{id}`, `/decisions`, `/overrides`, `/usage`, `/quotas` | Unified Runs list (every async/sync task or agent invocation), per-run lifecycle drill-through, workflow_run_id-scoped grouping, decision log, overrides, Usage & Spend, quota status |
 | Governance | `/model-inventory`, `/lifecycle`, `/testing`, `/ground-truth`, `/validation-runs`, `/incidents` | Inventory, lifecycle overview, test suites, ground truth datasets, validation runs, incidents (incidents + active quota breaches) |
-| Audit | `/audit-trail/run/{id}`, `/audit-trail/context/{id}` | Pipeline-run and context-scoped audit trails |
+| Audit | `/audit-trail/run/{workflow_run_id}`, `/audit-trail/context/{execution_context_id}` | Workflow-run and context-scoped audit trails |
 | Settings | `/settings` | Platform settings (`platform_settings` table) |
 
 ### 4.3 Template Rendering
@@ -871,8 +942,9 @@ Mounted on the same FastAPI app at `/api/v1/*`. JSON-only; thin wrappers over th
 
 | Module | Surface |
 |--------|---------|
-| `registry.py` | `GET /agents`, `/tasks`, `/prompts`, `/pipelines`, `/inference-configs`, `/tools`, `/mcp-servers`; per-entity `/{name}/config` (resolved) and `/{name}/versions` |
-| `runtime.py` | `POST /runtime/agents/{name}/run`, `/tasks/{name}/run`, `/pipelines/{name}/run` |
+| `registry.py` | `GET /agents`, `/tasks`, `/prompts`, `/inference-configs`, `/tools`, `/mcp-servers`; per-entity `/{name}/config` (resolved) and `/{name}/versions` |
+| `runtime.py` | `POST /runtime/agents/{name}/run`, `/tasks/{name}/run` (sync sugar; internally submit + wait) |
+| `runs.py` | `POST /runs` (async submit), `GET /runs` (filtered list), `GET /runs/{id}` (current state), `GET /runs/{id}/lifecycle` (full event sequence), `GET /runs/{id}/result` (envelope), `POST /runs/{id}/cancel` |
 | `authoring.py` | `POST` for all `register_*` headers, versions, and associations (prompts / tools / delegations / MCP servers / ground truth / validation runs / model cards / thresholds / test suites) |
 | `draft_edit.py` | `PATCH / PUT / DELETE` on draft versions only (draft-guard enforced in SQL); `POST /{name}/versions/{source_id}/clone` for clone-and-edit |
 | `lifecycle.py` | `POST /lifecycle/promote`, `/lifecycle/rollback`, `GET /lifecycle/approvals` |
@@ -1150,7 +1222,7 @@ Business App             Verity SDK              Registry          Claude API   
 **What gets logged (31 columns):**
 - Entity identity: entity_type, entity_version_id, prompt_version_ids[]
 - Config snapshot: inference_config_snapshot (full JSONB copy, not just ID)
-- Context: channel, pipeline_run_id, execution_context_id, step_name
+- Context: channel, workflow_run_id, execution_run_id, execution_context_id, step_name
 - Input/Output: input_json, output_json, input_summary, output_summary, reasoning_text
 - AI metrics: confidence_score, risk_factors, model_used, input_tokens, output_tokens, duration_ms
 - Tool audit: tool_calls_made[] (every call with input and output)
@@ -1293,86 +1365,133 @@ Business App             Verity SDK              Claude API
 
 ---
 
-### 7.5 Pipeline Execution Flow
+### 7.5 Multi-Step Workflow Execution Flow (app-orchestrated)
 
-**Use case:** Multi-step orchestration - run a sequence of agents and tasks as a governed unit.
+**Use case:** Multi-step orchestration — run a sequence of tasks and agents
+that share an execution context. Verity does **not** own multi-step
+orchestration; the consuming app owns the loop and threads
+`workflow_run_id` through each call.
 
-**Input:** Pipeline name, context dict, optional mock.
+**Input:** None. The app generates a `workflow_run_id` (UUID) per workflow
+invocation and threads it through every `run_task` / `run_agent` call.
 
-**Output:** PipelineResult with per-step results, overall status, total duration.
+**Output:** Whatever shape the app builds from the per-call results
+(typically a list of per-step results plus a roll-up status). Verity does
+not return a `WorkflowResult` — that's an app-level concept.
 
-**Tables read:** pipeline, pipeline_version (for step definitions), plus all tables from agent/task execution per step.
+**Tables read:** Same read tables as agent / task execution per call. No
+workflow-specific tables exist (pipelines were descoped 2026-04-24).
 
-**Tables written:** agent_decision_log (1 row per step), all sharing the same pipeline_run_id.
+**Tables written:** `agent_decision_log` (1 row per call), all sharing
+the same `workflow_run_id`. `execution_run` lifecycle tables (1 row per
+call). All decisions also share the caller-supplied
+`execution_context_id` if the app provides it.
 
-#### Sequence
+#### Sequence — UW per-document doc-processing workflow
+
+The UW demo's `run_doc_processing` (in `uw_demo/app/workflows.py`)
+illustrates the pattern. EDMS returns originals only by default, so the
+loop iterates over the actual uploaded documents (not lineage children).
 
 ```
-Business App        Pipeline Executor       Execution Engine        Database
-     |                    |                       |                     |
-     | execute_pipeline(  |                       |                     |
-     |  "uw_submission")  |                       |                     |
-     |------------------->|                       |                     |
-     |                    |                       |                     |
-     |                    | Generate pipeline_run_id (UUID)             |
-     |                    |                       |                     |
-     |                    | Load pipeline version |                     |
-     |                    | Parse steps JSONB     |                     |
-     |                    |                       |                     |
-     |                    | Build execution groups|                     |
-     |                    | (group by step_order) |                     |
-     |                    |                       |                     |
-     |                    |=== GROUP 1 (order=1) =|===================  |
-     |                    |                       |                     |
-     |                    | Build step_context:   |                     |
-     |                    | original context      |                     |
-     |                    | (no prior outputs yet)|                     |
-     |                    |                       |                     |
-     |                    | run_agent(            |                     |
-     |                    |  "doc_classifier",    |                     |
-     |                    |  context=step_context, |                    |
-     |                    |  pipeline_run_id,     |                     |
-     |                    |  step_name="classify") |                    |
-     |                    |---------------------->|                     |
-     |                    |                       | (full agent flow)   |
-     |                    |<- StepResult ---------|                     |
-     |                    |                       |                     |
-     |                    | accumulated_results[  |                     |
-     |                    |   "classify_documents"|                     |
-     |                    | ] = step_result       |                     |
-     |                    |                       |                     |
-     |                    |=== GROUP 2 (order=2) =|===================  |
-     |                    |                       |                     |
-     |                    | Build step_context:   |                     |
-     |                    | original context +    |                     |
-     |                    | classify output       |                     |
-     |                    | (step_context[        |                     |
-     |                    |  "classify_documents"]|                     |
-     |                    |  = prior output)      |                     |
-     |                    |                       |                     |
-     |                    | run_agent(            |                     |
-     |                    |  "field_extractor",   |                     |
-     |                    |  context=step_context) |                    |
-     |                    |---------------------->|                     |
-     |                    |<- StepResult ---------|                     |
-     |                    |                       |                     |
-     |                    | ... (repeat for steps 3, 4)                |
-     |                    |                       |                     |
-     |                    | Determine overall:    |                     |
-     |                    | all complete? "complete"                    |
-     |                    | any failed?   "partial"                     |
-     |                    | pipeline_failed? "failed"                   |
-     |                    |                       |                     |
-     |<- PipelineResult --|                       |                     |
-     |   (pipeline_run_id,|                       |                     |
-     |    all_steps[],    |                       |                     |
-     |    status,         |                       |                     |
-     |    duration_ms)    |                       |                     |
+Business App                Verity SDK              Claude API   EDMS
+     |                          |                       |          |
+     | wf_run_id = uuid4()      |                       |          |
+     | ctx_id = create_         |                       |          |
+     |   execution_context(...) |                       |          |
+     |                          |                       |          |
+     | docs = edms.list_documents(submission_ref)       |          |
+     |                                                  |          |
+     | for doc in docs:         |                       |          |
+     |   classify = await       |                       |          |
+     |     verity.run_task(     |                       |          |
+     |       "document_classifier",                     |          |
+     |       input={            |                       |          |
+     |         submission_id,   |                       |          |
+     |         lob, named_insured,                      |          |
+     |         documents:[doc]} |                       |          |
+     |       step_name=         |                       |          |
+     |         f"classify_documents:{doc.filename}",    |          |
+     |       workflow_run_id=wf_run_id,                 |          |
+     |       execution_context_id=ctx_id)               |          |
+     |------------------------->|                       |          |
+     |                          | _open_self_tracked_run             |
+     |                          | (writes execution_run row,         |
+     |                          |  submitted_by='inproc')            |
+     |                          |                       |          |
+     |                          | _resolve_sources():   |          |
+     |                          |  binding_kind='content_blocks'|   |
+     |                          |  fetch:edms/get_document_         |
+     |                          |       content_blocks(input.documents)
+     |                          |---------------------------------->|
+     |                          |<-- list of content blocks --------|
+     |                          |   (PDF/text/image, per content_type)
+     |                          |                       |          |
+     |                          | _assemble_prompts():  |          |
+     |                          |  prepend content_blocks to user msg
+     |                          |                       |          |
+     |                          | Single LLM call       |          |
+     |                          |---------------------->|          |
+     |                          |<-- structured output --|         |
+     |                          |   {document_type, confidence,    |
+     |                          |    classification_notes}         |
+     |                          |                       |          |
+     |                          | _write_targets(): no targets     |
+     |                          | declared on classifier            |
+     |                          |                       |          |
+     |                          | _log_decision()       |          |
+     |                          | _close_self_tracked_run_complete |
+     |<--- ExecutionResult -----|                       |          |
+     |     (output, decision_log_id, ...)                          |
+     |                          |                       |          |
+     |   if classify.output["document_type"] ==                    |
+     |      "do_application":   |                       |          |
+     |     extract = await      |                       |          |
+     |       verity.run_task(   |                       |          |
+     |         "field_extractor", input={..., documents:[doc]},    |
+     |         step_name=f"extract_fields:{doc.filename}",         |
+     |         workflow_run_id=wf_run_id,                          |
+     |         execution_context_id=ctx_id)                        |
+     |------------------------->|                       |          |
+     |                          | (similar flow but    |           |
+     |                          |  binding_kind='text' for         |
+     |                          |  document_text;       |          |
+     |                          |  write_target          |          |
+     |                          |  extracted_fields_to_edms        |
+     |                          |  fires post-output:   |          |
+     |                          |  POST /documents/{parent}/derived|
+     |                          |---------------------------------->|
+     |                          |<-- {child_id, ...} ---------------|
+     |                          | target_writes:        |          |
+     |                          |  status=wrote,        |          |
+     |                          |  mode_reason=         |          |
+     |                          |   auto_channel=production        |
+     |                          |  handle={child_id, parent_id, ...} |
+     |                          |                       |          |
+     |<--- ExecutionResult -----|                       |          |
+     |                          |                       |          |
+     | (loop continues for all documents)               |          |
 ```
 
-**Context propagation nuance:** Each step receives the original pipeline context PLUS the output of every prior completed step, keyed by step_name. Step 3 (triage) sees: `context["classify_documents"] = {classifier output}`, `context["extract_fields"] = {extractor output}`, plus the original `context["submission_id"]`, `context["lob"]`, etc.
+**What clusters under the workflow_run_id**: every classify decision +
+every extract decision share `workflow_run_id`. Every row also has its
+own `execution_run_id` linking to the event-sourced lifecycle. Both
+appear together at `/admin/workflows/{workflow_run_id}`.
 
-**Parallel execution nuance:** Steps with the same `step_order` run concurrently via `asyncio.gather()`. They all receive the same accumulated_results from prior groups. Their individual outputs are collected after all complete.
+**What clusters under the execution_context_id**: every workflow run for
+the same submission (doc-processing AND risk-assessment, across all
+invocations) shares `execution_context_id`. The submission's UI page
+links here for "View in Verity".
+
+**Why per-document calls instead of one batched call?** Each document is
+a distinct semantic unit; the classifier returns one classification per
+call (its `output_schema` is single-classification shaped). Running
+per-document gives one audit row per document with its own
+`source_resolutions` and `target_writes`, making it possible to answer
+"why was this document classified as X?" with full provenance. Batched
+classification across N documents would collapse to a single row whose
+content blocks would have to encode all N documents at once — harder to
+audit, harder to retry per-document.
 
 ---
 
@@ -1679,12 +1798,21 @@ task  --(1:N)--> task_version  --(N:1)--> inference_config
                       |
                       +--(N:M via task_version_tool)--> tool
 
-pipeline --(1:N)--> pipeline_version (steps stored as JSONB, not FK)
-
-application --(1:N)--> application_entity (maps to agent, task, tool, prompt, pipeline)
+application --(1:N)--> application_entity (maps to agent, task, tool, prompt)
             --(1:N)--> execution_context
 
-agent_decision_log --(N:1)--> execution_context
+agent_version --(1:N via source_binding owner)--> source_binding
+              --(1:N via write_target owner)--> write_target
+task_version  --(1:N via source_binding owner)--> source_binding
+              --(1:N via write_target owner)--> write_target
+write_target --(1:N)--> target_payload_field (CASCADE on delete)
+data_connector <--(N:1) write_target
+
+execution_run --(1:N)--> execution_run_status (lifecycle ledger)
+              --(1:1)--> execution_run_completion (terminal success, optional)
+              --(1:1)--> execution_run_error      (terminal failure, optional)
+agent_decision_log --(N:1)--> execution_run (via execution_run_id)
+                   --(N:1)--> execution_context
                    --(self)--> parent_decision_id (for sub-agent hierarchy)
                    --(self)--> reproduced_from_decision_id (for audit replay)
 
@@ -1704,7 +1832,10 @@ validation_record_result --(N:1)--> validation_run
 |---|---|---|
 | agent_version.output_schema | JSON Schema for agent output | `{"risk_score": {"type": "string"}, "confidence": {"type": "number"}}` |
 | agent_version.authority_thresholds | Decision thresholds by category | `{"auto_approve_below": 0.7, "require_hitl_above": 0.9}` |
-| pipeline_version.steps | Array of PipelineStep objects | `[{"step_name": "classify", "entity_type": "agent", "entity_name": "doc_classifier", "step_order": 1, "depends_on": []}]` |
+| source_binding.reference | Wiring DSL string | `"fetch:edms/get_documents_text(input.documents)"` (text binding) or `"fetch:edms/get_document_content_blocks(input.documents)"` (content_blocks binding) |
+| target_payload_field.reference | Wiring DSL string | `"input.documents[0].id"` (input path) or `"output.fields"` (output path) or `"const:field_extraction"` (literal) |
+| agent_decision_log.source_resolutions | Per-binding audit array | `[{"template_var":"document_text","kind":"fetch","binding_kind":"text","status":"resolved","payload_size":18595,"connector":"edms","method":"get_documents_text"}]` |
+| agent_decision_log.target_writes | Per-target audit array | `[{"target_name":"extracted_fields_to_edms","mode":"write","mode_reason":"auto_channel=production","status":"wrote","handle":{"child_id":"...","parent_id":"...","storage_key":"...","transformation_type":"field_extraction"},"payload_size":2543}]` |
 | entity_prompt_assignment.condition_logic | Conditional prompt inclusion rules | `{"if_lob": "DO"}` or `null` (always include) |
 | tool.input_schema | JSON Schema for tool parameters | `{"type": "object", "properties": {"context_ref": {"type": "string"}}, "required": ["context_ref"]}` |
 | tool.mock_responses | Mock data keyed by scenario | `{"default": {"status": "success", "data": {...}}}` |
@@ -1742,7 +1873,7 @@ run_agent() catches Exception:
 
 **What this means:**
 - Failed API calls ARE logged to the decision trail (with status="failed")
-- The caller (pipeline executor or business app) sees a failed ExecutionResult
+- The caller (the business app's workflow code) sees a failed ExecutionResult
 - No retry. No fallback. The call fails once and that's it.
 - If failure happens mid-loop (e.g., turn 3 of 10), all prior tool calls are lost from the log - only the error is recorded.
 
@@ -1882,15 +2013,17 @@ One Python process
 
 **AsyncAnthropic client:** Uses httpx under the hood with connection pooling. Multiple concurrent Claude API calls are supported.
 
-**Pipeline parallelism:** When a pipeline group has multiple steps with the same `step_order`, they execute via `asyncio.gather()`. This means multiple Claude API calls run concurrently - one per parallel step.
+**Workflow-level parallelism:** Driven entirely by the consuming app. The app is free to call multiple `verity.run_task` / `verity.run_agent` concurrently with `asyncio.gather()` (or via the async `submit_*` API + multiple workers); each call resolves its own sources and writes its own targets independently.
 
-**Rate limiting:** Not handled by Verity. If the Claude API returns a rate limit error (429), it propagates as an exception. No backoff, no retry queue. The caller (pipeline executor) sees a failed step.
+**Worker-level parallelism:** Multiple `verity-worker` containers can run side-by-side (`docker compose up --scale verity-worker=N`). The worker's claim query uses `SELECT ... FOR UPDATE SKIP LOCKED` so two workers can never claim the same `execution_run` row.
+
+**Rate limiting:** The engine retries on transient Claude API errors (429/500/502/503/529) with exponential backoff inside `_gateway_llm_call`. Non-retryable errors propagate to the caller and surface as a failed `ExecutionResult`.
 
 ### 10.4 Tool Call Concurrency
 
 **Within one agent turn:** Tool calls within a single response are executed sequentially (for loop over `response.content` blocks). Even if Claude requests 3 tools in one turn, they run one at a time.
 
-**Across pipeline steps:** Parallel pipeline steps each run their own agent loop, so their tool calls run concurrently via `asyncio.gather()`.
+**Across concurrent runs:** Each Task/Agent run has its own engine call stack. When the app issues multiple runs concurrently (or multiple workers each run their own claim), tool implementations execute in parallel across runs.
 
 **Sync tool implementations:** If a registered tool implementation is synchronous (not async), it blocks the event loop during execution. For I/O-heavy tools (database queries, HTTP calls), this blocks ALL other concurrent operations until the tool returns. Always register async tool implementations.
 
@@ -1942,7 +2075,7 @@ If `VERITY_DB_URL` is wrong or the database is unreachable:
 | Dashboard queries | Full table scans with GROUP BY | Slow with >10K decisions |
 | Decision log | Every AI call creates a row with JSONB columns | Table grows linearly; no archival strategy |
 | Connection pool | max_size=10 | Cannot exceed 10 concurrent database operations |
-| Pipeline execution | Synchronous on request thread | Long pipelines block the HTTP response |
+| Sync sugar `run_task` / `run_agent` | Block the calling task / HTTP request until the LLM call finishes | Long-running runs block their caller; use `submit_*` + the async worker for fire-and-forget shapes |
 | No caching | Every request queries the database | Config resolution for every execution adds latency |
 
 ### 12.2 Missing Infrastructure
@@ -2302,7 +2435,7 @@ Managed via the Settings page in the admin UI (`/admin/settings`).
 
 ### 14.8 Client Integration
 
-The Verity client (`client/inprocess.py`) initializes TestRunner and ValidationRunner as part of the Runtime construction, alongside ExecutionEngine and PipelineExecutor:
+The Verity client (`client/inprocess.py`) initializes TestRunner and ValidationRunner as part of the Runtime construction, alongside ExecutionEngine, RunsWriter, RunsReader, and DecisionsWriter:
 
 ```python
 self.test_runner = TestRunner(
@@ -2358,15 +2491,15 @@ The `underwriting` collection has per-submission folders. The `ground_truth` col
 
 | Metric | Count |
 |--------|-------|
-| Database tables | ~45 (registry, multi-app, context, testing, decisions, pipeline_run, model / model_price / model_invocation_log, quota / quota_check, incidents, evaluation, model_card, field_extraction_config, description_similarity_log, platform_settings, mcp_server) |
-| Views | 1 (`v_model_invocation_cost`) |
-| Named SQL queries | ~223 across 10 files (registry, registration, authoring, lifecycle, decisions, testing, reporting, models, quotas, connectors) |
-| Pydantic models | 60+ (including contracts/ boundary types) |
+| Database tables | ~45 (registry, source_binding / write_target / target_payload_field, data_connector, multi-app, context, testing, decisions, execution_run + status + completion + error, model / model_price / model_invocation_log, quota / quota_check, incidents, evaluation, model_card, field_extraction_config, description_similarity_log, platform_settings, mcp_server) |
+| Views | 2 (`v_model_invocation_cost`, `execution_run_current`) |
+| Named SQL queries | across 11 files (registry, registration, authoring, lifecycle, decisions, runs, testing, reporting, models, quotas, connectors) |
+| Pydantic models | 60+ (including contracts/ boundary types: SourceBinding, WriteTarget, WriteTargetPayloadField, ExecutionRun + lifecycle, ExecutionEnvelope, MockContext, MockMissingError) |
 | Python enums | 15+ |
 | Admin UI HTML routes (Jinja2) | ~40 |
-| REST API endpoints (`/api/v1/*`) | ~78 across 11 sub-routers |
+| REST API endpoints (`/api/v1/*`) | sub-routers include registry / runtime / runs / authoring / draft_edit / lifecycle / applications / decisions / reporting / models / usage / quotas |
 | Jinja2 templates | 36 |
-| Governance modules | 7 (registry, lifecycle, decisions reader, reporting, testing_meta, models, quotas) + coordinator |
-| Runtime modules | 11 (engine, pipeline, decisions_writer, mcp_client, connectors, mock_context, fixture_backend, test_runner, validation_runner, metrics, runtime) |
+| Governance modules | 8 (registry, lifecycle, decisions reader, runs reader, reporting, testing_meta, models, quotas) + coordinator |
+| Runtime modules | engine, worker, decisions_writer, runs_writer, mcp_client, connectors, test_runner, validation_runner, metrics, runtime |
 | SDK public methods (`client/inprocess.py` + sub-facades) | ~100 |
-| `agent_decision_log` columns | ~35 (adds pipeline_run_id, parent_decision_id, decision_depth, step_name, application, reproduced_from_decision_id, hitl_required, decision_log_detail, redaction_applied) |
+| `agent_decision_log` columns | ~35 (adds workflow_run_id, execution_run_id, parent_decision_id, decision_depth, step_name, application, reproduced_from_decision_id, hitl_required, decision_log_detail, redaction_applied, source_resolutions, target_writes) |
