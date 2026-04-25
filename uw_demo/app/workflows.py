@@ -303,6 +303,16 @@ async def run_risk_assessment(
     all_steps: list[StepRun] = []
     mock = _build_mock(_risk_assessment_outputs(submission_id) if use_mock else None)
 
+    # Both agents are "produce a conclusion" agents — given evidence
+    # they emit a structured determination. enforce_output_schema=True
+    # makes that contract load-bearing: the engine forces the model to
+    # call submit_output(output_schema), the agent's output dict is
+    # guaranteed to conform, and downstream persistence reads
+    # `output_json["risk_score"]` / `output_json["determination"]`
+    # without defensive None checks. Without enforcement the model
+    # tends to wrap JSON in markdown fences, the parsed output ends up
+    # as `{"raw_output": "..."}`, and every flat-column upsert sees
+    # None for the structured fields.
     triage = await _run_step(
         verity,
         entity_kind="agent",
@@ -312,6 +322,7 @@ async def run_risk_assessment(
         mock=mock,
         workflow_run_id=workflow_run_id,
         execution_context_id=execution_context_id,
+        enforce_output_schema=True,
     )
     all_steps.append(triage)
     if triage.status != "complete":
@@ -335,6 +346,7 @@ async def run_risk_assessment(
         mock=mock,
         workflow_run_id=workflow_run_id,
         execution_context_id=execution_context_id,
+        enforce_output_schema=True,
     )
     all_steps.append(appetite)
 
@@ -368,6 +380,7 @@ async def _run_step(
     mock: Optional[MockContext],
     workflow_run_id: UUID,
     execution_context_id: Optional[UUID],
+    enforce_output_schema: bool = False,
 ) -> StepRun:
     """Dispatch one step through the engine, return a StepRun.
 
@@ -375,6 +388,15 @@ async def _run_step(
     (`mock.step_responses`) or run for real — there's only one code
     path here, regardless of mock vs live. Keeps audit shape identical
     in both modes.
+
+    `enforce_output_schema` is forwarded to run_agent (no-op for
+    tasks). When True, the engine injects a synthetic `submit_output`
+    tool with the agent_version's output_schema and forces tool_choice
+    on the terminal turn — guaranteeing the agent's `output` dict
+    conforms to its declared schema. Without it, agents can return
+    free-form text wrapped in `{"raw_output": "..."}`, which means
+    persistence layers reading top-level keys like
+    `output["risk_score"]` see None.
     """
     try:
         if entity_kind == "task":
@@ -394,6 +416,7 @@ async def _run_step(
                 mock=mock,
                 workflow_run_id=workflow_run_id,
                 execution_context_id=execution_context_id,
+                enforce_output_schema=enforce_output_schema,
             )
     except Exception as exc:
         # The engine catches its own internal exceptions and returns

@@ -231,48 +231,14 @@ async def store_extraction_result(
     return {"stored": True, "fields_stored": stored, "fields_flagged": flagged}
 
 
-async def store_triage_result(
-    submission_id: str,
-    risk_score: str,
-    routing: str = "",
-    reasoning: str = "",
-) -> dict:
-    """Stores the triage agent's risk assessment in uw_db."""
-    import json
-
-    result = {
-        "risk_score": risk_score,
-        "routing": routing,
-        "reasoning": reasoning,
-    }
-
-    async with await _get_conn() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                """INSERT INTO submission_assessment (
-                    submission_id, assessment_type, result,
-                    risk_score, routing, reasoning
-                ) VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (submission_id, assessment_type)
-                DO UPDATE SET
-                    result = EXCLUDED.result,
-                    risk_score = EXCLUDED.risk_score,
-                    routing = EXCLUDED.routing,
-                    reasoning = EXCLUDED.reasoning,
-                    created_at = NOW()
-                """,
-                (
-                    submission_id, "triage", json.dumps(result),
-                    risk_score, routing, reasoning,
-                ),
-            )
-            await cur.execute(
-                "UPDATE submission SET status = 'triaged', updated_at = NOW() WHERE id = %s",
-                (submission_id,),
-            )
-        await conn.commit()
-
-    return {"stored": True, "submission_id": submission_id, "risk_score": risk_score}
+# store_triage_result removed 2026-04-25.
+# triage_agent now uses enforce_output_schema=True. The agent's
+# structured output_json is the canonical conclusion; persistence to
+# submission_assessment is driven by the route reading
+# agent_decision_log.output_json after the run, not by a tool call
+# during the agent loop. The transition to status='triaged' is now
+# stamped by the route via _update_submission_status when the
+# workflow completes.
 
 
 async def update_submission_event(

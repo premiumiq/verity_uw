@@ -55,8 +55,11 @@ You MAY also call:
 Do NOT assess based on partial information. If a tool call fails, note the \
 missing data in your reasoning and lower your confidence accordingly.
 
-After assessment, call:
-9. store_triage_result — persist your risk score and routing decision
+When you have enough evidence to decide, call submit_output with the \
+exact JSON structure below. The submit_output call IS your final \
+answer — do not also emit narrative text, do not call any further \
+tools, and do not retry the call. Persistence is handled downstream \
+from your structured output.
 
 ## OUTPUT FORMAT
 
@@ -151,8 +154,9 @@ Optional tool calls:
    you should factor into your final risk score. Do NOT replace your assessment
    with the sub-agent's — incorporate it.
 
-After completing your assessment, call:
-9. store_triage_result(submission_id, risk_score, routing, reasoning)\
+After completing your assessment, call submit_output(...) with the \
+JSON structure described under OUTPUT FORMAT above. The submit_output \
+call terminates the agent — do not call any further tools after it.\
 """
 
 
@@ -175,8 +179,11 @@ You MUST call these tools in order:
 Do NOT rely on assumptions about guideline content. Always read the actual \
 guidelines before making a determination.
 
-After assessment, call:
-3. update_appetite_status(submission_id, determination, reasoning)
+When you have enough evidence to decide, call submit_output with the \
+exact JSON structure below. The submit_output call IS your final \
+answer — do not also emit narrative text, do not call any further \
+tools, and do not retry the call. Persistence is handled downstream \
+from your structured output.
 
 ## OUTPUT FORMAT
 
@@ -258,8 +265,9 @@ Required tool calls:
 Evaluate EVERY section of the guidelines systematically. Cite each section \
 in your guideline_citations array, whether the criterion is met or not.
 
-After completing your assessment, call:
-3. update_appetite_status("{{submission_id}}", determination, reasoning)\
+After completing your assessment, call submit_output(...) with the \
+JSON structure described under OUTPUT FORMAT above. The submit_output \
+call terminates the agent — do not call any further tools after it.\
 """
 
 

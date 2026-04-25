@@ -57,7 +57,6 @@ from uw_demo.app.tools.submission_tools import (
     get_submission_context,
     get_loss_history,
     store_extraction_result,
-    store_triage_result,
     update_submission_event,
 )
 from uw_demo.app.tools.guidelines_tools import get_underwriting_guidelines
@@ -75,11 +74,12 @@ verity.register_tool_implementation("get_loss_history", get_loss_history)
 verity.register_tool_implementation("get_underwriting_guidelines", get_underwriting_guidelines)
 verity.register_tool_implementation("get_documents_for_submission", get_documents_for_submission)
 verity.register_tool_implementation("store_extraction_result", store_extraction_result)
-verity.register_tool_implementation("store_triage_result", store_triage_result)
 verity.register_tool_implementation("update_submission_event", update_submission_event)
-verity.register_tool_implementation("update_appetite_status",
-    lambda submission_id, determination, citations=None: {"stored": True, "determination": determination}
-)
+# store_triage_result + update_appetite_status retired 2026-04-25.
+# triage_agent + appetite_agent now use enforce_output_schema=True so
+# their structured output_json IS the canonical conclusion. Persistence
+# is driven by the route reading agent_decision_log.output_json after
+# the run.
 
 # ── EDMS DOCUMENT TOOLS ──────────────────────────────────────
 # Calls the EDMS service over HTTP (no package dependency).

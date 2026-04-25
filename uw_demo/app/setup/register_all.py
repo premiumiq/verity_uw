@@ -621,28 +621,13 @@ async def seed_tools(verity: Verity) -> dict:
             "data_classification_max": "tier2_internal",
             "is_write_operation": True, "requires_confirmation": False, "tags": ["write", "events"],
         },
-        {
-            "name": "store_triage_result",
-            "display_name": "Store Triage Result",
-            "description": "Stores the triage agent's risk assessment output (risk score, routing, narrative) to the submission record.",
-            "input_schema": {"type": "object", "properties": {"submission_id": {"type": "string"}, "risk_score": {"type": "string"}, "routing": {"type": "string"}, "reasoning": {"type": "string"}}, "required": ["submission_id", "risk_score"]},
-            "output_schema": {"type": "object", "properties": {"stored": {"type": "boolean"}}},
-            "implementation_path": "uw_demo.app.tools.submission_tools.store_triage_result",
-            "mock_mode_enabled": False, "mock_response_key": "default",
-            "data_classification_max": "tier3_confidential",
-            "is_write_operation": True, "requires_confirmation": False, "tags": ["write", "triage"],
-        },
-        {
-            "name": "update_appetite_status",
-            "display_name": "Update Appetite Status",
-            "description": "Stores the appetite agent's determination (within_appetite, borderline, outside_appetite) and guideline citations.",
-            "input_schema": {"type": "object", "properties": {"submission_id": {"type": "string"}, "determination": {"type": "string"}, "citations": {"type": "array"}}, "required": ["submission_id", "determination"]},
-            "output_schema": {"type": "object", "properties": {"stored": {"type": "boolean"}}},
-            "implementation_path": "uw_demo.app.tools.submission_tools.update_appetite_status",
-            "mock_mode_enabled": False, "mock_response_key": "default",
-            "data_classification_max": "tier3_confidential",
-            "is_write_operation": True, "requires_confirmation": False, "tags": ["write", "appetite"],
-        },
+        # store_triage_result + update_appetite_status removed
+        # 2026-04-25 — both agents now use enforce_output_schema=True
+        # so the structured agent output IS the canonical persistence
+        # source. The route reads agent_decision_log.output_json and
+        # upserts submission_assessment from there. There is no
+        # separate "save my conclusion" tool because the agent's
+        # output_json is the conclusion.
         # ── EDMS document tools ──────────────────────────────────
         {
             "name": "list_documents",
@@ -896,7 +881,13 @@ async def seed_agent_versions(verity: Verity, agents: dict, configs: dict) -> di
         major_version=1, minor_version=0, patch_version=0,
         lifecycle_state="draft", channel="development",
         inference_config_id=configs["triage_balanced"],
-        output_schema=json.dumps({"risk_score": "string", "routing": "string", "reasoning": "string", "risk_factors": "array", "confidence": "number"}),
+        output_schema=json.dumps({
+            "risk_score":   {"type": "string", "enum": ["Green", "Yellow", "Red"]},
+            "routing":      {"type": "string", "enum": ["assign_to_uw", "senior_review", "decline"]},
+            "reasoning":    {"type": "string"},
+            "confidence":   {"type": "number", "minimum": 0, "maximum": 1},
+            "risk_factors": {"type": "array", "items": {"type": "object"}},
+        }),
         authority_thresholds=json.dumps({"requires_hitl_above_premium": 500000, "low_confidence_threshold": 0.70, "auto_decline_red": False}),
         mock_mode_enabled=False, decision_log_detail="full",
         developer_name="Dev Team", change_summary="Added multi-factor risk assessment with guideline citations and structured risk factors",
@@ -911,7 +902,12 @@ async def seed_agent_versions(verity: Verity, agents: dict, configs: dict) -> di
         major_version=1, minor_version=0, patch_version=0,
         lifecycle_state="draft", channel="development",
         inference_config_id=configs["triage_balanced"],
-        output_schema=json.dumps({"determination": "string", "confidence": "number", "guideline_citations": "array", "reasoning": "string"}),
+        output_schema=json.dumps({
+            "determination":        {"type": "string", "enum": ["within_appetite", "borderline", "outside_appetite"]},
+            "confidence":           {"type": "number", "minimum": 0, "maximum": 1},
+            "guideline_citations":  {"type": "array", "items": {"type": "object"}},
+            "reasoning":            {"type": "string"},
+        }),
         authority_thresholds=json.dumps({}),
         mock_mode_enabled=False, decision_log_detail="full",
         developer_name="Dev Team", change_summary="Initial release with guidelines-based appetite assessment",
@@ -926,7 +922,13 @@ async def seed_agent_versions(verity: Verity, agents: dict, configs: dict) -> di
         major_version=2, minor_version=0, patch_version=0,
         lifecycle_state="draft", channel="development",
         inference_config_id=configs["triage_balanced"],
-        output_schema=json.dumps({"risk_score": "string", "routing": "string", "reasoning": "string", "risk_factors": "array", "confidence": "number"}),
+        output_schema=json.dumps({
+            "risk_score":   {"type": "string", "enum": ["Green", "Yellow", "Red"]},
+            "routing":      {"type": "string", "enum": ["assign_to_uw", "senior_review", "decline"]},
+            "reasoning":    {"type": "string"},
+            "confidence":   {"type": "number", "minimum": 0, "maximum": 1},
+            "risk_factors": {"type": "array", "items": {"type": "object"}},
+        }),
         authority_thresholds=json.dumps({"requires_hitl_above_premium": 500000}),
         mock_mode_enabled=False, decision_log_detail="full",
         developer_name="Dev Team",
@@ -1391,28 +1393,30 @@ async def seed_prompt_assignments(verity, agent_versions, task_versions, prompt_
 async def seed_tool_authorizations(verity, agent_versions, tools):
     """Authorize tools for agent versions."""
     auth = [
-        # Triage agent tools — in-process Python tools
+        # Triage agent tools — evidence gathering only. The agent's
+        # CONCLUSION lands in its enforced output_schema, not in a
+        # tool call (store_triage_result was retired 2026-04-25).
         (agent_versions[("triage_agent", "1.0.0")], tools["get_submission_context"]),
         (agent_versions[("triage_agent", "1.0.0")], tools["get_underwriting_guidelines"]),
         (agent_versions[("triage_agent", "1.0.0")], tools["get_loss_history"]),
-        (agent_versions[("triage_agent", "1.0.0")], tools["store_triage_result"]),
-        # Triage agent tools — MCP-sourced (replaces the old
-        # get_enrichment_data Python tool with four provider-native tools
-        # plus DuckDuckGo web search for current news/regulatory filings)
+        # MCP-sourced enrichment (replaces the old get_enrichment_data
+        # Python tool with four provider-native tools plus DuckDuckGo
+        # web search for current news / regulatory filings).
         (agent_versions[("triage_agent", "1.0.0")], tools["web_search"]),
         (agent_versions[("triage_agent", "1.0.0")], tools["lexisnexis_lookup"]),
         (agent_versions[("triage_agent", "1.0.0")], tools["dnb_lookup"]),
         (agent_versions[("triage_agent", "1.0.0")], tools["pitchbook_lookup"]),
         (agent_versions[("triage_agent", "1.0.0")], tools["factset_lookup"]),
-        # Triage agent tool — Verity-builtin meta-tool for sub-agent
-        # delegation (FC-1). Granting the tool authorizes the CAPABILITY;
-        # which specific sub-agents triage can target is governed by the
+        # Verity-builtin meta-tool for sub-agent delegation (FC-1).
+        # Granting the tool authorizes the CAPABILITY; which specific
+        # sub-agents triage can target is governed by the
         # agent_version_delegation rows seeded in seed_delegations.
         (agent_versions[("triage_agent", "1.0.0")], tools["delegate_to_agent"]),
-        # Appetite agent tools
+        # Appetite agent tools — evidence gathering only.
+        # update_appetite_status was retired 2026-04-25 for the same
+        # reason as store_triage_result.
         (agent_versions[("appetite_agent", "1.0.0")], tools["get_submission_context"]),
         (agent_versions[("appetite_agent", "1.0.0")], tools["get_underwriting_guidelines"]),
-        (agent_versions[("appetite_agent", "1.0.0")], tools["update_appetite_status"]),
     ]
 
     for av_id, tool_id in auth:
