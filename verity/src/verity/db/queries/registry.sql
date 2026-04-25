@@ -309,6 +309,7 @@ SELECT
     sb.owner_id,
     sb.template_var,
     sb.reference,
+    sb.binding_kind,
     sb.required,
     sb.execution_order,
     sb.description,

@@ -203,13 +203,16 @@ DELETE FROM task_version_target WHERE task_version_id = %(task_version_id)s;
 -- name: insert_source_binding
 -- One row per (owner, template_var) source declaration. The reference
 -- string carries the wiring DSL (input.<path>, const:<v>, or
--- fetch:<connector>/<method>(input.<field>)).
+-- fetch:<connector>/<method>(input.<field>)). binding_kind decides how
+-- the resolved value reaches the LLM: 'text' bound to {{template_var}}
+-- in the prompt, or 'content_blocks' prepended to the first user message
+-- as Claude content blocks.
 INSERT INTO source_binding (
-    owner_kind, owner_id, template_var, reference,
+    owner_kind, owner_id, template_var, reference, binding_kind,
     required, execution_order, description
 )
 VALUES (
-    %(owner_kind)s, %(owner_id)s, %(template_var)s, %(reference)s,
+    %(owner_kind)s, %(owner_id)s, %(template_var)s, %(reference)s, %(binding_kind)s,
     %(required)s, %(execution_order)s, %(description)s
 )
 RETURNING id, created_at;

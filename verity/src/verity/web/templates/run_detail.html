@@ -215,7 +215,7 @@
 
     {% if envelope.error %}
     <div class="verity-detail-label" style="margin-top: 12px;">Error</div>
-    <div class="verity-code">{{ envelope.error | tojson(indent=2) }}</div>
+    <div class="verity-code">{{ envelope.error.model_dump(mode='json') | tojson(indent=2) }}</div>
     {% endif %}
 </div>
 {% endif %}

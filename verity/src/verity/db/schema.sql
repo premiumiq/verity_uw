@@ -655,6 +655,17 @@ CREATE TABLE source_binding (
     template_var     VARCHAR(100) NOT NULL,
     -- Reference string in the wiring DSL. See section comment above.
     reference        TEXT NOT NULL,
+    -- How the resolved value is delivered to the LLM:
+    --   'text'           — the value is a string, bound to {{template_var}}
+    --                      in the prompt content. (default; current behavior)
+    --   'content_blocks' — the value is a list of {data, media_type} dicts;
+    --                      the runtime prepends them as Claude content
+    --                      blocks to the first user message. The connector
+    --                      method is responsible for returning that shape;
+    --                      the prompt template SHOULD NOT reference
+    --                      {{template_var}} for content-block bindings.
+    binding_kind     VARCHAR(20) NOT NULL DEFAULT 'text'
+                     CHECK (binding_kind IN ('text', 'content_blocks')),
     required         BOOLEAN NOT NULL DEFAULT TRUE,
     execution_order  INTEGER NOT NULL DEFAULT 1,
     description      TEXT,

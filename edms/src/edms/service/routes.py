@@ -32,13 +32,26 @@ def create_routes(
         context_ref: str = Query(..., description="Business context reference"),
         document_type: Optional[str] = Query(None, description="Filter by document type"),
         context_type: Optional[str] = Query(None, description="Filter by context type"),
+        include_derivatives: bool = Query(
+            False,
+            description=(
+                "When false (default) returns only original documents — "
+                "anything with a parent in document_lineage (extracted text, "
+                "JSON derivatives, etc.) is omitted. Set true to get the flat "
+                "list including lineage children."
+            ),
+        ),
     ):
-        """List all documents for a business context.
+        """List documents for a business context.
 
-        Example: GET /documents?context_ref=submission:SUB-001
+        Examples:
+            GET /documents?context_ref=submission:SUB-001
+            GET /documents?context_ref=submission:SUB-001&include_derivatives=true
         Optional: &document_type=do_application&context_type=submission
         """
-        docs = await db.list_documents(context_ref)
+        docs = await db.list_documents(
+            context_ref, include_derivatives=include_derivatives,
+        )
         # Apply optional filters (db returns all for context_ref, we filter here)
         if document_type:
             docs = [d for d in docs if d.get("document_type") == document_type]
@@ -325,6 +338,85 @@ def create_routes(
         return updated
 
     # ── DELETE DOCUMENT ───────────────────────────────────────
+
+    # ── CREATE DERIVED JSON DOCUMENT ──────────────────────────────
+    # Generic counterpart to /extract: takes a JSON payload produced by
+    # any downstream consumer (a Verity Task today, future agents) and
+    # stores it as a new child document under the parent. Same shape as
+    # text extraction — child document + lineage row — so the document
+    # graph stays consistent regardless of who produced the derivative.
+    #
+    # Storage key follows the parent's prefix so children co-locate with
+    # their parent in MinIO. Idempotency is intentionally NOT enforced
+    # here — repeated calls produce repeated derivatives, which lets
+    # callers re-run extractors and compare outputs over time.
+    @router.post("/{parent_id}/derived")
+    async def create_derived_json(parent_id: UUID, body_in: dict):
+        """Persist a JSON derivative of an existing document.
+
+        JSON body fields:
+          payload                — the dict to store as JSON (required)
+          transformation_type    — short label (e.g. 'field_extraction', required)
+          transformation_method  — provenance label (e.g. 'claude:field_extractor')
+          uploaded_by            — actor name for audit
+
+        Returns the new child document row.
+        """
+        import json as _json
+
+        payload = body_in.get("payload")
+        transformation_type = body_in.get("transformation_type")
+        transformation_method = body_in.get("transformation_method", "verity")
+        uploaded_by = body_in.get("uploaded_by", "verity")
+
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="payload must be a JSON object")
+        if not transformation_type or not isinstance(transformation_type, str):
+            raise HTTPException(status_code=400, detail="transformation_type is required")
+
+        parent = await db.get_document(parent_id)
+        if not parent:
+            raise HTTPException(status_code=404, detail=f"Document {parent_id} not found")
+
+        coll = await db.get_collection(parent["collection_id"])
+        bucket = coll["storage_container"] if coll else default_bucket
+
+        body = _json.dumps(payload, indent=2, sort_keys=True, default=str)
+        derived_key = f"{parent['storage_key']}.{transformation_type}.json"
+        body_size = storage.upload_text(bucket, derived_key, body)
+
+        child = await db.insert_document(
+            collection_id=parent["collection_id"],
+            folder_id=parent.get("folder_id"),
+            context_ref=parent["context_ref"],
+            context_type=parent.get("context_type"),
+            filename=f"{parent['filename']}.{transformation_type}.json",
+            content_type="application/json",
+            file_size_bytes=body_size,
+            storage_key=derived_key,
+            uploaded_by=uploaded_by,
+            tags={"transformation": [transformation_type], "source_document": [str(parent_id)]},
+        )
+
+        await db.insert_lineage(
+            parent_document_id=parent_id,
+            child_document_id=child["id"],
+            transformation_type=transformation_type,
+            transformation_method=transformation_method,
+            transformation_status="complete",
+            transformation_metadata={
+                "payload_size_bytes": body_size,
+                "payload_keys": list(payload.keys())[:50],
+            },
+        )
+
+        return {
+            "parent_id": str(parent_id),
+            "child_id": str(child["id"]),
+            "storage_key": derived_key,
+            "size_bytes": body_size,
+            "transformation_type": transformation_type,
+        }
 
     @router.delete("/{document_id}")
     async def delete_document(document_id: UUID):

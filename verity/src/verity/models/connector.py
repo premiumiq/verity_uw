@@ -97,13 +97,21 @@ class SourceBinding(BaseModel):
     `const:<value>`, or `fetch:<connector>/<method>(input.<field>)`.
     The runtime parses it into one of those three kinds and either
     overlays a constant, copies a path from `input_data`, or invokes
-    the connector before binding to the prompt template variable.
+    the connector before binding the value.
+
+    `binding_kind` controls how the resolved value reaches the LLM:
+      - 'text' (default) — bound to {{template_var}} in the prompt.
+      - 'content_blocks' — value is a list of Claude content-block
+                           dicts; runtime prepends them to the first
+                           user message. Prompts SHOULD NOT reference
+                           {{template_var}} for content-block bindings.
     """
     id: UUID
     owner_kind: str   # 'task_version' | 'agent_version'
     owner_id: UUID
     template_var: str
     reference: str
+    binding_kind: str = "text"
     required: bool = True
     execution_order: int = 1
     description: Optional[str] = None

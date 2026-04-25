@@ -67,6 +67,11 @@ WITH candidate AS (
       AND NOT EXISTS (
         SELECT 1 FROM execution_run_error e WHERE e.execution_run_id = r.id
     )
+      -- Sync engine calls write `submitted_by='inproc'` and self-track
+      -- the lifecycle without using the worker pool. Excluding them
+      -- here prevents a worker from racing the in-process executor and
+      -- producing duplicate completion / error rows.
+      AND COALESCE(r.submitted_by, '') <> 'inproc'
       AND COALESCE(
           (SELECT status FROM execution_run_status s
            WHERE s.execution_run_id = r.id

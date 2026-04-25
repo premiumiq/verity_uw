@@ -79,10 +79,10 @@ class DecisionLogCreate(BaseModel):
     source_resolutions: Optional[list[dict[str, Any]]] = None
     target_writes: Optional[list[dict[str, Any]]] = None
 
-    # Summary of any bulky fields the runtime stripped from input_json
-    # before writing (e.g. base64 PDF bytes under the `_documents`
-    # protocol key). None when nothing was elided. Shape is
-    # {fields: [...], total_bytes_elided: int, documents_elided?: int}.
+    # Summary of any bulky top-level string fields the runtime stripped
+    # from input_json before writing — e.g. a caller-inlined large blob
+    # of text that should have come through a source binding. None when
+    # nothing was elided. Shape is {fields: [...], total_bytes_elided: int}.
     redaction_applied: Optional[dict[str, Any]] = None
 
 

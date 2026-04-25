@@ -93,68 +93,146 @@ async def run_doc_processing(
     execution_context_id: Optional[UUID] = None,
     use_mock: bool = False,
 ) -> WorkflowResult:
-    """Two-step doc-processing workflow.
+    """Per-document doc-processing workflow.
 
-    Step 1 (classify_documents) runs the document_classifier task; its
-    output is merged into the input for step 2.
-    Step 2 (extract_fields) runs the field_extractor task.
-    A canned-output map exists for submission ids 0000000{1..4} and is
-    used only when use_mock=True; otherwise both tasks call Claude live.
+    Iterates `pipeline_context["documents"]` (the EDMS reference list).
+    For every document:
+      1. classify_documents:<doc_id> — runs document_classifier with
+         the single ref. Each call gets its own audit row.
+      2. extract_fields:<doc_id>     — runs field_extractor IFF the
+         classification says it's a D&O application. Each extract call
+         gets its own audit row and writes its own JSON-derivative
+         child to EDMS under that document.
+
+    Workflow status rolls up: 'complete' if every classify succeeded
+    (and every triggered extract succeeded), 'failed' on the first
+    hard failure, 'partial' if some docs classified but their
+    follow-on extract failed without aborting the overall flow.
     """
     workflow_run_id = uuid4()
     all_steps: list[StepRun] = []
     mock = _build_mock(_doc_processing_outputs(submission_id) if use_mock else None)
 
-    classify = await _run_step(
-        verity,
-        entity_kind="task",
-        entity_name="document_classifier",
-        input_data=pipeline_context,
-        step_name="classify_documents",
-        mock=mock,
-        workflow_run_id=workflow_run_id,
-        execution_context_id=execution_context_id,
-    )
-    all_steps.append(classify)
-    if classify.status != "complete":
+    documents: list[dict[str, Any]] = pipeline_context.get("documents") or []
+    if not documents:
         return WorkflowResult(
             workflow_run_id=workflow_run_id,
             status="failed",
             all_steps=all_steps,
-            error_message=classify.error_message,
+            error_message="No documents in submission to process.",
         )
 
-    # Merge classify output into the extractor's input. Same dict-merge
-    # the old pipeline runtime did between dependent steps.
-    extract_input = dict(pipeline_context)
-    if classify.execution_result and classify.execution_result.output:
-        extract_input.update(classify.execution_result.output)
+    extract_failures = 0
+    extract_attempts = 0
 
-    extract = await _run_step(
-        verity,
-        entity_kind="task",
-        entity_name="field_extractor",
-        input_data=extract_input,
-        step_name="extract_fields",
-        mock=mock,
-        workflow_run_id=workflow_run_id,
-        execution_context_id=execution_context_id,
-    )
-    all_steps.append(extract)
+    for doc in documents:
+        doc_id = doc.get("id")
+        doc_label = _short_doc_label(doc)
 
-    if extract.status != "complete":
-        return WorkflowResult(
+        # Per-doc input: only the metadata fields the prompts need plus
+        # a single-element documents list. The source_binding fetches
+        # text for that one ref; the prompt sees one document.
+        per_doc_input = {
+            "submission_id": pipeline_context.get("submission_id"),
+            "lob": pipeline_context.get("lob"),
+            "named_insured": pipeline_context.get("named_insured"),
+            "documents": [doc],
+        }
+
+        classify = await _run_step(
+            verity,
+            entity_kind="task",
+            entity_name="document_classifier",
+            input_data=per_doc_input,
+            step_name=f"classify_documents:{doc_label}",
+            mock=mock,
             workflow_run_id=workflow_run_id,
-            status="failed",
-            all_steps=all_steps,
-            error_message=extract.error_message,
+            execution_context_id=execution_context_id,
         )
+        all_steps.append(classify)
+        if classify.status != "complete":
+            return WorkflowResult(
+                workflow_run_id=workflow_run_id,
+                status="failed",
+                all_steps=all_steps,
+                error_message=classify.error_message,
+            )
+
+        # Read the classification. The extractor only runs on docs
+        # classified as D&O applications — every other type is recorded
+        # in the audit but does not invoke the extractor.
+        classification = (
+            classify.execution_result.output
+            if classify.execution_result and classify.execution_result.output
+            else {}
+        )
+        doc_type = classification.get("document_type")
+        if doc_type != "do_application":
+            logger.info(
+                "doc_processing skip-extract submission=%s doc_id=%s "
+                "classified_as=%s",
+                submission_id, doc_id, doc_type,
+            )
+            continue
+
+        extract_attempts += 1
+        extract_input = {
+            "submission_id": pipeline_context.get("submission_id"),
+            "named_insured": pipeline_context.get("named_insured"),
+            "documents": [doc],
+            **classification,
+        }
+        extract = await _run_step(
+            verity,
+            entity_kind="task",
+            entity_name="field_extractor",
+            input_data=extract_input,
+            step_name=f"extract_fields:{doc_label}",
+            mock=mock,
+            workflow_run_id=workflow_run_id,
+            execution_context_id=execution_context_id,
+        )
+        all_steps.append(extract)
+        if extract.status != "complete":
+            extract_failures += 1
+            logger.warning(
+                "doc_processing extract failed submission=%s doc_id=%s reason=%s",
+                submission_id, doc_id, extract.error_message,
+            )
+
+    # Roll up status. Hard failure on classify already returned above;
+    # extract failures are recorded as 'partial' so the workflow does
+    # not throw away successful work.
+    if extract_failures and extract_failures == extract_attempts:
+        status = "failed"
+    elif extract_failures:
+        status = "partial"
+    else:
+        status = "complete"
 
     return WorkflowResult(
         workflow_run_id=workflow_run_id,
-        status="complete",
+        status=status,
         all_steps=all_steps,
+        error_message=(
+            f"{extract_failures} of {extract_attempts} extractions failed"
+            if extract_failures else None
+        ),
     )
+
+
+def _short_doc_label(doc: dict[str, Any]) -> str:
+    """Build a step_name suffix that's human-readable in audit views.
+
+    Prefer the filename (truncated) so multiple per-doc rows are
+    distinguishable at a glance; fall back to the first 8 chars of
+    the EDMS UUID when filename is missing.
+    """
+    fname = doc.get("filename")
+    if fname:
+        return fname[:60]
+    doc_id = doc.get("id", "")
+    return doc_id.split("-")[0] if doc_id else "unknown"
 
 
 # ══════════════════════════════════════════════════════════════

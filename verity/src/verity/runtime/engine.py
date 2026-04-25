@@ -55,7 +55,7 @@ from verity.contracts.decision import (  # noqa: F401
     ExecutionResult,
 )
 # MockContext lives in verity.contracts.mock — runtime-side boundary control.
-from verity.contracts.mock import MockContext
+from verity.contracts.mock import MockContext, MockMissingError
 # Governance-side dependency: the runtime reads configs from the registry.
 # This is the version-pinning seam — the engine cannot execute without
 # resolving a config through the governance plane.
@@ -769,7 +769,19 @@ class ExecutionEngine:
         # so audit shape is identical to a real run.
         is_step_mocked, step_mock_output = (False, None)
         if mock is not None:
-            is_step_mocked, step_mock_output = mock.get_step_response(step_name, agent_name)
+            try:
+                is_step_mocked, step_mock_output = mock.get_step_response(step_name, agent_name)
+            except MockMissingError as exc:
+                # Strict mock: no fixture matched. Close the self-tracked
+                # run with an error row so /admin/runs surfaces the
+                # failure instead of leaving a phantom 'submitted' row.
+                if self_tracked_run_id is not None:
+                    await self._close_self_tracked_run_error(
+                        run_id=self_tracked_run_id,
+                        error_code="MockMissingError",
+                        error_message=str(exc),
+                    )
+                raise
 
         if is_step_mocked:
             output = step_mock_output if isinstance(step_mock_output, dict) else {}
@@ -820,14 +832,16 @@ class ExecutionEngine:
         # template_context overlays the resolved values onto a copy of
         # the caller-supplied context so prompt assembly sees both.
         # Failures here are hard fails — the loop never starts.
-        template_context, source_resolutions = await self._resolve_sources(
+        template_context, content_blocks, source_resolutions = await self._resolve_sources(
             version_id=config.agent_version_id,
             owner_kind="agent_version",
             entity_name=agent_name,
             input_data=context,
             mock=mock,
         )
-        system_prompt, user_messages = _assemble_prompts(config.prompts, template_context)
+        system_prompt, user_messages = _assemble_prompts(
+            config.prompts, template_context, content_blocks=content_blocks,
+        )
         tools = _build_tool_definitions(config.tools)
         # Initialised early so the failure handler can record partial
         # writes if a connector explosion happens mid-target loop.
@@ -1308,7 +1322,19 @@ class ExecutionEngine:
         # show the same shape as a real run.
         is_step_mocked, step_mock_output = (False, None)
         if mock is not None:
-            is_step_mocked, step_mock_output = mock.get_step_response(step_name, task_name)
+            try:
+                is_step_mocked, step_mock_output = mock.get_step_response(step_name, task_name)
+            except MockMissingError as exc:
+                # Strict mock: no fixture matched. Close the self-tracked
+                # run with an error row so /admin/runs surfaces the
+                # failure instead of leaving a phantom 'submitted' row.
+                if self_tracked_run_id is not None:
+                    await self._close_self_tracked_run_error(
+                        run_id=self_tracked_run_id,
+                        error_code="MockMissingError",
+                        error_message=str(exc),
+                    )
+                raise
 
         if is_step_mocked:
             output = step_mock_output if isinstance(step_mock_output, dict) else {}
@@ -1356,14 +1382,16 @@ class ExecutionEngine:
         # checked first, then the connector fetch is invoked. Resolution
         # is eager; failures are hard failures. See
         # verity.runtime.connectors for the provider contract.
-        template_context, source_resolutions = await self._resolve_sources(
+        template_context, content_blocks, source_resolutions = await self._resolve_sources(
             version_id=config.task_version_id,
             owner_kind="task_version",
             entity_name=task_name,
             input_data=input_data,
             mock=mock,
         )
-        system_prompt, user_messages = _assemble_prompts(config.prompts, template_context)
+        system_prompt, user_messages = _assemble_prompts(
+            config.prompts, template_context, content_blocks=content_blocks,
+        )
 
         try:
             messages = [{"role": "user", "content": msg} for msg in user_messages]
@@ -1571,20 +1599,23 @@ class ExecutionEngine:
         entity_name: str,
         input_data: dict[str, Any],
         mock: Optional[MockContext],
-    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
         """Resolve declared source bindings for a task or agent version.
 
         Reads source_binding rows for (owner_kind, version_id), parses
-        each `reference` string in the wiring DSL, and assembles a
-        template context by overlaying the resolved values onto a copy
-        of input_data. Connector-fetch references hit the registered
-        provider; input./const: references are pure data lookups.
+        each `reference` string in the wiring DSL, and either overlays
+        the resolved value onto a copy of input_data (binding_kind=text)
+        or accumulates it into a content-blocks list that the prompt
+        assembler will prepend to the first user message
+        (binding_kind=content_blocks).
 
-        Returns (template_context, resolutions):
-          - template_context — input_data with resolved template_vars merged in.
-          - resolutions      — audit list, one entry per binding, with
-                                shape suitable for the decision log's
-                                source_resolutions JSONB column.
+        Returns (template_context, content_blocks, resolutions):
+          - template_context — input_data with text-bindings merged in.
+          - content_blocks   — flat list of Claude content-block dicts
+                                from content_blocks-bindings, in the
+                                order the connector produced them.
+          - resolutions      — audit list, one entry per binding,
+                                shape suitable for source_resolutions.
 
         Mocking semantics: for `fetch:` references, the binding's input
         field name (the part inside `input.<...>`) is used as the
@@ -1599,14 +1630,14 @@ class ExecutionEngine:
             registered.
 
         Entities with zero declared bindings short-circuit to
-        (input_data, []) with no DB or audit noise.
+        (input_data, [], []) with no DB or audit noise.
         """
         rows = await self.registry.db.fetch_all(
             "list_source_bindings",
             {"owner_kind": owner_kind, "owner_id": str(version_id)},
         )
         if not rows:
-            return dict(input_data), []
+            return dict(input_data), [], []
 
         from verity.runtime.connectors import (
             get_provider,
@@ -1619,6 +1650,7 @@ class ExecutionEngine:
             return await provider.fetch(method, ref_value)
 
         template_context = dict(input_data)
+        content_blocks: list[dict[str, Any]] = []
         resolutions: list[dict[str, Any]] = []
         scopes = {"input": input_data}
 
@@ -1626,6 +1658,7 @@ class ExecutionEngine:
             template_var = row["template_var"]
             reference_str = row["reference"]
             required = row["required"]
+            binding_kind = row.get("binding_kind") or "text"
 
             # Parse upfront — a bad reference is registration-level data,
             # so a failure here is structural and must abort.
@@ -1635,6 +1668,7 @@ class ExecutionEngine:
                 resolutions.append({
                     "template_var": template_var,
                     "reference": reference_str,
+                    "binding_kind": binding_kind,
                     "kind": "unknown",
                     "status": "failed",
                     "mocked": False,
@@ -1648,10 +1682,14 @@ class ExecutionEngine:
 
             # Build a base record. Fetch-kind records carry the connector
             # info so audit views can show 'edms.get_document_text' at a
-            # glance; input/const records carry just the kind.
+            # glance; input/const records carry just the kind. binding_kind
+            # is recorded so operators can tell at a glance whether the
+            # value drove a {{template_var}} substitution or attached as
+            # content blocks.
             base: dict[str, Any] = {
                 "template_var": template_var,
                 "reference": reference_str,
+                "binding_kind": binding_kind,
                 "kind": parsed.kind,
             }
             if parsed.kind == "fetch":
@@ -1663,7 +1701,13 @@ class ExecutionEngine:
                 if mock is not None:
                     is_mocked, mock_payload = mock.get_source_response(parsed.arg_path)
                     if is_mocked:
-                        template_context[template_var] = mock_payload
+                        _attach_resolved_value(
+                            binding_kind=binding_kind,
+                            template_var=template_var,
+                            value=mock_payload,
+                            template_context=template_context,
+                            content_blocks=content_blocks,
+                        )
                         size = _payload_size(mock_payload)
                         resolutions.append({
                             **base,
@@ -1728,7 +1772,24 @@ class ExecutionEngine:
                 })
                 continue
 
-            template_context[template_var] = value
+            try:
+                _attach_resolved_value(
+                    binding_kind=binding_kind,
+                    template_var=template_var,
+                    value=value,
+                    template_context=template_context,
+                    content_blocks=content_blocks,
+                )
+            except ValueError as exc:
+                resolutions.append({
+                    **base, "status": "failed", "mocked": False,
+                    "failure_reason": str(exc),
+                })
+                raise SourceResolutionError(
+                    f"{owner_kind} '{entity_name}' source "
+                    f"'{template_var}': {exc}",
+                    partial_resolutions=resolutions,
+                ) from exc
             size = _payload_size(value)
             resolution: dict[str, Any] = {
                 **base, "status": "resolved", "mocked": False,
@@ -1740,11 +1801,12 @@ class ExecutionEngine:
                 )
             resolutions.append(resolution)
             logger.info(
-                "source_resolved entity=%s template_var=%s kind=%s size=%s",
-                entity_name, template_var, parsed.kind, size,
+                "source_resolved entity=%s template_var=%s kind=%s "
+                "binding_kind=%s size=%s",
+                entity_name, template_var, parsed.kind, binding_kind, size,
             )
 
-        return template_context, resolutions
+        return template_context, content_blocks, resolutions
 
     async def _write_targets(
         self,
@@ -2118,7 +2180,18 @@ class ExecutionEngine:
         write_mode: Optional[str] = None,
         enforce_output_schema: Optional[bool] = None,
     ) -> None:
-        """INSERT the execution_run request row for a sync call."""
+        """INSERT the execution_run request row for a sync call.
+
+        Trims oversized top-level string fields from input_data before
+        logging — same redaction the decision log applies. Vision /
+        binary content arrives via source bindings (binding_kind=
+        'content_blocks') and never touches input_data, so there is no
+        binary to redact at this point.
+        """
+        if isinstance(input_data, dict):
+            redacted_input, _ = _redact_input_for_log(input_data)
+        else:
+            redacted_input = None
         await self.registry.db.execute_returning(
             "insert_execution_run",
             {
@@ -2128,7 +2201,7 @@ class ExecutionEngine:
                 "entity_name": entity_name,
                 "channel": channel,
                 "input_json": (
-                    json.dumps(input_data, default=str) if input_data else None
+                    json.dumps(redacted_input, default=str) if redacted_input else None
                 ),
                 "execution_context_id": (
                     str(execution_context_id) if execution_context_id else None
@@ -2276,10 +2349,11 @@ class ExecutionEngine:
         else:
             version_id = getattr(config, 'id', None) or UUID(int=0)
 
-        # Strip bulky fields (e.g. base64 PDF bytes under `_documents`)
-        # from the logged input before it hits the DB. The original
-        # `context` is still used upstream for prompt assembly and tool
-        # calls — only the audit representation is trimmed.
+        # Trim oversized top-level string fields from the logged input
+        # before it hits the DB. The original `context` is still used
+        # upstream for prompt assembly and tool calls — only the audit
+        # representation is trimmed. Binary content (PDFs, images) flows
+        # in via source bindings and is never present in `context`.
         sanitized_context, redaction_summary = _redact_input_for_log(
             context if isinstance(context, dict) else None
         )
@@ -2337,22 +2411,27 @@ class ExecutionEngine:
 # ══════════════════════════════════════════════════════════════
 
 def _assemble_prompts(
-    prompts: list[PromptAssignment], context: dict[str, Any]
+    prompts: list[PromptAssignment],
+    context: dict[str, Any],
+    *,
+    content_blocks: Optional[list[dict[str, Any]]] = None,
 ) -> tuple[str, list]:
-    """Assemble prompts into system prompt and user messages.
+    """Assemble prompts into a system prompt + user messages.
 
-    Validates that all declared template variables are present in the
-    context dict. Raises ValueError if any are missing, so the caller
-    gets a clear error instead of {{placeholder}} being sent to Claude.
+    Validates that every declared template variable is present in the
+    context dict so a {{placeholder}} can never reach Claude unfilled.
 
-    If the context contains a "_documents" key (list of dicts with
-    "data" and "media_type"), document content blocks are prepended
-    to the first user message. This enables sending PDFs to Claude
-    for native document understanding (form layout, checkboxes, etc.).
+    `content_blocks` (when non-empty) carries Claude content-block dicts
+    produced by source bindings declared with binding_kind='content_blocks'
+    — text/document/image blocks. They are prepended to the first user
+    message in the order the connector emitted them, ahead of the
+    template-rendered text. The prompt template itself need not (and
+    SHOULD not) reference those blocks via template variables.
 
     Returns:
         (system_prompt, user_messages) where each user message is either
-        a string (text-only) or a list of content blocks (documents + text).
+        a string (text-only) or a list of content blocks
+        (content_blocks + text).
     """
     system_parts = []
     user_messages = []
@@ -2363,11 +2442,12 @@ def _assemble_prompts(
             if not _evaluate_condition(prompt.condition_logic, context):
                 continue
 
-        # Validate: check that all declared template variables are in context
-        # Skip keys starting with "_" — those are internal (e.g., _documents)
+        # Validate: every declared template variable must be in the
+        # context. No underscore-prefixed exceptions — the protocol
+        # side-channel that justified them is gone.
         if prompt.template_variables:
             missing = [v for v in prompt.template_variables
-                       if v not in context and not v.startswith("_")]
+                       if v not in context]
             if missing:
                 raise ValueError(
                     f"Prompt '{prompt.prompt_name}' requires template variables "
@@ -2385,23 +2465,14 @@ def _assemble_prompts(
     if not user_messages:
         user_messages = [json.dumps(context, default=str)]
 
-    # If context includes _documents, prepend document content blocks
-    # to the first user message. This sends PDFs/images to Claude as
-    # native document content blocks alongside the text prompt.
-    if "_documents" in context and context["_documents"]:
-        doc_blocks = []
-        for doc in context["_documents"]:
-            doc_blocks.append({
-                "type": "document",
-                "source": {
-                    "type": "base64",
-                    "media_type": doc.get("media_type", "application/pdf"),
-                    "data": doc["data"],
-                },
-            })
-        # Convert first user message from string to content block array
+    # Prepend any source-binding-produced content blocks to the first
+    # user message. The blocks land ahead of the template-rendered text
+    # so vision-mode prompts don't need a placeholder for them.
+    if content_blocks:
         first_msg = user_messages[0] if user_messages else ""
-        user_messages[0] = doc_blocks + [{"type": "text", "text": first_msg}]
+        user_messages[0] = list(content_blocks) + [
+            {"type": "text", "text": first_msg}
+        ]
 
     return system_prompt, user_messages
 
@@ -2425,8 +2496,9 @@ def _effective_write_mode(
          of channel or explicit write_mode.
       2. Caller-supplied `write_mode`: "log_only" and "write" are both
          explicit overrides with well-defined reasons.
-      3. "auto" mode: write iff channel is champion (the only production
-         channel), log-only for every other channel.
+      3. "auto" mode: write iff channel is `production` (the only
+         live-traffic channel); log-only for development/staging/shadow/
+         evaluation runs.
 
     The returned reason string is stashed in the target_writes audit
     record so operators can answer "why didn't this write?" without
@@ -2439,8 +2511,8 @@ def _effective_write_mode(
     if write_mode == "write":
         return "write", "write_mode=write"
     # write_mode == "auto" — channel-gated.
-    if channel == "champion":
-        return "write", "auto_channel=champion"
+    if channel == "production":
+        return "write", "auto_channel=production"
     return "log_only", f"auto_channel={channel}"
 
 
@@ -2643,19 +2715,18 @@ def _build_target_payload(
 def _redact_input_for_log(
     context: Optional[dict],
 ) -> tuple[Optional[dict], Optional[dict]]:
-    """Strip bulky fields from a logged context so the decision row stays
-    readable. Returns (sanitized_context, redaction_summary).
+    """Strip oversized top-level string fields from a logged context.
 
-    Two patterns are handled:
-      1. `_documents` — Verity protocol key (see _assemble_prompts) whose
-         entries carry base64 PDF/image bytes. Each entry with a `data`
-         field is replaced by a reference stub
-         {filename, media_type, bytes, elided}.
-      2. Any other top-level string value over _LARGE_FIELD_BYTES is
-         replaced with {elided, bytes, preview}.
+    The runtime no longer accepts inlined binary side-channels — vision
+    and other binary content arrive via source bindings declared with
+    binding_kind='content_blocks', which never touch input_data and
+    therefore never reach this redactor. This pass only handles the
+    remaining failure mode: a caller stuffing a large string (e.g. a
+    pre-extracted document text dump) directly under a top-level key.
 
-    When nothing is elided the original dict is returned unchanged and
-    the summary is None.
+    Returns (sanitized_context, redaction_summary). When nothing is
+    elided the original dict is returned unchanged and the summary
+    is None.
     """
     if not isinstance(context, dict):
         return context, None
@@ -2664,32 +2735,7 @@ def _redact_input_for_log(
     fields: list[str] = []
     sanitized = dict(context)  # shallow copy, top-level mutation only
 
-    # _documents protocol key — strip per-entry base64 bytes.
-    docs = sanitized.get("_documents")
-    if isinstance(docs, list) and docs:
-        new_docs = []
-        doc_elided = False
-        for doc in docs:
-            if isinstance(doc, dict) and isinstance(doc.get("data"), str):
-                size = len(doc["data"])
-                total_bytes += size
-                new_docs.append({
-                    "filename": doc.get("filename") or doc.get("name"),
-                    "media_type": doc.get("media_type"),
-                    "bytes": size,
-                    "elided": True,
-                })
-                doc_elided = True
-            else:
-                new_docs.append(doc)
-        if doc_elided:
-            sanitized["_documents"] = new_docs
-            fields.append("_documents")
-
-    # Oversized top-level strings.
     for k, v in list(sanitized.items()):
-        if k == "_documents":
-            continue
         if isinstance(v, str) and len(v) > _LARGE_FIELD_BYTES:
             total_bytes += len(v)
             sanitized[k] = {
@@ -2702,16 +2748,10 @@ def _redact_input_for_log(
     if not fields:
         return context, None
 
-    summary: dict[str, Any] = {
+    return sanitized, {
         "fields": fields,
         "total_bytes_elided": total_bytes,
     }
-    if "_documents" in fields and isinstance(sanitized.get("_documents"), list):
-        summary["documents_elided"] = sum(
-            1 for d in sanitized["_documents"]
-            if isinstance(d, dict) and d.get("elided")
-        )
-    return sanitized, summary
 
 
 def _substitute_variables(template: str, context: dict[str, Any]) -> str:
@@ -2847,6 +2887,42 @@ def _is_valid_json_schema(properties: dict) -> bool:
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _attach_resolved_value(
+    *,
+    binding_kind: str,
+    template_var: str,
+    value: Any,
+    template_context: dict[str, Any],
+    content_blocks: list[dict[str, Any]],
+) -> None:
+    """Route a resolved source binding's value to the right destination.
+
+    'text'           → bind value to template_context[template_var] so
+                       prompt assembly substitutes {{template_var}}.
+    'content_blocks' → value MUST be a list of Claude content-block
+                       dicts (`{"type":"document","source":...}` etc.);
+                       extend the call's content_blocks list with them.
+                       The prompt template SHOULD NOT reference
+                       {{template_var}} for content_blocks bindings —
+                       the data lands in the message content array,
+                       not as a template substitution.
+
+    Raises ValueError on a content_blocks binding whose value is not a
+    list — a configuration mismatch the caller surface as a
+    SourceResolutionError.
+    """
+    if binding_kind == "content_blocks":
+        if not isinstance(value, list):
+            raise ValueError(
+                f"binding_kind='content_blocks' requires a list value, "
+                f"got {type(value).__name__}"
+            )
+        content_blocks.extend(value)
+        return
+    # Default: text binding → template substitution.
+    template_context[template_var] = value
 
 
 def _payload_size(payload: Any) -> int:

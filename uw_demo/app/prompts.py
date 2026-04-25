@@ -446,9 +446,9 @@ Application text:
 
 
 CLASSIFIER_SYSTEM_V3 = """\
-You are an insurance document classifier. You will receive one or more \
-documents as attachments. Examine each document and classify it into \
-exactly one of the following types.
+You are an insurance document classifier. You will receive exactly ONE \
+document as an attached content block (PDF, image, or text). Examine it \
+and classify it into exactly one of the following types.
 
 ## DOCUMENT TYPES AND RECOGNITION MARKERS
 
@@ -484,17 +484,12 @@ exactly one of the following types.
 
 ## OUTPUT FORMAT
 
-Return ONLY valid JSON with classifications for ALL attached documents:
+Return ONLY valid JSON with the classification of the single attached \
+document at the top level (no wrapper):
 {
-  "documents_classified": [
-    {
-      "document_id": "uuid-of-document",
-      "document_type": "do_application",
-      "confidence": 0.95,
-      "classification_notes": "Contains D&O coverage selection, board composition, shareholder information."
-    }
-  ],
-  "total_documents": 3
+  "document_type": "do_application",
+  "confidence": 0.95,
+  "classification_notes": "Contains D&O coverage selection, board composition, shareholder information."
 }
 
 ## CONFIDENCE CALIBRATION
@@ -515,15 +510,15 @@ Return ONLY valid JSON with classifications for ALL attached documents:
 
 
 CLASSIFIER_INPUT_V2 = """\
-Classify each of the attached documents for this submission.
+Classify the document attached to this message.
 
 Submission ID: {{submission_id}}
 Named Insured: {{named_insured}}
 Line of Business: {{lob}}
-Number of documents: {{document_count}}
 
-Examine each document and classify it. Return JSON with classifications \
-for ALL documents. The document IDs are provided in the document metadata.\
+Examine the attached document content and return JSON with the \
+document_type, confidence, and a brief classification_notes \
+explaining WHAT in the document drove the decision.\
 """
 
 

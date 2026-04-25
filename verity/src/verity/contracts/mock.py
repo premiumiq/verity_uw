@@ -68,6 +68,17 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 
+class MockMissingError(RuntimeError):
+    """Raised when MockContext.step_responses is supplied but the
+    requested step_name / entity_name is not in the fixture dict.
+
+    Caller-supplied step_responses means the run is fully scripted; a
+    missing key is a fixture-omission bug, never a fallback to live
+    Claude. The engine surfaces this as a hard failure so a typo in a
+    workflow's step_name doesn't quietly start billing real tokens.
+    """
+
+
 @dataclass
 class MockContext:
     """Controls tool-level mocking during an execution.
@@ -88,6 +99,13 @@ class MockContext:
     # workflow), then entity_name as a fallback. A non-empty match on
     # either key is honored. Decision_log row is still written; the
     # mock_mode flag flips to True. Tokens / duration are zero.
+    #
+    # When step_responses is non-empty and neither key matches, the
+    # engine raises MockMissingError — a missing fixture is an explicit
+    # failure, never a license to silently fall through to a real
+    # Claude call. (Partial mocking of individual tool calls is what
+    # tool_responses is for; step_responses always means "this run is
+    # fully scripted".)
     step_responses: Optional[dict[str, Any]] = None
 
     # ── TOOL MOCK ─────────────────────────────────────────────
@@ -184,6 +202,11 @@ class MockContext:
         per step), then entity_name. The two-tier lookup lets a workflow
         pin a specific step's output without affecting other invocations
         of the same entity.
+
+        Raises MockMissingError when step_responses is non-empty and
+        neither key matches — supplying step_responses means "this run
+        is fully scripted", and a missing fixture must surface as an
+        explicit failure rather than fall through to a live Claude call.
         """
         if not self.step_responses:
             return (False, None)
@@ -191,7 +214,11 @@ class MockContext:
             return (True, self.step_responses[step_name])
         if entity_name in self.step_responses:
             return (True, self.step_responses[entity_name])
-        return (False, None)
+        raise MockMissingError(
+            f"MockContext.step_responses was supplied but no fixture "
+            f"matched step_name={step_name!r} or entity_name={entity_name!r}. "
+            f"Available keys: {sorted(self.step_responses.keys())}"
+        )
 
     def get_sub_agent_mock(self, agent_name: str) -> Optional["MockContext"]:
         """Get the MockContext for a sub-agent invocation."""

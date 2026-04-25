@@ -271,11 +271,37 @@ class EdmsDatabase:
         )
         return await result.fetchone()
 
-    async def list_documents(self, context_ref: str) -> list[dict]:
-        result = await self._conn.execute(
-            "SELECT * FROM document WHERE context_ref = %(ref)s ORDER BY uploaded_at DESC",
-            {"ref": context_ref},
-        )
+    async def list_documents(
+        self, context_ref: str, *, include_derivatives: bool = False,
+    ) -> list[dict]:
+        """List documents for a business context.
+
+        By default returns only originals — documents that have no
+        parent in the document_lineage table. Lineage children
+        (auto-extracted text, JSON derivatives, etc.) are an internal
+        consequence of upload + transformation; clients shouldn't see
+        them in the catalog unless they explicitly ask.
+
+        Set include_derivatives=True to get the full flat list.
+        """
+        if include_derivatives:
+            result = await self._conn.execute(
+                "SELECT * FROM document "
+                "WHERE context_ref = %(ref)s "
+                "ORDER BY uploaded_at DESC",
+                {"ref": context_ref},
+            )
+        else:
+            result = await self._conn.execute(
+                "SELECT d.* FROM document d "
+                "WHERE d.context_ref = %(ref)s "
+                "  AND NOT EXISTS ("
+                "    SELECT 1 FROM document_lineage dl "
+                "    WHERE dl.child_document_id = d.id"
+                "  ) "
+                "ORDER BY d.uploaded_at DESC",
+                {"ref": context_ref},
+            )
         return await result.fetchall()
 
     async def list_documents_in_collection(self, collection_id: UUID, folder_id: Optional[UUID] = None) -> list[dict]:

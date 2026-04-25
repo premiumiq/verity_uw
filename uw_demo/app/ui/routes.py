@@ -19,7 +19,6 @@ Pipeline actions (POST, returns HTMX partials):
 No mock/live toggle in the UI. Use APP_ENV=demo for mock, APP_ENV=live for real.
 """
 
-import base64
 import json
 import logging
 from datetime import datetime, timezone
@@ -218,37 +217,21 @@ def _compute_next_action(sub: dict, submission_id: str) -> dict | None:
 # EDMS HELPERS
 # ══════════════════════════════════════════════════════════════
 
-async def _fetch_documents_from_edms(submission_id: str):
-    """Fetch documents from EDMS with content and text for pipeline input."""
-    context_ref = f"submission:{submission_id}"
-    documents = []
+async def _fetch_document_index(submission_id: str) -> list[dict]:
+    """Fetch the document INDEX (metadata only — no content) for a
+    submission from EDMS. UW passes this list as `documents` in the
+    Verity input_data; tasks declare what to fetch per reference via
+    source_binding so the runtime — not UW — owns content retrieval.
 
+    Returns a list of dicts with: id, filename, content_type, document_type.
+    Empty list when EDMS has no docs (or returns an error).
+    """
+    context_ref = f"submission:{submission_id}"
     async with httpx.AsyncClient(base_url=settings.EDMS_URL, timeout=30.0) as http:
         resp = await http.get("/documents", params={"context_ref": context_ref})
         if resp.status_code != 200:
             return []
-        docs = resp.json().get("documents", [])
-
-        for doc in docs:
-            doc_id = doc["id"]
-            # Get PDF bytes for classifier (base64 for Claude content blocks)
-            try:
-                resp = await http.get(f"/documents/{doc_id}/content")
-                resp.raise_for_status()
-                doc["content_base64"] = base64.b64encode(resp.content).decode()
-            except Exception:
-                doc["content_base64"] = None
-
-            # Get extracted text for field extractor
-            try:
-                resp = await http.get(f"/documents/{doc_id}/text")
-                resp.raise_for_status()
-                doc["extracted_text"] = resp.json().get("text", "")
-            except Exception:
-                doc["extracted_text"] = ""
-
-            documents.append(doc)
-    return documents
+        return resp.json().get("documents", [])
 
 
 # ══════════════════════════════════════════════════════════════
@@ -428,28 +411,30 @@ def create_uw_routes(verity) -> APIRouter:
         except Exception:
             exec_ctx_id = None
 
-        # Fetch documents from EDMS
-        documents = await _fetch_documents_from_edms(submission_id)
-
-        # Build pipeline context with document content
-        doc_blocks = []
-        all_extracted_text = []
-        for doc in documents:
-            if doc.get("content_base64") and doc.get("content_type", "").startswith("application/pdf"):
-                doc_blocks.append({
-                    "data": doc["content_base64"],
-                    "media_type": "application/pdf",
-                })
-            if doc.get("extracted_text"):
-                all_extracted_text.append(doc["extracted_text"])
+        # UW passes only the document INDEX to Verity — pure references
+        # plus metadata. Each task version's source_binding declares what
+        # to fetch from each reference (text, bytes, image — modality is
+        # the task's choice, not UW's). The runtime calls EDMS via the
+        # connector at execution time, so the audit input_json carries
+        # exactly the references that were considered, with no inlined
+        # content of any kind.
+        edms_docs = await _fetch_document_index(submission_id)
+        documents = [
+            {
+                "id": d["id"],
+                "filename": d.get("filename"),
+                "content_type": d.get("content_type"),
+                "document_type": d.get("document_type"),
+            }
+            for d in edms_docs
+        ]
 
         pipeline_context = {
             "submission_id": submission_id,
             "lob": sub["lob"],
             "named_insured": sub["named_insured"],
             "document_count": str(len(documents)),
-            "_documents": doc_blocks,
-            "document_text": "\n\n---\n\n".join(all_extracted_text) if all_extracted_text else "(no documents found)",
+            "documents": documents,
         }
 
         # Execute pipeline

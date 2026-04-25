@@ -101,6 +101,14 @@ async def main():
         print("Declaring task version data sources...")
         await seed_task_version_sources(verity, task_versions)
 
+        # ── Task version write targets ────────────────────────
+        # Declare where a task version's structured output should be
+        # persisted after the LLM call. field_extractor v1.0.0 writes
+        # its extracted fields back to EDMS as a JSON-derivative
+        # child document of the source.
+        print("Declaring task version write targets...")
+        await seed_write_targets(verity, task_versions)
+
         # ── STEP 5-6: Prompt Versions + Assignments ───────────
         print("Step 5-6: Registering prompt versions and assignments...")
         prompt_versions = await seed_prompt_versions(verity, prompts)
@@ -746,7 +754,7 @@ async def seed_tasks(verity: Verity) -> dict:
             "purpose": "Identify document types to route to appropriate extraction tasks.",
             "domain": "underwriting",
             "materiality_tier": "medium",
-            "input_schema": {"document_text": "string", "document_filename": "string"},
+            "input_schema": {"documents": "array"},
             "output_schema": {"document_type": "string", "confidence": "number", "classification_notes": "string"},
             "owner_name": "James Okafor",
             "owner_email": "james.okafor@premiumiq.com",
@@ -762,7 +770,10 @@ async def seed_tasks(verity: Verity) -> dict:
             "purpose": "Populate submission detail records from D&O application text.",
             "domain": "underwriting",
             "materiality_tier": "medium",
-            "input_schema": {"document_text": "string", "submission_id": "string"},
+            "input_schema": {
+                "submission_id": "string",
+                "documents": "array",
+            },
             "output_schema": {"fields": "object", "low_confidence_fields": "array", "unextractable_fields": "array", "extraction_complete": "boolean"},
             "owner_name": "James Okafor",
             "owner_email": "james.okafor@premiumiq.com",
@@ -959,11 +970,10 @@ async def seed_task_versions(verity: Verity, tasks: dict, configs: dict) -> dict
 
 
 async def seed_task_version_sources(verity: Verity, task_versions: dict) -> None:
-    """Declare data sources on task versions.
-
-    A source says: "when the caller passes `input_field_name` in
-    input_data, resolve it via the named connector and bind the result
-    to the prompt template variable `maps_to_template_var`."
+    """Declare data sources on task versions via the unified source_binding
+    table. Each binding maps a prompt template variable to a reference
+    string in the wiring DSL (input.<field>, const:<value>, or
+    fetch:<connector>/<method>(input.<field>)).
 
     Declared required=False — UW's production flow still passes
     `document_text` directly, which bypasses source resolution. Validation
@@ -974,30 +984,120 @@ async def seed_task_version_sources(verity: Verity, task_versions: dict) -> None
     if not edms:
         print("  ! edms data connector not registered; skipping source declarations")
         return
-    edms_id = edms["id"]
 
-    # Every registered task version (both 0.9.0 and 1.0.0) gets the same
-    # declaration so a promotion/rollback doesn't lose the source contract.
-    declarations = [
+    # Per-task source-binding declarations. Two modalities are wired:
+    #   - The CLASSIFIER receives Claude content blocks (vision for PDFs,
+    #     text blocks for text files) via binding_kind='content_blocks'.
+    #     The connector returns the right shape per content_type. The
+    #     classifier prompt does NOT have a {{document_text}} placeholder —
+    #     the data lands in the user message's content array directly.
+    #   - The EXTRACTOR receives extracted text bound to {{document_text}}
+    #     via binding_kind='text'. The extractor's prompt is text-mode.
+    classifier_versions = [
         ("document_classifier", "0.9.0"),
         ("document_classifier", "1.0.0"),
-        ("field_extractor",      "1.0.0"),
     ]
-    for task_name, version in declarations:
+    for task_name, version in classifier_versions:
         tv_id = task_versions.get((task_name, version))
         if not tv_id:
             continue
-        await verity.db.execute_returning("insert_task_version_source", {
-            "task_version_id": str(tv_id),
-            "input_field_name": "document_ref",
-            "connector_id": str(edms_id),
-            "fetch_method": "get_document_text",
-            "maps_to_template_var": "document_text",
-            "required": False,
+        await verity.db.execute_returning("insert_source_binding", {
+            "owner_kind": "task_version",
+            "owner_id": str(tv_id),
+            "template_var": "documents_content",
+            "reference": "fetch:edms/get_document_content_blocks(input.documents)",
+            "binding_kind": "content_blocks",
+            "required": True,
             "execution_order": 1,
-            "description": "When caller passes document_ref (an EDMS document id), fetch the extracted text and bind it to {{document_text}}.",
+            "description": "Fetch each EDMS doc as a Claude content block (PDF→document, text→text, image→image) and prepend to the first user message.",
         })
-        print(f"  + source declared: {task_name} {version} (document_ref → document_text via edms)")
+        print(f"  + source declared: {task_name} {version} (content_blocks ← fetch:edms/get_document_content_blocks(input.documents))")
+
+    extractor_versions = [
+        ("field_extractor", "1.0.0"),
+    ]
+    for task_name, version in extractor_versions:
+        tv_id = task_versions.get((task_name, version))
+        if not tv_id:
+            continue
+        await verity.db.execute_returning("insert_source_binding", {
+            "owner_kind": "task_version",
+            "owner_id": str(tv_id),
+            "template_var": "document_text",
+            "reference": "fetch:edms/get_documents_text(input.documents)",
+            "binding_kind": "text",
+            "required": True,
+            "execution_order": 1,
+            "description": "Fetch extracted text for every EDMS doc in input.documents and bind to {{document_text}}.",
+        })
+        print(f"  + source declared: {task_name} {version} (document_text ← fetch:edms/get_documents_text(input.documents))")
+
+
+async def seed_write_targets(verity: Verity, task_versions: dict) -> None:
+    """Declare output writes on task versions via write_target +
+    target_payload_field. The runtime calls the connector's `write()`
+    after the LLM produces structured output, assembling the payload
+    from these per-field references.
+
+    field_extractor v1.0.0 publishes its extracted fields back to EDMS
+    as a JSON-derivative child document of the source document. The
+    write fires in `auto` mode — runs in champion channel actually POST
+    to EDMS; staging/shadow runs log the intended write without firing.
+    """
+    edms = await verity.db.fetch_one("get_data_connector_by_name", {"name": "edms"})
+    if not edms:
+        print("  ! edms data connector not registered; skipping target declarations")
+        return
+    edms_id = edms["id"]
+
+    fe_version_id = task_versions.get(("field_extractor", "1.0.0"))
+    if not fe_version_id:
+        print("  ! field_extractor v1.0.0 not registered; skipping write_target")
+        return
+
+    # Step 1: declare the write_target itself (one row).
+    target_row = await verity.db.execute_returning("insert_write_target", {
+        "owner_kind": "task_version",
+        "owner_id": str(fe_version_id),
+        "name": "extracted_fields_to_edms",
+        "connector_id": str(edms_id),
+        "write_method": "create_derived_json",
+        "container": None,
+        "required": False,
+        "execution_order": 1,
+        "description": "Persist the extracted fields as a JSON-derivative child document under the source EDMS document.",
+    })
+    target_id = target_row["id"]
+
+    # Step 2: declare each payload field. The connector reads:
+    #   destination_document_id  — parent document under which the JSON child is created
+    #   data                     — the extracted fields dict
+    #   transformation_type      — short label that becomes the storage suffix
+    #   transformation_method    — provenance for the lineage row
+    #   uploaded_by              — actor name for audit
+    payload_fields = [
+        ("destination_document_id", "input.documents[0].id",
+         True,  1, "EDMS document id of the parent (source) document — first ref in the input documents list."),
+        ("data",                    "output.fields",
+         True,  2, "Extracted-field dict, keyed by field name."),
+        ("transformation_type",     "const:field_extraction",
+         True,  3, "Storage suffix and lineage label."),
+        ("transformation_method",   "const:claude:field_extractor",
+         False, 4, "Provenance label written to the lineage row."),
+        ("uploaded_by",             "const:verity:field_extractor",
+         False, 5, "Actor recorded on the new child document."),
+    ]
+    for name, ref, required, order, desc in payload_fields:
+        await verity.db.execute_returning("insert_target_payload_field", {
+            "write_target_id": str(target_id),
+            "payload_field": name,
+            "reference": ref,
+            "required": required,
+            "execution_order": order,
+            "description": desc,
+        })
+
+    print(f"  + write_target declared: field_extractor v1.0.0 → edms.create_derived_json ({len(payload_fields)} payload fields)")
 
 
 # ══════════════════════════════════════════════════════════════
