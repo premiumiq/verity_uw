@@ -257,6 +257,7 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
 
         return _render(templates, request, "agent_detail.html",
             active_page="agents",
+            entity_kind="agent",
             agent=agent,
             versions=versions,
             prompts=prompts,
@@ -293,7 +294,6 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
         versions = await verity.registry.list_task_versions(task["id"])
 
         prompts = []
-        tools = []
         model_cards = []
         validation = None
 
@@ -302,19 +302,26 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             try:
                 config = await verity.get_task_config(task_name)
                 prompts = config.prompts
-                tools = config.tools
+                # Tasks are single-call structured-output units — no
+                # dynamic tool dispatch loop. Don't read or pass
+                # config.tools so the shared template can suppress the
+                # Authorized Tools section for tasks.
             except Exception:
                 logger.warning("Could not load champion config for detail page", exc_info=True)
 
             model_cards = await verity.testing.list_model_cards("task", champion_id)
             validation = await verity.testing.get_latest_validation("task", champion_id)
 
+        # Render via the shared agent_detail.html template; entity_kind
+        # discriminates so agent-only sections (Authorized Tools,
+        # Sub-Agent Delegation Authorizations) are skipped for tasks.
         return _render(templates, request, "agent_detail.html",
             active_page="tasks",
+            entity_kind="task",
             agent=task,
             versions=versions,
             prompts=prompts,
-            tools=tools,
+            tools=[],
             model_cards=model_cards,
             validation=validation,
         )

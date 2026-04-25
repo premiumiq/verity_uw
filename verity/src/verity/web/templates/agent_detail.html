@@ -140,7 +140,12 @@
 </div>
 
 
-<!-- ── AUTHORIZED TOOLS ───────────────────────────────────── -->
+{# ── AUTHORIZED TOOLS ─────────────────────────────────────
+   Agent-only. Tasks are single-call structured-output units — no
+   dynamic tool dispatch loop — so the section is suppressed entirely
+   for entity_kind='task' rather than rendered with an empty state.
+#}
+{% if entity_kind == 'agent' %}
 <div class="verity-section">
     <h2 class="verity-section-title">Authorized Tools (Champion Version)</h2>
 
@@ -171,17 +176,22 @@
     </div>
     {% endif %}
 </div>
+{% endif %}{# entity_kind == 'agent' — Authorized Tools #}
 
 
-<!-- ── SUB-AGENT DELEGATIONS (FC-1) ────────────────────────── -->
-{#
-  Two views side-by-side:
+{# ── SUB-AGENT DELEGATIONS (FC-1) ──────────────────────────
+   Agent-only. Tasks have no delegation concept (no agentic loop, no
+   sub-agent dispatch), so the section is suppressed entirely for
+   entity_kind='task'.
+
+  Two views side-by-side when shown:
     Outbound — "this agent's champion version can delegate to these sub-agents"
     Inbound  — "these parent agent versions can delegate to this agent"
   Backed by agent_version_delegation. Outbound is shown only for the
   current champion; inbound spans all parent versions that reference
   this agent (by name or pinned to one of its versions).
 #}
+{% if entity_kind == 'agent' %}
 <div class="verity-section">
     <h2 class="verity-section-title">Sub-Agent Delegation Authorizations</h2>
 
@@ -303,6 +313,7 @@
 
     </div>
 </div>
+{% endif %}{# entity_kind == 'agent' — Sub-Agent Delegation Authorizations #}
 
 
 <!-- ── VALIDATION STATUS ───────────────────────────────────── -->
