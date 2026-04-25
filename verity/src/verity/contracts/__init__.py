@@ -2,9 +2,8 @@
 
 Anything in this subpackage is shared vocabulary between the governance plane
 (registry, lifecycle, decision log writer/reader, audit, compliance) and the
-runtime plane (execution, pipelines, runners). Governance-internal models
-(DB read shapes, approval records, registration inputs) stay under
-verity.models.*.
+runtime plane (execution, runners). Governance-internal models (DB read
+shapes, approval records, registration inputs) stay under verity.models.*.
 
 Import from this subpackage directly:
 
@@ -16,7 +15,7 @@ Import from this subpackage directly:
 
         # Config / resolve() result
         AgentConfig, TaskConfig, InferenceConfig, InferenceConfigSnapshot,
-        PromptAssignment, ToolAuthorization, PipelineStep,
+        PromptAssignment, ToolAuthorization,
 
         # Decision log / runtime result
         DecisionLogCreate, ExecutionResult, ExecutionEvent, ExecutionEventType,
@@ -53,7 +52,6 @@ from verity.contracts.enums import (
 )
 from verity.contracts.inference import InferenceConfig, InferenceConfigSnapshot
 from verity.contracts.mock import MockContext
-from verity.contracts.pipeline import PipelineStep
 from verity.contracts.prompt import PromptAssignment
 from verity.contracts.testing import TestCase, TestExecutionResult, TestSuite, ValidationRun
 from verity.contracts.tool import ToolAuthorization
@@ -80,7 +78,6 @@ __all__ = [
     "InferenceConfigSnapshot",
     "PromptAssignment",
     "ToolAuthorization",
-    "PipelineStep",
     # Decision log / runtime result
     "DecisionLogCreate",
     "ExecutionResult",

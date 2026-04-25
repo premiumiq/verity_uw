@@ -443,16 +443,6 @@ class Registry:
             {"agent_name": agent_name},
         )
 
-    async def register_pipeline(self, **kwargs) -> dict:
-        """Register a pipeline."""
-        return await self.db.execute_returning("insert_pipeline", kwargs)
-
-    async def register_pipeline_version(self, **kwargs) -> dict:
-        """Register a pipeline version."""
-        kwargs.setdefault("cloned_from_version_id", None)
-        params = _prepare_json_params(kwargs, json_fields=["steps"])
-        return await self.db.execute_returning("insert_pipeline_version", params)
-
     async def register_test_suite(self, **kwargs) -> dict:
         return await self.db.execute_returning("insert_test_suite", kwargs)
 
@@ -928,9 +918,6 @@ class Registry:
     async def list_tools(self) -> list[dict]:
         return await self.db.fetch_all("list_tools")
 
-    async def list_pipelines(self) -> list[dict]:
-        return await self.db.fetch_all("list_pipelines")
-
     async def get_agent_by_name(self, name: str) -> Optional[dict]:
         return await self.db.fetch_one("get_agent_by_name", {"agent_name": name})
 
@@ -948,12 +935,6 @@ class Registry:
 
     async def list_prompt_versions(self, prompt_id: UUID) -> list[dict]:
         return await self.db.fetch_all("list_prompt_versions", {"prompt_id": str(prompt_id)})
-
-    async def list_pipeline_versions(self, pipeline_id: UUID) -> list[dict]:
-        return await self.db.fetch_all("list_pipeline_versions", {"pipeline_id": str(pipeline_id)})
-
-    async def get_pipeline_by_name(self, name: str) -> Optional[dict]:
-        return await self.db.fetch_one("get_pipeline_by_name", {"pipeline_name": name})
 
     # ── APPLICATION & CONTEXT ─────────────────────────────────
 

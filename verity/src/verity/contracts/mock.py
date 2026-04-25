@@ -67,10 +67,10 @@ from typing import Any, Optional
 class MockContext:
     """Controls tool-level mocking during an execution.
 
-    Passed as an optional parameter to execute_agent(), execute_task(),
-    execute_pipeline(), or run_tool(). When None (the default), tools
-    fall back to their DB-registered `mock_mode_enabled` flag, which
-    defaults to off for production tools.
+    Passed as an optional parameter to run_agent(), run_task(), or
+    run_tool(). When None (the default), tools fall back to their
+    DB-registered `mock_mode_enabled` flag, which defaults to off for
+    production tools.
     """
 
     # ── TOOL MOCK ─────────────────────────────────────────────

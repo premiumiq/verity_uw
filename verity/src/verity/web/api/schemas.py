@@ -37,8 +37,10 @@ class RunAgentRequest(BaseModel):
     )
     workflow_run_id: Optional[UUID] = Field(
         None,
-        description="Link this run to a parent pipeline run (normally "
-                    "left null when calling the agent directly).",
+        description="Caller-supplied correlation id grouping multiple "
+                    "related task/agent calls into one logical workflow "
+                    "invocation. Normally left null when calling the "
+                    "agent directly.",
     )
     application: Optional[str] = Field(
         None,
@@ -69,18 +71,3 @@ class RunTaskRequest(BaseModel):
     )
 
 
-class RunPipelineRequest(BaseModel):
-    """Body for POST /api/v1/runtime/pipelines/{name}/run."""
-
-    context: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Top-level context shared across all pipeline steps.",
-    )
-    channel: str = "production"
-    execution_context_id: Optional[UUID] = None
-    application: Optional[str] = Field(
-        None,
-        description="Attribution override for every decision log row "
-                    "produced by this pipeline run "
-                    "(see RunAgentRequest.application).",
-    )

@@ -52,7 +52,6 @@ from verity.runtime.decisions_writer import DecisionsWriter
 from verity.runtime.runs_writer import RunsWriter
 from verity.runtime.engine import ExecutionResult
 from verity.runtime.mock_context import MockContext
-from verity.runtime.pipeline import PipelineResult
 from verity.runtime.runtime import Runtime
 
 
@@ -85,13 +84,14 @@ class Verity:
 
     Internal structure:
         self._gov : GovernanceCoordinator (registry + lifecycle + decisions_reader + reporting + testing)
-        self._rt  : Runtime (execution + pipeline + test/validation runners + decisions_writer)
+        self._rt  : Runtime (execution + test/validation runners + decisions_writer)
         self.db   : shared Database connection pool
 
-    Backward-compatible attribute surface (same as before the split):
+    Backward-compatible attribute surface:
         self.registry, self.lifecycle, self.reporting, self.testing,
-        self.execution, self.pipeline_executor, self.test_runner,
-        self.validation_runner, self.decisions (unified reader+writer).
+        self.execution, self.test_runner, self.validation_runner,
+        self.decisions (unified reader+writer), self.runs_reader,
+        self.runs_writer.
     """
 
     def __init__(self, database_url: str, anthropic_api_key: str = "", application: str = "default"):
@@ -129,7 +129,6 @@ class Verity:
         self.models = self._gov.models
         self.quotas = self._gov.quotas
         self.execution = self._rt.execution
-        self.pipeline_executor = self._rt.pipeline_executor
         self.test_runner = self._rt.test_runner
         self.validation_runner = self._rt.validation_runner
 
@@ -235,76 +234,6 @@ class Verity:
             workflow_run_id=workflow_run_id,
             mock=mock,
             stream=stream,
-            execution_context_id=execution_context_id,
-            application=application,
-        )
-
-    async def execute_pipeline(
-        self,
-        pipeline_name: str,
-        context: dict[str, Any],
-        channel: str = "production",
-        mock: Optional[MockContext] = None,
-        fixtures: Optional[dict[str, Any]] = None,
-        execution_context_id: Optional[UUID] = None,
-        application: Optional[str] = None,
-    ) -> PipelineResult:
-        """Execute a full pipeline with dependency resolution and parallel groups.
-
-        Pass `execution_context_id` to link all decisions to a business context.
-
-        Pipeline engine selection:
-          - fixtures=None (default): the pipeline runs on the real
-            ExecutionEngine, which calls Claude and dispatches registered
-            tools. `mock=MockContext(...)` can override tool responses.
-          - fixtures={step_name: Fixture or dict, ...}: the pipeline runs
-            on a FixtureEngine, which returns pre-built outputs without
-            calling Claude or tools. Every step's decision is logged with
-            mock_mode=True. Use this for the UW demo's "mock mode" and
-            other scenarios where you want deterministic execution with
-            full governance but zero LLM cost. `mock` is ignored in this
-            path.
-        """
-        await self.ensure_connected()
-
-        # Fixture path: build a disposable FixtureEngine + PipelineExecutor
-        # per request. Cheap — both are lightweight wiring classes — and
-        # keeps the default pipeline_executor (which wraps ExecutionEngine)
-        # untouched for real runs.
-        if fixtures is not None:
-            from verity.runtime.fixture_backend import FixtureEngine
-            from verity.runtime.pipeline import PipelineExecutor
-
-            fixture_engine = FixtureEngine(
-                registry=self._gov.registry,
-                decisions=self._rt.decisions_writer,
-                fixtures=fixtures,
-                application=self.application,
-            )
-            # Share tool_implementations so callers that register tools at
-            # app startup don't have to care which engine ultimately runs.
-            # (FixtureEngine never dispatches tools, but it accepts
-            # registrations for interface parity.)
-            fixture_engine.tool_implementations = self._rt.execution.tool_implementations
-
-            fixture_pipeline = PipelineExecutor(
-                registry=self._gov.registry,
-                execution_engine=fixture_engine,
-            )
-            return await fixture_pipeline.run_pipeline(
-                pipeline_name=pipeline_name,
-                context=context,
-                channel=channel,
-                execution_context_id=execution_context_id,
-                application=application,
-            )
-
-        # Real path: the persistent pipeline_executor over ExecutionEngine.
-        return await self._rt.pipeline_executor.run_pipeline(
-            pipeline_name=pipeline_name,
-            context=context,
-            channel=channel,
-            mock=mock,
             execution_context_id=execution_context_id,
             application=application,
         )

@@ -7,8 +7,8 @@ lookup paths the compliance/audit notebooks need:
   - get_decision         — full DecisionLogDetail by id (includes
                             message_history, tool_calls, risk_factors)
   - get_audit_trail      — all decisions in an execution_context
-                            (can span multiple pipeline runs)
-  - get_audit_trail_by_run — all decisions from one pipeline run
+                            (can span multiple workflow runs)
+  - get_audit_trail_by_run — all decisions from one workflow_run_id
 
 Plus one write: POST /overrides to record a human override.
 """
@@ -58,7 +58,7 @@ def build_decisions_router(verity) -> APIRouter:
         execution_context_id: UUID,
     ) -> list[AuditTrailEntry]:
         """All decisions tied to a business-level execution_context.
-        A context can span multiple pipeline runs (e.g. an initial
+        A context can span multiple workflow runs (e.g. an initial
         run plus a re-run), so this is the right view for 'show me
         everything Verity did for submission X'."""
         return await verity.get_audit_trail(execution_context_id)
@@ -70,9 +70,9 @@ def build_decisions_router(verity) -> APIRouter:
     async def get_audit_trail_by_run(
         workflow_run_id: UUID,
     ) -> list[AuditTrailEntry]:
-        """All decisions from one pipeline_run — the preferred query
-        for replaying a single execution, since workflow_run_id is
-        unique per run (no cross-application collision risk)."""
+        """All decisions sharing one workflow_run_id — the preferred
+        query for replaying a single multi-step workflow, since the
+        correlation id is caller-supplied and unique per invocation."""
         return await verity.get_audit_trail_by_run(workflow_run_id)
 
     @router.post("/overrides")

@@ -1,12 +1,13 @@
-"""Runtime execution endpoints — run_agent / run_task / run_pipeline.
+"""Runtime execution endpoints — synchronous run_agent / run_task.
 
-Thin JSON wrappers over `verity.execution.*` and
-`verity.pipeline_executor.*`. Each endpoint awaits the full execution
-synchronously and returns the ExecutionResult / PipelineResult on
-completion. No streaming or background-job semantics in the first pass
-— notebooks that want real-time tokens can call Verity's admin-side
-streaming endpoints directly, or we'll add an SSE variant later when
-a specific use case needs it.
+Thin JSON wrappers over `verity.execution.*`. Each endpoint awaits the
+full execution synchronously and returns the ExecutionResult on
+completion. For async submission with worker dispatch, see
+`web/api/runs.py` (POST /api/v1/runs).
+
+Multi-step orchestration is descoped — apps chain run_task / run_agent
+in their own code (see uw_demo/app/workflows.py for the demo's pattern)
+and thread a workflow_run_id for audit clustering.
 
 Results are @dataclass instances in the SDK. FastAPI / Pydantic v2
 serializes dataclasses via `jsonable_encoder`, so returning them
@@ -19,7 +20,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from verity.web.api.schemas import RunAgentRequest, RunPipelineRequest, RunTaskRequest
+from verity.web.api.schemas import RunAgentRequest, RunTaskRequest
 
 
 def build_runtime_router(verity) -> APIRouter:
@@ -56,25 +57,6 @@ def build_runtime_router(verity) -> APIRouter:
                 input_data=req.input_data,
                 channel=req.channel,
                 workflow_run_id=req.workflow_run_id,
-                execution_context_id=req.execution_context_id,
-                application=req.application,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc))
-        return asdict(result)
-
-    @router.post("/pipelines/{name}/run")
-    async def run_pipeline(name: str, req: RunPipelineRequest) -> dict[str, Any]:
-        """Execute a pipeline from its champion version.
-
-        Returns the PipelineResult with all step outcomes inline —
-        each step's ExecutionResult, status, duration, and any error.
-        """
-        try:
-            result = await verity.execute_pipeline(
-                pipeline_name=name,
-                context=req.context,
-                channel=req.channel,
                 execution_context_id=req.execution_context_id,
                 application=req.application,
             )

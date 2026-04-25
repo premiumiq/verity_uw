@@ -11,7 +11,10 @@ governance plane and the runtime plane.
               service and remote runtime service. Same public interface as
               inprocess, swappable by config.
 
-The `Verity` class exposed here preserves the flat API consuming apps
-used before the split (verity.execute_pipeline, verity.get_audit_trail,
-etc.), so no business-app code has to change.
+The `Verity` class exposes the flat governance + runtime API:
+verity.execution.run_task / run_agent for direct in-process calls,
+verity.submit_task / submit_agent + verity.get_run for the async run
+surface, verity.get_audit_trail for compliance reads. Multi-step
+orchestration is the consuming app's job (see uw_demo/app/workflows.py
+for the demo's pattern).
 """

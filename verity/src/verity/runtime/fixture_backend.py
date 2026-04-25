@@ -6,13 +6,14 @@ When running the UW demo with Claude credits turned off, or running a test
 suite on a laptop that can't reach api.anthropic.com, we still want:
   - The full governance trail (a row in agent_decision_log per run)
   - Real config resolution (so version_ids in the log are correct)
-  - Real pipeline orchestration (step ordering, parallel groups)
+  - Identical step semantics across the live + mock paths
   - Honest identification in the log that "this wasn't a real LLM call"
 
 FixtureEngine provides that. It has the same public shape as
 runtime.engine.ExecutionEngine (same constructor, same run_agent / run_task /
-register_tool_implementation signatures), so `PipelineExecutor` or any
-caller can drive it without caring which engine it received.
+register_tool_implementation signatures), so any caller — UW's
+workflows.py, a test harness — can drive it without caring which
+engine it received.
 
 How it works
 ------------
@@ -21,8 +22,9 @@ Each run_agent / run_task call:
      is the version-pinning seam — even fixture runs go through it so
      the decision log's entity_version_id and prompt_version_ids are real.
   2. Looks up a `Fixture` in the engine's fixtures dict, keyed first by
-     step_name (pipeline mode) then by entity_name. Raises loudly if
-     neither key is present.
+     step_name (when the caller passed one — typical for multi-step
+     workflows) then by entity_name. Raises loudly if neither key is
+     present.
   3. Writes a DecisionLogCreate row shaped like a real run — same 31
      columns populated, but `mock_mode=True` and tokens/duration either
      zero or whatever the fixture declares.
@@ -121,8 +123,8 @@ class FixtureNotFound(Exception):
 class FixtureEngine:
     """Zero-LLM execution engine that returns pre-built fixtures.
 
-    Constructor shape matches ExecutionEngine so the Runtime facade or
-    PipelineExecutor can swap them without any other rewiring:
+    Constructor shape matches ExecutionEngine so callers (UW workflows,
+    test harnesses) can swap them without any other rewiring:
 
         FixtureEngine(registry, decisions, fixtures, application="uw_demo")
         ExecutionEngine(registry, decisions, anthropic_api_key, application="uw_demo")
@@ -282,7 +284,7 @@ class FixtureEngine:
     # ── INTERNAL HELPERS ─────────────────────────────────────────
 
     def _resolve_fixture(self, step_name: Optional[str], entity_name: str) -> Fixture:
-        """Pick the matching fixture: step_name first (pipeline mode), then entity_name.
+        """Pick the matching fixture: step_name first (multi-step workflows), then entity_name.
 
         Raises FixtureNotFound if neither key matches. This is a loud
         failure on purpose — if you're running with the FixtureEngine you

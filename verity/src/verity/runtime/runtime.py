@@ -6,11 +6,13 @@ dependencies — this is the concrete manifestation of the version-pinning
 invariant: the runtime reads resolved configs from governance and writes
 decisions back through DecisionsWriter.
 
-Why both this class and the existing ExecutionEngine/PipelineExecutor/etc.?
-The existing classes handle specific execution responsibilities. This
-class is a thin wiring layer that holds one of each and exposes them as
-attributes. Consumer apps (UW) and the runtime REST API (Phase 5) both
-use this single entry point.
+This class is a thin wiring layer that holds one instance of each
+runtime-plane module and exposes them as attributes. Consumer apps
+(UW) and the runtime REST API both use this single entry point.
+
+Multi-step orchestration: pipelines are descoped from Verity. Apps
+chain run_task / run_agent calls in their own code (see uw_demo's
+workflows.py) and thread a workflow_run_id for audit clustering.
 """
 
 from verity.db.connection import Database
@@ -19,7 +21,6 @@ from verity.governance.testing_meta import Testing
 from verity.runtime.decisions_writer import DecisionsWriter
 from verity.runtime.engine import ExecutionEngine
 from verity.runtime.mcp_client import MCPClient
-from verity.runtime.pipeline import PipelineExecutor
 from verity.runtime.test_runner import TestRunner
 from verity.runtime.validation_runner import ValidationRunner
 
@@ -37,10 +38,9 @@ class Runtime:
     Runtime-plane capabilities exposed via its attributes:
       - decisions_writer   : log_decision() — one write per execution
       - mcp_client         : MCPClient — shared pool of MCP server connections for
-                             tools registered with transport='mcp_*' (Phase 4c)
+                             tools registered with transport='mcp_*'
       - execution          : ExecutionEngine (agentic loop; holds the mcp_client
                              so tool dispatch can route by transport)
-      - pipeline_executor  : multi-step orchestrator with dependency resolution
       - test_runner        : execute test suites against entity versions
       - validation_runner  : run entity versions against ground truth datasets
     """
@@ -71,10 +71,6 @@ class Runtime:
             application=application,
             mcp_client=self.mcp_client,
             models=models,
-        )
-        self.pipeline_executor = PipelineExecutor(
-            registry=registry,
-            execution_engine=self.execution,
         )
         self.test_runner = TestRunner(
             registry=registry,
