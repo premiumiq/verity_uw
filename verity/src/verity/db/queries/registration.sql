@@ -284,26 +284,6 @@ VALUES (
 RETURNING id, created_at;
 
 
--- name: insert_pipeline
-INSERT INTO pipeline (name, display_name, description)
-VALUES (%(name)s, %(display_name)s, %(description)s)
-RETURNING id, created_at;
-
-
--- name: insert_pipeline_version
-INSERT INTO pipeline_version (
-    pipeline_id, version_number, lifecycle_state, steps,
-    change_summary, developer_name,
-    cloned_from_version_id
-)
-VALUES (
-    %(pipeline_id)s, %(version_number)s, %(lifecycle_state)s, %(steps)s,
-    %(change_summary)s, %(developer_name)s,
-    %(cloned_from_version_id)s
-)
-RETURNING id, created_at;
-
-
 -- name: insert_test_suite
 INSERT INTO test_suite (name, description, entity_type, entity_id, suite_type, created_by)
 VALUES (%(name)s, %(description)s, %(entity_type)s, %(entity_id)s, %(suite_type)s, %(created_by)s)

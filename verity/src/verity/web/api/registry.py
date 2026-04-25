@@ -47,10 +47,6 @@ def build_registry_router(verity) -> APIRouter:
     async def list_tools() -> list[dict]:
         return await verity.registry.list_tools()
 
-    @router.get("/pipelines")
-    async def list_pipelines() -> list[dict]:
-        return await verity.registry.list_pipelines()
-
     @router.get("/inference-configs")
     async def list_inference_configs() -> list[dict]:
         return await verity.registry.list_inference_configs()
@@ -122,12 +118,5 @@ def build_registry_router(verity) -> APIRouter:
         if not header:
             raise HTTPException(status_code=404, detail=f"Prompt '{name}' not found")
         return await verity.registry.list_prompt_versions(header["id"])
-
-    @router.get("/pipelines/{name}/versions")
-    async def list_pipeline_versions(name: str) -> list[dict]:
-        header = await verity.registry.get_pipeline_by_name(name)
-        if not header:
-            raise HTTPException(status_code=404, detail=f"Pipeline '{name}' not found")
-        return await verity.registry.list_pipeline_versions(header["id"])
 
     return router

@@ -92,37 +92,6 @@ WHERE id = %(task_id)s::uuid
 RETURNING id;
 
 
--- name: set_pipeline_champion
-UPDATE pipeline
-SET current_champion_version_id = %(version_id)s::uuid
-WHERE id = %(pipeline_id)s::uuid
-RETURNING id;
-
-
--- name: update_pipeline_version_state
-UPDATE pipeline_version
-SET lifecycle_state = %(new_state)s::lifecycle_state,
-    valid_from = CASE WHEN %(new_state)s = 'champion' THEN NOW() ELSE valid_from END,
-    valid_to = CASE WHEN %(new_state)s = 'champion' THEN '2999-12-31 23:59:59'::timestamp ELSE valid_to END
-WHERE id = %(version_id)s::uuid
-RETURNING id, lifecycle_state, valid_from, valid_to;
-
-
--- name: deprecate_pipeline_version
-UPDATE pipeline_version
-SET lifecycle_state = 'deprecated',
-    valid_to = NOW()
-WHERE id = %(version_id)s::uuid
-RETURNING id;
-
-
--- name: get_current_champion_pipeline_version
-SELECT pv.id
-FROM pipeline p
-JOIN pipeline_version pv ON pv.id = p.current_champion_version_id
-WHERE p.id = %(pipeline_id)s::uuid;
-
-
 -- name: deprecate_prompt_version
 UPDATE prompt_version
 SET lifecycle_state = 'deprecated',

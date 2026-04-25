@@ -103,17 +103,6 @@ def build_authoring_router(verity) -> APIRouter:
         except (ValueError, PsycopgError) as exc:
             raise _as_400(exc)
 
-    @router.post("/pipelines")
-    async def register_pipeline(body: dict[str, Any]) -> dict:
-        """Register a pipeline header.
-
-        Expected: name, display_name, description.
-        """
-        try:
-            return await verity.registry.register_pipeline(**body)
-        except (ValueError, PsycopgError) as exc:
-            raise _as_400(exc)
-
     @router.post("/inference-configs")
     async def register_inference_config(body: dict[str, Any]) -> dict:
         """Register an inference config.
@@ -203,25 +192,6 @@ def build_authoring_router(verity) -> APIRouter:
         try:
             return await verity.registry.register_prompt_version(
                 prompt_id=header["id"], **body,
-            )
-        except (ValueError, PsycopgError) as exc:
-            raise _as_400(exc)
-
-    @router.post("/pipelines/{name}/versions")
-    async def register_pipeline_version(name: str, body: dict[str, Any]) -> dict:
-        """Register a pipeline_version (draft).
-
-        Body fields: version_number (int), lifecycle_state
-        (default 'draft'), steps (JSONB array of step dicts with
-        step_order/step_name/entity_type/entity_name/depends_on/
-        parallel_group/error_policy), change_summary, developer_name.
-        """
-        header = await verity.registry.get_pipeline_by_name(name)
-        if not header:
-            raise HTTPException(status_code=404, detail=f"Pipeline '{name}' not found")
-        try:
-            return await verity.registry.register_pipeline_version(
-                pipeline_id=header["id"], **body,
             )
         except (ValueError, PsycopgError) as exc:
             raise _as_400(exc)

@@ -57,15 +57,6 @@ WHERE id = %(version_id)s::uuid AND lifecycle_state = 'draft'
 RETURNING id, version_label, lifecycle_state;
 
 
--- name: update_pipeline_version_draft
-UPDATE pipeline_version SET
-    steps            = COALESCE(%(steps)s::jsonb, steps),
-    change_summary   = COALESCE(%(change_summary)s, change_summary),
-    developer_name   = COALESCE(%(developer_name)s, developer_name)
-WHERE id = %(version_id)s::uuid AND lifecycle_state = 'draft'
-RETURNING id, version_number, lifecycle_state;
-
-
 -- ── DRAFT-STATE DELETES WITH CASCADE ─────────────────────────
 -- Single CTE: the guard subquery yields the target id only if the
 -- row is in draft; each "delete dependents" CTE removes associated
@@ -116,14 +107,6 @@ RETURNING id;
 -- caller sees a 400. That is the right behavior — we don't want to
 -- silently orphan assignments on promoted agent/task versions.
 DELETE FROM prompt_version
-WHERE id = %(version_id)s::uuid AND lifecycle_state = 'draft'
-RETURNING id;
-
-
--- name: delete_draft_pipeline_version
--- Pipeline versions have no association tables (steps are embedded
--- JSONB), so no cascade is needed.
-DELETE FROM pipeline_version
 WHERE id = %(version_id)s::uuid AND lifecycle_state = 'draft'
 RETURNING id;
 
@@ -183,9 +166,6 @@ SELECT * FROM task_version WHERE id = %(version_id)s::uuid;
 
 -- name: get_prompt_version_row
 SELECT * FROM prompt_version WHERE id = %(version_id)s::uuid;
-
--- name: get_pipeline_version_row
-SELECT * FROM pipeline_version WHERE id = %(version_id)s::uuid;
 
 -- name: get_agent_prompt_assignments_raw
 SELECT * FROM entity_prompt_assignment

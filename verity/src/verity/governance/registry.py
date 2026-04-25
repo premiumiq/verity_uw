@@ -525,14 +525,6 @@ class Registry:
             params.setdefault(key, None)
         return await self.db.execute_returning("update_prompt_version_draft", params)
 
-    async def update_pipeline_version_draft(self, version_id, **fields) -> Optional[dict]:
-        params = dict(fields)
-        params["version_id"] = str(version_id)
-        for key in ("steps", "change_summary", "developer_name"):
-            params.setdefault(key, None)
-        params = _prepare_json_params(params, json_fields=["steps"])
-        return await self.db.execute_returning("update_pipeline_version_draft", params)
-
     async def delete_draft_version(self, entity_type: str, version_id) -> Optional[dict]:
         """Delete a draft version. Cascades through associations for
         agent / task. Non-draft rows return None (surface as 409).
@@ -546,12 +538,11 @@ class Registry:
             "agent":    "delete_draft_agent_version_cascade",
             "task":     "delete_draft_task_version_cascade",
             "prompt":   "delete_draft_prompt_version",
-            "pipeline": "delete_draft_pipeline_version",
         }.get(entity_type)
         if not query_name:
             raise ValueError(
                 f"delete_draft_version: entity_type must be one of "
-                f"agent/task/prompt/pipeline, got {entity_type!r}"
+                f"agent/task/prompt, got {entity_type!r}"
             )
         return await self.db.execute_returning(
             query_name, {"version_id": str(version_id)},
@@ -878,28 +869,6 @@ class Registry:
                 "cloned_from_version_id": str(source_version_id),
             }
             return await tx.execute_returning("insert_prompt_version", new_params)
-
-    async def clone_pipeline_version(
-        self, source_version_id, new_version_number: int,
-        change_summary: str = "Cloned", developer_name: Optional[str] = None,
-    ) -> dict:
-        async with self.db.transaction() as tx:
-            src = await tx.fetch_one(
-                "get_pipeline_version_row", {"version_id": str(source_version_id)},
-            )
-            if not src:
-                raise ValueError(f"Source pipeline_version {source_version_id} not found")
-            new_params = {
-                "pipeline_id": str(src["pipeline_id"]),
-                "version_number": new_version_number,
-                "lifecycle_state": "draft",
-                "steps": src["steps"],
-                "change_summary": change_summary,
-                "developer_name": developer_name or src.get("developer_name"),
-                "cloned_from_version_id": str(source_version_id),
-            }
-            new_params = _prepare_json_params(new_params, json_fields=["steps"])
-            return await tx.execute_returning("insert_pipeline_version", new_params)
 
     # ── LISTING (browsing) ────────────────────────────────────
 

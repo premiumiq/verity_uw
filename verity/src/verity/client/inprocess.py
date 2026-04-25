@@ -550,10 +550,6 @@ class Verity:
         await self.ensure_connected()
         return await self._gov.registry.list_tools()
 
-    async def list_pipelines(self) -> list[dict]:
-        await self.ensure_connected()
-        return await self._gov.registry.list_pipelines()
-
     # ── APPLICATIONS & EXECUTION CONTEXT ──────────────────────
 
     async def register_application(self, name: str, display_name: str, description: str = "") -> dict:

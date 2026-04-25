@@ -564,49 +564,6 @@ WHERE tvt.authorized = TRUE
 ORDER BY tool_id, entity_type;
 
 
--- name: list_pipelines
-SELECT
-    p.id,
-    p.name,
-    p.display_name,
-    p.description,
-    pv.version_number AS champion_version,
-    pv.lifecycle_state AS champion_state,
-    pv.steps,
-    p.created_at
-FROM pipeline p
-LEFT JOIN pipeline_version pv ON pv.id = p.current_champion_version_id
-ORDER BY p.name;
-
-
--- name: get_pipeline_by_name
-SELECT
-    p.*,
-    pv.id AS champion_version_id,
-    pv.version_number AS champion_version_number,
-    pv.lifecycle_state AS champion_lifecycle_state,
-    pv.steps
-FROM pipeline p
-LEFT JOIN pipeline_version pv ON pv.id = p.current_champion_version_id
-WHERE p.name = %(pipeline_name)s;
-
-
--- name: list_pipeline_versions
--- All versions of one pipeline, newest first. Used by the /api/v1/pipelines/{name}/versions endpoint.
-SELECT
-    pv.id,
-    pv.pipeline_id,
-    pv.version_number,
-    pv.lifecycle_state,
-    pv.change_summary,
-    pv.developer_name,
-    pv.valid_from,
-    pv.valid_to,
-    pv.created_at,
-    jsonb_array_length(pv.steps) AS step_count
-FROM pipeline_version pv
-WHERE pv.pipeline_id = %(pipeline_id)s
-ORDER BY pv.version_number DESC;
 
 
 -- name: list_applications

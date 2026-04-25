@@ -27,7 +27,7 @@ def build_lifecycle_router(verity) -> APIRouter:
         """Promote an entity version to the next lifecycle state.
 
         Body:
-          entity_type (agent/task/prompt/pipeline), entity_version_id,
+          entity_type (agent/task/prompt), entity_version_id,
           target_state (candidate/staging/shadow/challenger/champion/
           deprecated), approver_name, rationale, approver_role (optional),
           and any evidence_flags required by the gate
@@ -83,7 +83,7 @@ def build_lifecycle_router(verity) -> APIRouter:
 
     @router.get("/approvals")
     async def list_approvals(
-        entity_type: str = Query(..., description="agent / task / prompt / pipeline"),
+        entity_type: str = Query(..., description="agent / task / prompt"),
         entity_version_id: UUID = Query(..., description="The version's UUID"),
     ) -> list[dict]:
         """List every approval_record row for an entity version —

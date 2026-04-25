@@ -102,7 +102,6 @@ SELECT
     (SELECT COUNT(*) FROM prompt) AS prompt_count,
     (SELECT COUNT(*) FROM inference_config WHERE active = TRUE) AS config_count,
     (SELECT COUNT(*) FROM tool WHERE active = TRUE) AS tool_count,
-    (SELECT COUNT(*) FROM pipeline) AS pipeline_count,
     (SELECT COUNT(*) FROM mcp_server WHERE active = TRUE) AS mcp_server_count,
     (SELECT COUNT(*) FROM agent_decision_log) AS total_decisions,
     (SELECT COUNT(*) FROM override_log) AS total_overrides,
@@ -137,8 +136,6 @@ SELECT
     (SELECT COUNT(*) FROM inference_config WHERE active = TRUE) AS config_count,
     (SELECT COUNT(DISTINCT entity_id) FROM application_entity
        WHERE entity_type = 'tool'     AND application_id = ANY(%(app_ids)s::uuid[])) AS tool_count,
-    (SELECT COUNT(DISTINCT entity_id) FROM application_entity
-       WHERE entity_type = 'pipeline' AND application_id = ANY(%(app_ids)s::uuid[])) AS pipeline_count,
     (SELECT COUNT(*) FROM mcp_server WHERE active = TRUE) AS mcp_server_count,
     (SELECT COUNT(*) FROM agent_decision_log
        WHERE application = ANY(%(app_names)s::text[])
@@ -173,22 +170,23 @@ SELECT
 
 -- name: dashboard_governance_stats
 -- Platform-wide governance counters — always unscoped. Approvals,
--- pipeline-run totals, in-review counts, and the aggregate test pass
+-- workflow-run totals, in-review counts, and the aggregate test pass
 -- rate don't decompose cleanly by application so we show them whole.
 SELECT
     (SELECT COUNT(*) FROM approval_record) AS total_approvals,
-    (SELECT COUNT(DISTINCT workflow_run_id) FROM agent_decision_log WHERE workflow_run_id IS NOT NULL) AS total_pipeline_runs,
+    (SELECT COUNT(DISTINCT workflow_run_id) FROM agent_decision_log WHERE workflow_run_id IS NOT NULL) AS total_workflow_runs,
     (SELECT COUNT(*) FROM application) AS app_count,
     (SELECT COUNT(*) FROM agent_version WHERE lifecycle_state IN ('staging', 'shadow', 'challenger')) AS entities_in_review,
     (SELECT COUNT(*) FROM test_execution_log WHERE passed = TRUE) AS tests_passed,
     (SELECT COUNT(*) FROM test_execution_log) AS tests_total;
 
 
--- name: dashboard_pipeline_runs_scoped
--- Number of distinct pipeline runs tied to the selected apps (same OR
+-- name: dashboard_workflow_runs_scoped
+-- Number of distinct workflow_run_ids tied to the selected apps (same OR
 -- predicate as dashboard_counts_scoped). Used by the Activity section's
--- "Pipeline Runs" card.
-SELECT COUNT(DISTINCT workflow_run_id) AS total_pipeline_runs
+-- "Workflow Runs" card. Renamed from dashboard_pipeline_runs_scoped now
+-- that workflow_run_id is caller-supplied (not Verity-owned).
+SELECT COUNT(DISTINCT workflow_run_id) AS total_workflow_runs
 FROM agent_decision_log
 WHERE workflow_run_id IS NOT NULL
   AND (application = ANY(%(app_names)s::text[])

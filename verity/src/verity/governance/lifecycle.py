@@ -89,11 +89,6 @@ class Lifecycle:
                 "version_id": str(entity_version_id),
                 "new_state": target_state.value,
             })
-        elif entity_type == EntityType.PIPELINE:
-            await self.db.execute_returning("update_pipeline_version_state", {
-                "version_id": str(entity_version_id),
-                "new_state": target_state.value,
-            })
 
         # 6. If promoting to champion, update the parent entity's champion pointer
         #    and deprecate the prior champion
@@ -244,12 +239,6 @@ class Lifecycle:
             return await self.db.fetch_one("get_task_version", {"version_id": str(version_id)})
         elif entity_type == EntityType.PROMPT:
             return await self.db.fetch_one("get_prompt_version", {"version_id": str(version_id)})
-        elif entity_type == EntityType.PIPELINE:
-            # Pipeline versions use a simpler structure — fetch directly
-            return await self.db.fetch_one_raw(
-                "SELECT * FROM pipeline_version WHERE id = %(version_id)s::uuid",
-                {"version_id": str(version_id)},
-            )
         return None
 
     async def _set_champion(self, entity_type: EntityType, current_version: dict, new_version_id: UUID):
@@ -282,20 +271,6 @@ class Lifecycle:
             await self.db.execute_returning("set_task_champion", {
                 "version_id": str(new_version_id),
                 "task_id": str(task_id),
-            })
-
-        elif entity_type == EntityType.PIPELINE:
-            pipeline_id = current_version["pipeline_id"]
-            prior = await self.db.fetch_one("get_current_champion_pipeline_version", {
-                "pipeline_id": str(pipeline_id),
-            })
-            if prior and str(prior["id"]) != str(new_version_id):
-                await self.db.execute_returning("deprecate_pipeline_version", {
-                    "version_id": str(prior["id"]),
-                })
-            await self.db.execute_returning("set_pipeline_champion", {
-                "version_id": str(new_version_id),
-                "pipeline_id": str(pipeline_id),
             })
 
         elif entity_type == EntityType.PROMPT:

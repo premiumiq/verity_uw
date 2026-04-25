@@ -8,9 +8,9 @@
        the page reloads and every count card below is filtered to that
        set (catalog via application_entity, activity via the decision /
        execution_context predicate that matches the purge endpoint).
-    3. Catalog cards — pipelines, agents, tasks, prompts, inference
-       configs, tools, MCP servers.
-    4. Activity cards — decisions, pipeline runs, overrides, open
+    3. Catalog cards — agents, tasks, prompts, inference configs,
+       tools, MCP servers.
+    4. Activity cards — decisions, workflow runs, overrides, open
        incidents.
     5. Governance cards — promotions, test pass rate, entities in review.
 
@@ -141,7 +141,7 @@
 <p class="verity-page-description">
     <strong>Verity</strong> is PremiumIQ's AI trust &amp; compliance platform.
     It is the single source of truth for every AI component in your organization:
-    agents, tasks, prompts, tools, inference configs, and pipelines are governed
+    agents, tasks, prompts, tools, and inference configs are governed
     here through a 7-state lifecycle, and every execution writes an immutable
     decision-log row for audit. Below is a live view of the registry plus the
     activity each consuming application has generated.
@@ -203,10 +203,6 @@
      ══════════════════════════════════════════════════════════ -->
 <div class="home-section-label">Catalog</div>
 <div class="home-card-grid">
-    <a href="/admin/pipelines" class="home-card">
-        <span class="home-card-value">{{ counts.pipeline_count }}</span>
-        <span class="home-card-label">Pipelines</span>
-    </a>
     <a href="/admin/agents" class="home-card">
         <span class="home-card-value">{{ counts.agent_count }}</span>
         <span class="home-card-label">Agents</span>
@@ -243,9 +239,9 @@
         <span class="home-card-value">{{ counts.total_decisions }}</span>
         <span class="home-card-label">Decisions</span>
     </a>
-    <a href="/admin/pipeline-runs" class="home-card">
-        <span class="home-card-value">{{ total_pipeline_runs }}</span>
-        <span class="home-card-label">Pipeline runs</span>
+    <a href="/admin/decisions?group_by=workflow_run" class="home-card">
+        <span class="home-card-value">{{ total_workflow_runs }}</span>
+        <span class="home-card-label">Workflow runs</span>
     </a>
     <a href="/admin/overrides" class="home-card amber">
         <span class="home-card-value">{{ counts.total_overrides }}</span>

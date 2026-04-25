@@ -107,23 +107,6 @@ def build_draft_edit_router(verity) -> APIRouter:
         await _ensure_draft_result(row, version_id, "prompt")
         return row
 
-    @router.patch("/pipelines/{name}/versions/{version_id}")
-    async def update_pipeline_version(
-        name: str, version_id: str, body: dict[str, Any],
-    ) -> dict:
-        """Update mutable fields on a draft pipeline_version.
-
-        Editable: steps (JSONB array), change_summary, developer_name.
-        """
-        try:
-            row = await verity.registry.update_pipeline_version_draft(
-                version_id=version_id, **body,
-            )
-        except (ValueError, PsycopgError) as exc:
-            raise _as_400(exc)
-        await _ensure_draft_result(row, version_id, "pipeline")
-        return row
-
     # ── PUT — transactional replace of an association set ───────
 
     @router.put("/agents/{name}/versions/{version_id}/prompts")
@@ -246,15 +229,6 @@ def build_draft_edit_router(verity) -> APIRouter:
         except (ValueError, PsycopgError) as exc:
             raise _as_400(exc)
         await _ensure_draft_result(row, version_id, "prompt")
-        return {"deleted_id": row["id"]}
-
-    @router.delete("/pipelines/{name}/versions/{version_id}")
-    async def delete_pipeline_version(name: str, version_id: str) -> dict:
-        try:
-            row = await verity.registry.delete_draft_version("pipeline", version_id)
-        except (ValueError, PsycopgError) as exc:
-            raise _as_400(exc)
-        await _ensure_draft_result(row, version_id, "pipeline")
         return {"deleted_id": row["id"]}
 
     # ── POST .../clone — copy a version into a new draft ────────

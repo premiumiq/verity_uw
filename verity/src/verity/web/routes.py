@@ -154,16 +154,18 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
         )
         governance_stats = await verity.db.fetch_one("dashboard_governance_stats") or {}
 
-        # Pipeline-run total — scoped when apps are selected, otherwise
-        # just reuse the unscoped number already in governance_stats.
+        # Workflow-run total — distinct workflow_run_ids on the decision
+        # log. Scoped when apps are selected; otherwise reuse the unscoped
+        # number already in governance_stats. Renamed from "pipeline runs"
+        # now that workflow_run_id is caller-supplied (not Verity-owned).
         if selected_ids:
             pr_row = await verity.db.fetch_one(
-                "dashboard_pipeline_runs_scoped",
+                "dashboard_workflow_runs_scoped",
                 {"app_ids": [str(i) for i in selected_ids], "app_names": selected_names},
             ) or {}
-            total_pipeline_runs = pr_row.get("total_pipeline_runs") or 0
+            total_workflow_runs = pr_row.get("total_workflow_runs") or 0
         else:
-            total_pipeline_runs = governance_stats.get("total_pipeline_runs") or 0
+            total_workflow_runs = governance_stats.get("total_workflow_runs") or 0
 
         # ── Month-to-date cost + invocations (scoped to selected apps)
         # for the home page's "Usage & Spend" section. Same usage_totals
@@ -190,7 +192,7 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             active_page="home",
             counts=counts,
             governance_stats=governance_stats,
-            total_pipeline_runs=total_pipeline_runs,
+            total_workflow_runs=total_workflow_runs,
             applications=applications,
             selected_app_names=selected_names,
             mtd=mtd,
@@ -653,34 +655,6 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             quota_count=quota_count,
         )
 
-    # ── PIPELINES ─────────────────────────────────────────────
-
-    @router.get("/pipelines", response_class=HTMLResponse)
-    async def pipelines_list(request: Request):
-        await verity.ensure_connected()
-        pipelines = await verity.list_pipelines()
-        entity_apps = await _load_entity_apps()
-        return _render(templates, request, "pipelines.html",
-            active_page="pipelines",
-            pipelines=pipelines,
-            entity_apps=entity_apps,
-        )
-
-    @router.get("/pipelines/{pipeline_name}", response_class=HTMLResponse)
-    async def pipeline_detail(request: Request, pipeline_name: str):
-        """Show full detail for a pipeline: metadata + steps."""
-        await verity.ensure_connected()
-        pipeline = await verity.registry.get_pipeline_by_name(pipeline_name)
-        if not pipeline:
-            return HTMLResponse("<h1>Pipeline not found</h1>", status_code=404)
-        entity_apps = await _load_entity_apps()
-        apps = entity_apps.get(('pipeline', str(pipeline["id"])), '—')
-        return _render(templates, request, "pipeline_detail.html",
-            active_page="pipelines",
-            pipeline=pipeline,
-            entity_apps=apps,
-        )
-
     # ── APPLICATIONS ──────────────────────────────────────────
 
     @router.get("/applications", response_class=HTMLResponse)
@@ -1042,18 +1016,6 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             run=run,
             records=records,
             record_failures=record_failures,
-        )
-
-    # ── PIPELINE RUNS ───────────────────────────────────────────
-
-    @router.get("/pipeline-runs", response_class=HTMLResponse)
-    async def pipeline_runs_page(request: Request):
-        """Show all pipeline runs grouped by workflow_run_id."""
-        await verity.ensure_connected()
-        runs = await verity.db.fetch_all("list_pipeline_runs")
-        return _render(templates, request, "pipeline_runs.html",
-            active_page="pipeline_runs",
-            runs=runs,
         )
 
     # ── OVERRIDES ─────────────────────────────────────────────
