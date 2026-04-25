@@ -19,7 +19,9 @@ from __future__ import annotations
 from typing import Any, Optional
 from uuid import UUID
 
+from verity.contracts.envelope import ExecutionEnvelope
 from verity.db.connection import Database
+from verity.governance.envelope_builder import build_envelope
 from verity.models.run import (
     ExecutionRunCurrent,
     RunLifecycleEvent,
@@ -135,31 +137,66 @@ class RunsReader:
         )
         return [ExecutionRunCurrent(**r) for r in rows]
 
-    async def get_run_result(self, run_id: UUID) -> Optional[dict[str, Any]]:
-        """Return the decision_log row for a completed run, or None.
+    async def get_run_result(self, run_id: UUID) -> Optional[ExecutionEnvelope]:
+        """Build the canonical ExecutionEnvelope for a terminal run.
 
-        For a run whose execution_run_completion exists with a
-        decision_log_id, this fetches the full audit row and returns
-        it as the run's "result envelope." Callers that want the
-        canonical envelope shape (Phase G) will reshape this output;
-        for now the raw decision_log dict is what's available.
+        Combines the execution_run_current view row with the linked
+        agent_decision_log row (if any) into the envelope shape every
+        external consumer sees: REST `GET /runs/{id}/result`, the
+        Runs UI, SDK callers polling on `verity.get_run_result`.
 
         Returns None when:
           - the run doesn't exist
-          - the run hasn't reached a terminal state
-          - the run terminated without a decision_log_id (e.g. cancelled
-            before any engine work)
+          - the run hasn't reached a terminal state (callers should
+            check `current_status` first or call wait_for_run)
+
+        Runs that terminated without a decision_log_id (e.g. cancelled
+        before claim) still produce an envelope — the audit-row-derived
+        telemetry fields are simply absent.
         """
         run = await self.get_run(run_id)
         if not run:
             return None
-        decision_id = run.completion_decision_log_id or run.error_decision_log_id
-        if not decision_id:
+        # Gate envelope construction on terminal-only states. The
+        # builder enforces the same invariant; this just gives a clean
+        # None at the API surface for in-flight runs instead of an
+        # exception.
+        if run.current_status.value not in ("complete", "cancelled", "failed"):
             return None
-        return await self.db.fetch_one(
-            "get_decision_by_id",
-            {"decision_id": str(decision_id)},
+        decision: Optional[dict[str, Any]] = None
+        decision_id = (
+            run.completion_decision_log_id or run.error_decision_log_id
         )
+        if decision_id:
+            decision = await self.db.fetch_one(
+                "get_decision_by_id",
+                {"decision_id": str(decision_id)},
+            )
+        # version_label isn't on the execution_run_current view; one
+        # extra lookup keeps the envelope informative for human-facing
+        # UIs. Cheap — single-row query keyed on a UUID.
+        version_label = await self._lookup_version_label(
+            run.entity_kind, run.entity_version_id,
+        )
+        return build_envelope(run, decision, version_label=version_label)
+
+    async def _lookup_version_label(
+        self, entity_kind: str, entity_version_id: UUID,
+    ) -> Optional[str]:
+        """Resolve the SemVer label for a task or agent version. None on miss."""
+        if entity_kind == "task":
+            row = await self.db.fetch_one(
+                "get_task_version_by_id", {"version_id": str(entity_version_id)},
+            )
+        elif entity_kind == "agent":
+            row = await self.db.fetch_one(
+                "get_agent_version_by_id", {"version_id": str(entity_version_id)},
+            )
+        else:
+            return None
+        if not row:
+            return None
+        return row.get("version_label")
 
 
 def _str_or_none(value: Any) -> Optional[str]:

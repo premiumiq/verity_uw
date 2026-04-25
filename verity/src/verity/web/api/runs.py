@@ -24,6 +24,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
 
+from verity.contracts.envelope import ExecutionEnvelope
 from verity.contracts.run import RunSubmission, RunSubmissionResponse
 from verity.models.run import (
     ExecutionRunCurrent,
@@ -123,21 +124,19 @@ def build_runs_router(verity) -> APIRouter:
                 raise HTTPException(404, f"Run {run_id} not found")
         return events
 
-    @router.get("/runs/{run_id}/result")
-    async def get_run_result(run_id: UUID) -> dict:
-        """Decision-log row for a completed run.
+    @router.get("/runs/{run_id}/result", response_model=ExecutionEnvelope)
+    async def get_run_result(run_id: UUID) -> ExecutionEnvelope:
+        """Canonical ExecutionEnvelope for a terminal run.
 
-        Returns the full audit row (input, output, source_resolutions,
-        target_writes, telemetry) for runs that have a decision_log_id
-        on their completion or error row. 409 if the run hasn't reached
-        a terminal state, or terminated without producing a decision
-        (e.g. cancelled before claim)."""
+        Returns the unified envelope shape regardless of whether the
+        run was a task or an agent: identity (entity, run_id),
+        status-discriminated output/error, telemetry, provenance
+        (decision_log_id, execution_run_id, workflow_run_id,
+        execution_context_id). 409 if the run hasn't reached a
+        terminal state."""
         run = await verity.runs_reader.get_run(run_id)
         if not run:
             raise HTTPException(404, f"Run {run_id} not found")
-        # Two cases for "not yet terminal": current_status is in the
-        # in-flight set. Map them to 409 so callers can tell "not
-        # ready" from "not present."
         if run.current_status.value in (
             "submitted", "claimed", "heartbeat", "released",
         ):
@@ -145,13 +144,16 @@ def build_runs_router(verity) -> APIRouter:
                 409,
                 f"Run {run_id} is not terminal (status={run.current_status.value}).",
             )
-        result = await verity.runs_reader.get_run_result(run_id)
-        if not result:
+        envelope = await verity.runs_reader.get_run_result(run_id)
+        if not envelope:
+            # Terminal but builder returned None. Shouldn't happen given
+            # the gate above, but surfacing 500 rather than silent None
+            # makes the failure mode clear.
             raise HTTPException(
-                409,
-                f"Run {run_id} terminated without a decision_log_id.",
+                500,
+                f"Run {run_id} is terminal but envelope construction failed.",
             )
-        return result
+        return envelope
 
     @router.post("/runs/{run_id}/cancel")
     async def cancel_run(run_id: UUID) -> dict:

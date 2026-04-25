@@ -460,12 +460,12 @@ class Verity:
         status, limit, offset)."""
         return await self.runs_reader.list_runs(**filters)
 
-    async def get_run_result(self, run_id: UUID) -> Optional[dict[str, Any]]:
-        """Decision-log row for a completed run. Returns None if the
-        run hasn't reached a terminal state or has no decision_log_id.
+    async def get_run_result(self, run_id: UUID):
+        """Canonical ExecutionEnvelope for a completed run.
 
-        Phase G will reshape this into the canonical envelope; for now
-        the raw decision_log row is what's available.
+        Returns None if the run hasn't reached a terminal state.
+        Otherwise returns the unified envelope (status-discriminated
+        output/error, telemetry, provenance, identity).
         """
         return await self.runs_reader.get_run_result(run_id)
 
