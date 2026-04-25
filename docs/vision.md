@@ -115,9 +115,9 @@ It is not an AI application. It is the governance infrastructure that AI applica
 
 ---
 
-## Governance, Runtime, and Agents
+## Governance, Runtime, Agents, and Studio
 
-Internally, Verity is organized into three planes. Two are implemented today. The third is a roadmap extension that builds on the first two.
+Internally, Verity is organized into four planes. Two are implemented today. Two are roadmap extensions that build on the first two.
 
 ### 1. Verity Governance (shipped)
 
@@ -146,6 +146,21 @@ Governance-plane agents that automate three capabilities that today require a hu
 - **Validation with HITL gates.** Run validation suites against candidate versions, route results to the designated SME for review, and only advance the version through `staging -> shadow -> challenger -> champion` after each HITL gate is signed off.
 
 Verity Agents will themselves be Verity-governed agents - registered, versioned, validated, decision-logged. The governance system governing itself. The scaffolding they require (incidents, validation runs, HITL overrides, the 7-state lifecycle, the clone-and-edit workflow) is already in place.
+
+### 4. Verity Studio (future, not yet designed)
+
+A UI-driven authoring surface for non-developer users. Today, registering an Agent or Task, wiring its source bindings, building test cases, uploading ground-truth data, and driving the lifecycle all require Python scripts (the canonical pattern lives in `uw_demo/app/setup/`). The people accountable for the resulting AI behavior — underwriters, compliance officers, governance reviewers, SMEs — cannot author or modify the assets directly.
+
+Studio addresses that gap with four capability areas, each a UI over the existing REST API:
+
+- **Compose AI.** Visual authoring for Agents, Tasks, Prompts, Inference Configs, Tools, Data Connectors, MCP Servers. Reference-grammar autocomplete for source bindings (`input.*`, `const:*`, `fetch:C/M(input.X)`); write-target editor with payload-field assistance; tool authorization picker with `data_classification_max` filtering; sub-agent delegation graph.
+- **Lifecycle Management.** Promotion workflow with evidence checklists per gate; HITL approval routing using the existing `approval_record` flow; clone-and-edit authoring with composition diff; rollback with diff against prior champion.
+- **Ground Truth Management.** Dataset upload (CSV / JSON / Vault link); annotator assignment + IAA dashboard; authoritative-label resolution UI for multi-annotator → gold; coverage and quality reporting.
+- **Test Management.** Suite builder with case templates per `capability_type`; expected-output editor (JSON Schema-aware); mock fixture builder for `tool` / `source` / `target` / `step`; run-test-suite + per-case drill-through.
+
+Studio is a thick frontend over the existing `/api/v1/*` API — no new backend capabilities required initially. Everything Studio writes goes through the same governance writes used by the SDK, so audit, lifecycle, and validation gates apply uniformly to UI-driven and SDK-driven changes. Authentication ties to the OIDC layer in [enhancements/rest-api-auth.md](enhancements/rest-api-auth.md); without per-user identity Studio is unusable.
+
+Studio is what makes Verity usable beyond the engineering team. Without it, Verity is a metamodel + governance backend that requires a developer to operate. With it, Verity becomes a governance platform the people accountable for AI behavior can actually use. Design isn't started — see [enhancements/verity-studio.md](enhancements/verity-studio.md) for scope and open questions.
 
 ### Deployment Topologies
 

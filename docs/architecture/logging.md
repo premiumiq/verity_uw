@@ -273,13 +273,3 @@ ERROR  Storage read failed               | document_id, error (exc_info=True)
 | `docker-compose.yml` | Add log rotation limits, log volume, LOG_LEVEL env vars |
 | `verity/pyproject.toml` | Add `python-json-logger>=3.0` dependency |
 | `requirements.txt` | Add `python-json-logger>=3.0` dependency |
-
-### Implementation phases
-
-**Phase 1 — Foundation**: Create logging module, NullHandler, setup_logging(), CorrelationMiddleware, Docker log limits. All three services get configured logging. (~1 hour)
-
-**Phase 2 — Critical instrumentation**: Instrument execution.py and pipeline_executor.py. Fix all silent exception swallows. These two files handle every AI call and every pipeline step. (~1 hour)
-
-**Phase 3 — Comprehensive coverage**: Instrument routes, tools, EDMS, database layer. Add correlation ID propagation in inter-service httpx calls. (~1 hour)
-
-**Phase 4 — Polish**: Runtime log level endpoint, rotating file handler with volume mount, documentation. (~30 min)
