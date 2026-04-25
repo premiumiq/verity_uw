@@ -326,6 +326,10 @@ def create_uw_routes(verity) -> APIRouter:
             "next_action": next_action,
             "review_count": review_count,
             "run_id": run_id if run_id else None,
+            # execution_context_id scopes the "View in Verity" link to
+            # ALL decisions for the submission (every workflow_run_id),
+            # not just the most recent workflow's audit trail.
+            "execution_context_id": str(sub.get("execution_context_id")) if sub.get("execution_context_id") else None,
             "pipeline_mode": pipeline_mode,
         })
 
@@ -370,15 +374,24 @@ def create_uw_routes(verity) -> APIRouter:
 
     @router.get("/submissions/{submission_id}/tab/audit-trail", response_class=HTMLResponse)
     async def tab_audit_trail(request: Request, submission_id: str):
+        """Submission-scoped audit trail.
+
+        Queries by `execution_context_id` so every workflow invocation
+        for the submission shows up — doc-processing classifies/extracts
+        AND risk-assessment triage/appetite, across however many
+        workflow runs the submission has gone through. The previous
+        version picked one workflow_run_id and silently hid every
+        decision from the OTHER workflow.
+        """
         await verity.ensure_connected()
         sub = await _get_submission(submission_id)
         trail = []
-        run_id = sub.get("last_risk_workflow_run_id") or sub.get("last_doc_workflow_run_id")
-        if run_id:
-            trail = await verity.get_audit_trail_by_run(str(run_id))
+        ctx_id = sub.get("execution_context_id")
+        if ctx_id:
+            trail = await verity.get_audit_trail(str(ctx_id))
         return templates.TemplateResponse(request, "partials/_tab_audit_trail.html", {
             "trail": trail,
-            "run_id": str(run_id) if run_id else None,
+            "execution_context_id": str(ctx_id) if ctx_id else None,
         })
 
     # ── PIPELINE 1: DOCUMENT PROCESSING ──────────────────────
@@ -688,44 +701,72 @@ async def _run_risk_assessment_internal(verity, submission_id: str, sub: dict, t
     triage_step = next((s for s in result.all_steps if s.step_name == "triage_submission"), None)
     appetite_step = next((s for s in result.all_steps if s.step_name == "assess_appetite"), None)
 
+    # The agents already write submission_assessment rows mid-loop via
+    # their `store_triage_result` / `update_appetite_status` tools. The
+    # block below is a post-process backstop that copies the agent's
+    # *structured* output into the same row when the agent emits one.
+    # Critically, when an agent returns unstructured text (e.g. when
+    # `enforce_output_schema` is off and the model wraps JSON in a
+    # markdown fence) the parsed `output` looks like
+    # `{"raw_output": "..."}` and `t.get("risk_score")` returns None
+    # for every flat column. Without the guard below this upsert
+    # *clobbers* the row the tool just wrote and nukes the flat
+    # columns the UI reads from.
     async with await _get_conn() as conn:
         async with conn.cursor() as cur:
             if (triage_step and triage_step.status == "complete"
                     and triage_step.execution_result and triage_step.execution_result.output):
                 t = triage_step.execution_result.output
-                await cur.execute(
-                    """INSERT INTO submission_assessment (
-                        submission_id, assessment_type, result,
-                        risk_score, routing, confidence, reasoning, workflow_run_id
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (submission_id, assessment_type) DO UPDATE SET
-                        result = EXCLUDED.result, risk_score = EXCLUDED.risk_score,
-                        routing = EXCLUDED.routing, confidence = EXCLUDED.confidence,
-                        reasoning = EXCLUDED.reasoning, workflow_run_id = EXCLUDED.workflow_run_id,
-                        created_at = NOW()
-                    """,
-                    (submission_id, "triage", json.dumps(t),
-                     t.get("risk_score"), t.get("routing"),
-                     t.get("confidence"), t.get("reasoning"), run_id),
-                )
+                if t.get("risk_score") is not None:
+                    await cur.execute(
+                        """INSERT INTO submission_assessment (
+                            submission_id, assessment_type, result,
+                            risk_score, routing, confidence, reasoning, workflow_run_id
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (submission_id, assessment_type) DO UPDATE SET
+                            result = EXCLUDED.result, risk_score = EXCLUDED.risk_score,
+                            routing = EXCLUDED.routing, confidence = EXCLUDED.confidence,
+                            reasoning = EXCLUDED.reasoning, workflow_run_id = EXCLUDED.workflow_run_id,
+                            created_at = NOW()
+                        """,
+                        (submission_id, "triage", json.dumps(t),
+                         t.get("risk_score"), t.get("routing"),
+                         t.get("confidence"), t.get("reasoning"), run_id),
+                    )
+                else:
+                    # Agent returned unstructured text — leave the
+                    # tool-stored row alone but at least record the
+                    # workflow_run_id so audit links work.
+                    await cur.execute(
+                        "UPDATE submission_assessment SET workflow_run_id = %s "
+                        "WHERE submission_id = %s AND assessment_type = 'triage'",
+                        (run_id, submission_id),
+                    )
 
             if (appetite_step and appetite_step.status == "complete"
                     and appetite_step.execution_result and appetite_step.execution_result.output):
                 a = appetite_step.execution_result.output
-                await cur.execute(
-                    """INSERT INTO submission_assessment (
-                        submission_id, assessment_type, result,
-                        determination, confidence, reasoning, workflow_run_id
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (submission_id, assessment_type) DO UPDATE SET
-                        result = EXCLUDED.result, determination = EXCLUDED.determination,
-                        confidence = EXCLUDED.confidence, reasoning = EXCLUDED.reasoning,
-                        workflow_run_id = EXCLUDED.workflow_run_id, created_at = NOW()
-                    """,
-                    (submission_id, "appetite", json.dumps(a),
-                     a.get("determination"), a.get("confidence"),
-                     a.get("reasoning"), run_id),
-                )
+                if a.get("determination") is not None:
+                    await cur.execute(
+                        """INSERT INTO submission_assessment (
+                            submission_id, assessment_type, result,
+                            determination, confidence, reasoning, workflow_run_id
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (submission_id, assessment_type) DO UPDATE SET
+                            result = EXCLUDED.result, determination = EXCLUDED.determination,
+                            confidence = EXCLUDED.confidence, reasoning = EXCLUDED.reasoning,
+                            workflow_run_id = EXCLUDED.workflow_run_id, created_at = NOW()
+                        """,
+                        (submission_id, "appetite", json.dumps(a),
+                         a.get("determination"), a.get("confidence"),
+                         a.get("reasoning"), run_id),
+                    )
+                else:
+                    await cur.execute(
+                        "UPDATE submission_assessment SET workflow_run_id = %s "
+                        "WHERE submission_id = %s AND assessment_type = 'appetite'",
+                        (run_id, submission_id),
+                    )
         await conn.commit()
 
     # Set final submission status based on what completed

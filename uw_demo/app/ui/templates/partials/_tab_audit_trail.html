@@ -30,9 +30,9 @@
 </div>
 {% endfor %}
 
-{% if run_id %}
+{% if execution_context_id %}
 <div class="verity-section">
-    <a href="http://localhost:8000/admin/audit-trail/run/{{ run_id }}"
+    <a href="http://localhost:8000/admin/audit-trail/context/{{ execution_context_id }}"
        class="verity-btn verity-btn-secondary" target="_blank">
         View Full Audit Trail in Verity ↗
     </a>
