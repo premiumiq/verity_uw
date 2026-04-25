@@ -36,10 +36,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from uw_demo.app.config import settings
-from uw_demo.app.pipeline import (
-    get_fixtures_doc_processing,
-    get_fixtures_risk_assessment,
-)
+from uw_demo.app.workflows import run_doc_processing, run_risk_assessment
 
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -460,22 +457,15 @@ def create_uw_routes(verity) -> APIRouter:
 
         try:
             use_mock = await _use_mock()
-            if use_mock:
-                fixtures = get_fixtures_doc_processing(submission_id)
-                result = await verity.execute_pipeline(
-                    pipeline_name="uw_document_processing",
-                    context=pipeline_context,
-                    fixtures=fixtures,
-                    execution_context_id=exec_ctx_id,
-                )
-            else:
-                result = await verity.execute_pipeline(
-                    pipeline_name="uw_document_processing",
-                    context=pipeline_context,
-                    execution_context_id=exec_ctx_id,
-                )
+            result = await run_doc_processing(
+                verity,
+                submission_id=submission_id,
+                pipeline_context=pipeline_context,
+                execution_context_id=exec_ctx_id,
+                use_mock=use_mock,
+            )
         except Exception as e:
-            logger.error(f"Pipeline 1 execution failed for {submission_id}: {e}")
+            logger.error(f"Doc-processing workflow failed for {submission_id}: {e}")
             await _update_workflow_step(submission_id, "document_processing", "failed",
                                          completed_by=f"error: {str(e)[:200]}")
             return RedirectResponse(url=f"/submissions/{submission_id}", status_code=303)
@@ -632,25 +622,18 @@ async def _run_risk_assessment_internal(verity, submission_id: str, sub: dict, t
         "named_insured": sub["named_insured"],
     }
 
-    # Execute pipeline
+    # Execute workflow
     try:
         use_mock = await _use_mock()
-        if use_mock:
-            fixtures = get_fixtures_risk_assessment(submission_id)
-            result = await verity.execute_pipeline(
-                pipeline_name="uw_risk_assessment",
-                context=pipeline_context,
-                fixtures=fixtures,
-                execution_context_id=exec_ctx_id,
-            )
-        else:
-            result = await verity.execute_pipeline(
-                pipeline_name="uw_risk_assessment",
-                context=pipeline_context,
-                execution_context_id=exec_ctx_id,
-            )
+        result = await run_risk_assessment(
+            verity,
+            submission_id=submission_id,
+            pipeline_context=pipeline_context,
+            execution_context_id=exec_ctx_id,
+            use_mock=use_mock,
+        )
     except Exception as e:
-        logger.error(f"Pipeline 2 execution failed for {submission_id}: {e}")
+        logger.error(f"Risk-assessment workflow failed for {submission_id}: {e}")
         await _update_workflow_step(submission_id, "triage", "failed",
                                      completed_by=f"error: {str(e)[:200]}")
         await _update_submission_status(submission_id, "approved")

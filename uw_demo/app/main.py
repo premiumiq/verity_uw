@@ -38,9 +38,11 @@ from verity import Verity
 
 # ── VERITY SDK INSTANCE ───────────────────────────────────────
 # This is a library import, not an HTTP client. The UW app calls
-# verity.execute_pipeline(), verity.get_audit_trail(), etc. as
-# direct Python function calls. Both this app and Verity's own
-# server share the same verity_db database.
+# verity.execution.run_task(), verity.execution.run_agent(),
+# verity.get_audit_trail(), etc. as direct Python function calls.
+# Multi-step workflows are orchestrated in uw_demo/app/workflows.py
+# now that pipelines are descoped from Verity. Both this app and
+# Verity's own server share the same verity_db database.
 verity = Verity(
     database_url=settings.VERITY_DB_URL,
     anthropic_api_key=settings.ANTHROPIC_API_KEY,
