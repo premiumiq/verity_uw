@@ -6,7 +6,7 @@ This script populates the Verity database with demo-ready data:
 - 2 agents (triage, appetite) with 2 versions each
 - 2 tasks (classifier, extractor) with 2 versions each
 - 8 prompts with versioned content
-- 1 pipeline with 4 steps
+- 2 multi-step workflows (orchestrated in uw_demo/app/workflows.py, not registered as Verity entities)
 - Test suites, approval records, model cards, validation runs
 - Pre-seeded decision logs and overrides for UI browsing
 
@@ -118,13 +118,12 @@ async def main():
         print("Step 7b: Registering delegation authorizations...")
         await seed_delegations(verity, agent_versions)
 
-        # ── STEP 8: Pipeline ──────────────────────────────────
-        print("Step 8: Registering pipeline...")
-        pipeline = await seed_pipeline(verity)
-
-        # ── STEP 8b: Application Registration ─────────────────
-        print("Step 8b: Registering application and mapping entities...")
-        await seed_application(verity, agents, tasks, tools, prompts, pipeline)
+        # ── STEP 8: Application Registration ─────────────────
+        # Multi-step workflows are orchestrated in
+        # uw_demo/app/workflows.py (descoped from Verity), so there's
+        # no pipeline to register at the governance plane.
+        print("Step 8: Registering application and mapping entities...")
+        await seed_application(verity, agents, tasks, tools, prompts)
 
         # ── STEP 9-10: Test Suites + Cases ────────────────────
         print("Step 9-10: Registering test suites and cases...")
@@ -1278,85 +1277,16 @@ async def seed_delegations(verity: Verity, agent_versions: dict) -> None:
 # STEP 8: PIPELINE
 # ══════════════════════════════════════════════════════════════
 
-async def seed_pipeline(verity: Verity) -> dict:
-    """Register two UW pipelines: document processing + risk assessment.
-
-    Pipeline 1 (uw_document_processing): classify → extract
-        Processes documents from EDMS. Results written to uw_db.
-        May trigger HITL review if extraction flags exist.
-
-    Pipeline 2 (uw_risk_assessment): triage → appetite
-        Uses finalized fields from uw_db (post-HITL).
-        Called by UW app after extraction is approved.
-    """
-    pipelines = {}
-
-    # ── Pipeline 1: Document Processing ──────────────────────
-    r = await verity.registry.register_pipeline(
-        name="uw_document_processing",
-        display_name="Document Processing Pipeline",
-        description="Classifies submission documents and extracts structured fields from applications. Results are written to uw_db for human review before risk assessment.",
-    )
-    pipelines["doc_processing"] = {"id": r["id"]}
-
-    doc_steps = [
-        {"step_order": 1, "step_name": "classify_documents", "entity_type": "task",
-         "entity_name": "document_classifier", "depends_on": [], "parallel_group": None,
-         "error_policy": "fail_pipeline"},
-        {"step_order": 2, "step_name": "extract_fields", "entity_type": "task",
-         "entity_name": "field_extractor", "depends_on": ["classify_documents"], "parallel_group": None,
-         "error_policy": "fail_pipeline"},
-    ]
-
-    pv1 = await verity.registry.register_pipeline_version(
-        pipeline_id=r["id"], version_number=1, lifecycle_state="draft",
-        steps=doc_steps, change_summary="2-step document pipeline: classify → extract. PDF input for classifier, extracted text for extractor.",
-        developer_name="Dev Team",
-    )
-    await verity.promote(entity_type="pipeline", entity_version_id=pv1["id"],
-        target_state="candidate", approver_name="Dev Team", rationale="Pipeline development complete")
-    await verity.promote(entity_type="pipeline", entity_version_id=pv1["id"],
-        target_state="champion", approver_name="Sarah Chen, Chief Actuary",
-        rationale="Document processing pipeline validated")
-    print(f"  + pipeline: uw_document_processing (2 steps)")
-
-    # ── Pipeline 2: Risk Assessment ──────────────────────────
-    r = await verity.registry.register_pipeline(
-        name="uw_risk_assessment",
-        display_name="Risk Assessment Pipeline",
-        description="Performs risk triage and appetite assessment using finalized submission fields (post-HITL). Called after document processing and human review.",
-    )
-    pipelines["risk_assessment"] = {"id": r["id"]}
-
-    risk_steps = [
-        {"step_order": 1, "step_name": "triage_submission", "entity_type": "agent",
-         "entity_name": "triage_agent", "depends_on": [], "parallel_group": None,
-         "error_policy": "fail_pipeline"},
-        {"step_order": 2, "step_name": "assess_appetite", "entity_type": "agent",
-         "entity_name": "appetite_agent", "depends_on": ["triage_submission"], "parallel_group": None,
-         "error_policy": "continue_with_flag"},
-    ]
-
-    pv2 = await verity.registry.register_pipeline_version(
-        pipeline_id=r["id"], version_number=1, lifecycle_state="draft",
-        steps=risk_steps, change_summary="2-step risk pipeline: triage → appetite. Uses finalized fields from uw_db.",
-        developer_name="Dev Team",
-    )
-    await verity.promote(entity_type="pipeline", entity_version_id=pv2["id"],
-        target_state="candidate", approver_name="Dev Team", rationale="Pipeline development complete")
-    await verity.promote(entity_type="pipeline", entity_version_id=pv2["id"],
-        target_state="champion", approver_name="Sarah Chen, Chief Actuary",
-        rationale="Risk assessment pipeline validated")
-    print(f"  + pipeline: uw_risk_assessment (2 steps)")
-
-    return pipelines
-
-
 # ══════════════════════════════════════════════════════════════
-# STEP 8b: APPLICATION REGISTRATION
+# STEP 8: APPLICATION REGISTRATION
 # ══════════════════════════════════════════════════════════════
+# Multi-step workflows (doc-processing, risk-assessment) are
+# orchestrated in uw_demo/app/workflows.py now that pipelines are
+# descoped from Verity. No pipeline entity gets registered with the
+# governance plane; the app still maps its own agents / tasks /
+# prompts / tools.
 
-async def seed_application(verity, agents, tasks, tools, prompts, pipeline):
+async def seed_application(verity, agents, tasks, tools, prompts):
     """Register the UW Demo application and map all entities to it."""
 
     # Register the application
@@ -1382,11 +1312,6 @@ async def seed_application(verity, agents, tasks, tools, prompts, pipeline):
     for name, tool_id in tools.items():
         await verity.registry.map_entity_to_application(app_id, "tool", tool_id)
     print(f"  + mapped {len(tools)} tools")
-
-    # Map pipelines (now two: doc_processing + risk_assessment)
-    for pname, pdata in pipeline.items():
-        await verity.registry.map_entity_to_application(app_id, "pipeline", pdata["id"])
-    print(f"  + mapped {len(pipeline)} pipelines")
 
     # Create execution contexts for the 4 seeded submissions
     submission_ids = [
@@ -2156,49 +2081,22 @@ async def seed_decisions(verity, agent_versions, task_versions):
 
     # Fixed workflow_run_id per submission — predictable so the UW app
     # can reference them in SUBMISSIONS list for "View in Verity" links.
-    # These are Verity-owned IDs, not business keys.
-    PIPELINE_RUN_IDS = {
+    # These are caller-supplied correlation ids grouping the demo's
+    # classify+extract step decisions, not Verity-owned pipeline runs.
+    WORKFLOW_RUN_IDS = {
         "00000001-0001-0001-0001-000000000001": "aaaa0001-0001-0001-0001-000000000001",
         "00000002-0002-0002-0002-000000000002": "aaaa0002-0002-0002-0002-000000000002",
         "00000003-0003-0003-0003-000000000003": "aaaa0003-0003-0003-0003-000000000003",
         "00000004-0004-0004-0004-000000000004": "aaaa0004-0004-0004-0004-000000000004",
     }
-
-    # Seed pipeline_run rows first so the /admin/pipeline-runs page
-    # has something to show after a fresh reset. Each synthetic run
-    # is written in two steps — 'insert at start' then 'update to
-    # complete' — to mirror exactly what PipelineExecutor does in
-    # production, so the demo data is indistinguishable from a real
-    # run that's already finished.
     from datetime import datetime, timezone
     seed_started_at = datetime.now(timezone.utc)
-    synth_total_duration = sum(2000 + (i * 300) for i in range(len(step_configs)))
-    for sub in submissions:
-        workflow_run_id = PIPELINE_RUN_IDS[sub["id"]]
-        await verity.db.execute_returning("insert_pipeline_run_start", {
-            "id": workflow_run_id,
-            "pipeline_name": "uw_document_processing",
-            "application": "uw_demo",
-            "started_at": seed_started_at,
-            "step_count": len(step_configs),
-            "execution_context_id": None,
-        })
-        await verity.db.execute("update_pipeline_run_complete", {
-            "id": workflow_run_id,
-            "status": "complete",
-            "completed_at": seed_started_at,
-            "duration_ms": synth_total_duration,
-            "step_count": len(step_configs),
-            "failed_step_count": 0,
-            "skipped_step_count": 0,
-            "error_message": None,
-        })
 
     decision_count = 0
     override_decisions = []
 
     for sub in submissions:
-        workflow_run_id = PIPELINE_RUN_IDS[sub["id"]]
+        workflow_run_id = WORKFLOW_RUN_IDS[sub["id"]]
         for step_name, entity_type, version_id, output_key, config_name, model, temp, max_tok in step_configs:
             output = sub[output_key]
 
