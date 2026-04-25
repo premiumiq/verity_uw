@@ -781,6 +781,25 @@ async def seed_tasks(verity: Verity) -> dict:
             "known_limitations": "Requires text-based input (not scanned images); field accuracy varies by form layout; may miss fields in non-standard form versions.",
             "regulatory_notes": "Medium materiality. Extracted values feed into risk assessment; errors propagate downstream.",
         },
+        {
+            "name": "gl_field_extractor",
+            "display_name": "GL Application Field Extraction Task",
+            "description": "Extracts structured data fields from a General Liability commercial insurance application form (typically ACORD 125). Returns field values with per-field confidence scores. Does not extract from D&O forms, loss runs, or supplementals.",
+            "capability_type": "extraction",
+            "purpose": "Populate submission detail records from GL application text.",
+            "domain": "underwriting",
+            "materiality_tier": "medium",
+            "input_schema": {
+                "submission_id": "string",
+                "documents": "array",
+            },
+            "output_schema": {"fields": "object", "low_confidence_fields": "array", "unextractable_fields": "array", "extraction_complete": "boolean"},
+            "owner_name": "James Okafor",
+            "owner_email": "james.okafor@premiumiq.com",
+            "business_context": "Extracts key application fields from GL/ACORD-125 application forms to populate the submission record automatically.",
+            "known_limitations": "Requires text-based input (not scanned images); field accuracy varies by form layout; ACORD-125 schedule attachments may carry duplicates that are ignored in favour of the main coverage section.",
+            "regulatory_notes": "Medium materiality. Extracted values feed into risk assessment; errors propagate downstream.",
+        },
     ]
 
     result = {}
@@ -820,6 +839,12 @@ async def seed_prompts(verity: Verity, agents: dict, tasks: dict) -> dict:
         {"name": "field_extractor_input", "display_name": "Field Extractor Input Template",
          "description": "User message template for field extractor input",
          "primary_entity_type": "task", "primary_entity_id": tasks["field_extractor"]["id"]},
+        {"name": "gl_extractor_instruction", "display_name": "GL Field Extractor Instruction",
+         "description": "System instruction for GL/ACORD-125 application field extraction task",
+         "primary_entity_type": "task", "primary_entity_id": tasks["gl_field_extractor"]["id"]},
+        {"name": "gl_extractor_input", "display_name": "GL Field Extractor Input Template",
+         "description": "User message template for GL field extractor input",
+         "primary_entity_type": "task", "primary_entity_id": tasks["gl_field_extractor"]["id"]},
     ]
 
     result = {}
@@ -966,6 +991,20 @@ async def seed_task_versions(verity: Verity, tasks: dict, configs: dict) -> dict
     versions[("field_extractor", "1.0.0")] = r["id"]
     print(f"  + field_extractor v1.0.0 (draft)")
 
+    # ── GL field extractor v1.0.0
+    r = await verity.registry.register_task_version(
+        task_id=tasks["gl_field_extractor"]["id"],
+        major_version=1, minor_version=0, patch_version=0,
+        lifecycle_state="draft", channel="development",
+        inference_config_id=configs["extraction_deterministic"],
+        output_schema=json.dumps({"fields": "object", "low_confidence_fields": "array", "unextractable_fields": "array", "extraction_complete": "boolean"}),
+        mock_mode_enabled=False, decision_log_detail="standard",
+        developer_name="Dev Team", change_summary="Initial release with 20-field GL/ACORD-125 application extraction",
+        change_type="major_redesign",
+    )
+    versions[("gl_field_extractor", "1.0.0")] = r["id"]
+    print(f"  + gl_field_extractor v1.0.0 (draft)")
+
     return versions
 
 
@@ -1015,6 +1054,7 @@ async def seed_task_version_sources(verity: Verity, task_versions: dict) -> None
 
     extractor_versions = [
         ("field_extractor", "1.0.0"),
+        ("gl_field_extractor", "1.0.0"),
     ]
     for task_name, version in extractor_versions:
         tv_id = task_versions.get((task_name, version))
@@ -1039,65 +1079,89 @@ async def seed_write_targets(verity: Verity, task_versions: dict) -> None:
     after the LLM produces structured output, assembling the payload
     from these per-field references.
 
-    field_extractor v1.0.0 publishes its extracted fields back to EDMS
-    as a JSON-derivative child document of the source document. The
-    write fires in `auto` mode — runs in champion channel actually POST
-    to EDMS; staging/shadow runs log the intended write without firing.
+    Both `field_extractor` (D&O) and `gl_field_extractor` (GL) publish
+    their extracted fields back to EDMS as a JSON-derivative child
+    document of the source. They differ only by `transformation_type`
+    suffix (so the EDMS storage paths and lineage labels distinguish
+    D&O vs GL extractions). The write fires in `auto` mode — runs on
+    `production` channel actually POST to EDMS; other channels log the
+    intended write without firing.
     """
     edms = await verity.db.fetch_one("get_data_connector_by_name", {"name": "edms"})
     if not edms:
         print("  ! edms data connector not registered; skipping target declarations")
         return
-    edms_id = edms["id"]
+    edms_id = str(edms["id"])
 
-    fe_version_id = task_versions.get(("field_extractor", "1.0.0"))
-    if not fe_version_id:
-        print("  ! field_extractor v1.0.0 not registered; skipping write_target")
-        return
-
-    # Step 1: declare the write_target itself (one row).
-    target_row = await verity.db.execute_returning("insert_write_target", {
-        "owner_kind": "task_version",
-        "owner_id": str(fe_version_id),
-        "name": "extracted_fields_to_edms",
-        "connector_id": str(edms_id),
-        "write_method": "create_derived_json",
-        "container": None,
-        "required": False,
-        "execution_order": 1,
-        "description": "Persist the extracted fields as a JSON-derivative child document under the source EDMS document.",
-    })
-    target_id = target_row["id"]
-
-    # Step 2: declare each payload field. The connector reads:
-    #   destination_document_id  — parent document under which the JSON child is created
-    #   data                     — the extracted fields dict
-    #   transformation_type      — short label that becomes the storage suffix
-    #   transformation_method    — provenance for the lineage row
-    #   uploaded_by              — actor name for audit
-    payload_fields = [
-        ("destination_document_id", "input.documents[0].id",
-         True,  1, "EDMS document id of the parent (source) document — first ref in the input documents list."),
-        ("data",                    "output.fields",
-         True,  2, "Extracted-field dict, keyed by field name."),
-        ("transformation_type",     "const:field_extraction",
-         True,  3, "Storage suffix and lineage label."),
-        ("transformation_method",   "const:claude:field_extractor",
-         False, 4, "Provenance label written to the lineage row."),
-        ("uploaded_by",             "const:verity:field_extractor",
-         False, 5, "Actor recorded on the new child document."),
+    # One declaration per extractor — D&O and GL share the same shape
+    # apart from the transformation_type suffix and provenance method
+    # name on the EDMS lineage row.
+    extractor_targets = [
+        {
+            "task_name":             "field_extractor",
+            "version":               "1.0.0",
+            "transformation_type":   "field_extraction",
+            "transformation_method": "claude:field_extractor",
+            "uploaded_by":           "verity:field_extractor",
+        },
+        {
+            "task_name":             "gl_field_extractor",
+            "version":               "1.0.0",
+            "transformation_type":   "gl_field_extraction",
+            "transformation_method": "claude:gl_field_extractor",
+            "uploaded_by":           "verity:gl_field_extractor",
+        },
     ]
-    for name, ref, required, order, desc in payload_fields:
-        await verity.db.execute_returning("insert_target_payload_field", {
-            "write_target_id": str(target_id),
-            "payload_field": name,
-            "reference": ref,
-            "required": required,
-            "execution_order": order,
-            "description": desc,
-        })
 
-    print(f"  + write_target declared: field_extractor v1.0.0 → edms.create_derived_json ({len(payload_fields)} payload fields)")
+    for spec in extractor_targets:
+        tv_id = task_versions.get((spec["task_name"], spec["version"]))
+        if not tv_id:
+            print(f"  ! {spec['task_name']} v{spec['version']} not registered; skipping write_target")
+            continue
+
+        target_row = await verity.db.execute_returning("insert_write_target", {
+            "owner_kind": "task_version",
+            "owner_id": str(tv_id),
+            "name": "extracted_fields_to_edms",
+            "connector_id": edms_id,
+            "write_method": "create_derived_json",
+            "container": None,
+            "required": False,
+            "execution_order": 1,
+            "description": "Persist the extracted fields as a JSON-derivative child document under the source EDMS document.",
+        })
+        target_id = target_row["id"]
+
+        # Per-field payload references. transformation_type and
+        # transformation_method are constants per extractor — they
+        # ride in the wiring DSL as `const:<value>`.
+        payload_fields = [
+            ("destination_document_id", "input.documents[0].id",
+             True,  1, "EDMS document id of the parent (source) document — first ref in the input documents list."),
+            ("data",                    "output.fields",
+             True,  2, "Extracted-field dict, keyed by field name."),
+            ("transformation_type",     f"const:{spec['transformation_type']}",
+             True,  3, "Storage suffix and lineage label."),
+            ("transformation_method",   f"const:{spec['transformation_method']}",
+             False, 4, "Provenance label written to the lineage row."),
+            ("uploaded_by",             f"const:{spec['uploaded_by']}",
+             False, 5, "Actor recorded on the new child document."),
+        ]
+        for name, ref, required, order, desc in payload_fields:
+            await verity.db.execute_returning("insert_target_payload_field", {
+                "write_target_id": str(target_id),
+                "payload_field": name,
+                "reference": ref,
+                "required": required,
+                "execution_order": order,
+                "description": desc,
+            })
+
+        print(
+            f"  + write_target declared: {spec['task_name']} v{spec['version']} "
+            f"→ edms.create_derived_json ({len(payload_fields)} payload fields, "
+            f"transformation_type={spec['transformation_type']!r})"
+        )
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1257,6 +1321,25 @@ async def seed_prompt_versions(verity: Verity, prompts: dict) -> dict:
         ("field_extractor_input", 2),
     )
 
+    # ── GL field extractor prompts ─────────────────────────────
+    from uw_demo.app.prompts import (
+        GL_EXTRACTOR_SYSTEM_V1, GL_EXTRACTOR_INPUT_V1,
+    )
+    await _register_and_promote(
+        prompts["gl_extractor_instruction"], 1, 0, 0,
+        GL_EXTRACTOR_SYSTEM_V1,
+        "system", "behavioural",
+        "Production-grade prompt with 20-field GL/ACORD-125 schema, type definitions, confidence calibration, and extraction rules", "high", "James Okafor",
+        ("gl_extractor_instruction", 1),
+    )
+    await _register_and_promote(
+        prompts["gl_extractor_input"], 1, 0, 0,
+        GL_EXTRACTOR_INPUT_V1,
+        "user", "contextual",
+        "GL extraction input with submission context for EDMS-integrated pipeline", "medium", "James Okafor",
+        ("gl_extractor_input", 1),
+    )
+
     print(f"  + {len(pv)} prompt versions registered and promoted via lifecycle")
     return pv
 
@@ -1283,11 +1366,17 @@ async def seed_prompt_assignments(verity, agent_versions, task_versions, prompt_
         ("task", task_versions[("document_classifier", "1.0.0")],
          prompt_versions[("doc_classifier_input", 2)], "user", "contextual", 2, True),
 
-        # Field extractor v1.0.0 gets instruction v1 + input v2 (EDMS-integrated)
+        # Field extractor v1.0.0 (D&O) gets instruction v1 + input v2
         ("task", task_versions[("field_extractor", "1.0.0")],
          prompt_versions[("field_extractor_instruction", 1)], "system", "behavioural", 1, True),
         ("task", task_versions[("field_extractor", "1.0.0")],
          prompt_versions[("field_extractor_input", 2)], "user", "contextual", 2, True),
+
+        # GL field extractor v1.0.0 (GL/ACORD-125) gets instruction v1 + input v1
+        ("task", task_versions[("gl_field_extractor", "1.0.0")],
+         prompt_versions[("gl_extractor_instruction", 1)], "system", "behavioural", 1, True),
+        ("task", task_versions[("gl_field_extractor", "1.0.0")],
+         prompt_versions[("gl_extractor_input", 1)], "user", "contextual", 2, True),
     ]
 
     for entity_type, version_id, pv_id, api_role, gov_tier, order, required in assignments:
@@ -1601,6 +1690,7 @@ async def promote_to_champion(verity, agent_versions, task_versions, agents, tas
         ("agent", agent_versions[("appetite_agent", "1.0.0")], "appetite_agent"),
         ("task", task_versions[("document_classifier", "1.0.0")], "document_classifier"),
         ("task", task_versions[("field_extractor", "1.0.0")], "field_extractor"),
+        ("task", task_versions[("gl_field_extractor", "1.0.0")], "gl_field_extractor"),
     ]
 
     for entity_type, version_id, name in promotions:

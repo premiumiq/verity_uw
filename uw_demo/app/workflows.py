@@ -70,12 +70,21 @@ class WorkflowResult:
     """Aggregate result for one workflow invocation.
 
     `workflow_run_id` is the caller-supplied correlation id all step
-    decision-log rows carry. `status` rolls up per-step statuses:
-    'complete' if every step completed, 'failed' on first failure,
-    'partial' if some steps completed and some were skipped.
+    decision-log rows carry. `status` is one of:
+      - 'complete'                   — every step succeeded.
+      - 'partial'                    — some triggered extractions failed.
+      - 'no_extractable_documents'   — classifier ran on every doc but
+                                        none matched a registered
+                                        extractor (e.g. submission
+                                        contains only loss runs and
+                                        financials, no application
+                                        form). The UI must surface
+                                        this distinctly from 'complete'.
+      - 'failed'                     — a hard step failure stopped the
+                                        workflow.
     """
     workflow_run_id: UUID
-    status: str   # 'complete' | 'failed' | 'partial'
+    status: str
     all_steps: list[StepRun] = field(default_factory=list)
     error_message: Optional[str] = None
 
@@ -83,6 +92,17 @@ class WorkflowResult:
 # ══════════════════════════════════════════════════════════════
 # WORKFLOW 1 — DOCUMENT PROCESSING (classify → extract)
 # ══════════════════════════════════════════════════════════════
+
+
+# Map a classifier-returned document_type to the extractor task that
+# knows how to handle it. Document types not in this map (loss_run,
+# financial_statement, board_resolution, supplemental_*, other, etc.)
+# are intentionally skipped — they don't have a registered extractor.
+# Adding a new extractor is a two-line change here plus its task seed.
+_EXTRACTOR_FOR_DOC_TYPE: dict[str, str] = {
+    "do_application": "field_extractor",
+    "gl_application": "gl_field_extractor",
+}
 
 
 async def run_doc_processing(
@@ -97,17 +117,27 @@ async def run_doc_processing(
 
     Iterates `pipeline_context["documents"]` (the EDMS reference list).
     For every document:
-      1. classify_documents:<doc_id> — runs document_classifier with
+      1. classify_documents:<filename> — runs document_classifier with
          the single ref. Each call gets its own audit row.
-      2. extract_fields:<doc_id>     — runs field_extractor IFF the
-         classification says it's a D&O application. Each extract call
-         gets its own audit row and writes its own JSON-derivative
-         child to EDMS under that document.
+      2. extract_fields:<filename> — runs the extractor matching the
+         classification's document_type (do_application →
+         field_extractor; gl_application → gl_field_extractor; anything
+         else → skipped). Each extract call gets its own audit row and
+         writes its own JSON-derivative child to EDMS under that
+         document.
 
-    Workflow status rolls up: 'complete' if every classify succeeded
-    (and every triggered extract succeeded), 'failed' on the first
-    hard failure, 'partial' if some docs classified but their
-    follow-on extract failed without aborting the overall flow.
+    Workflow status rolls up:
+      - `complete`                — every classify succeeded AND every
+                                     triggered extract succeeded.
+      - `partial`                 — some extracts failed (others may
+                                     have succeeded; classifier finished).
+      - `no_extractable_documents` — every classify succeeded but no
+                                     document matched a registered
+                                     extractor. The submission has no
+                                     extracted fields, and the UI
+                                     should say so explicitly.
+      - `failed`                  — a classify hard-failed OR every
+                                     triggered extract failed.
     """
     workflow_run_id = uuid4()
     all_steps: list[StepRun] = []
@@ -124,6 +154,7 @@ async def run_doc_processing(
 
     extract_failures = 0
     extract_attempts = 0
+    classified_count = 0
 
     for doc in documents:
         doc_id = doc.get("id")
@@ -158,19 +189,23 @@ async def run_doc_processing(
                 error_message=classify.error_message,
             )
 
-        # Read the classification. The extractor only runs on docs
-        # classified as D&O applications — every other type is recorded
-        # in the audit but does not invoke the extractor.
+        classified_count += 1
+
+        # Look up the right extractor for this document_type. Anything
+        # not in _EXTRACTOR_FOR_DOC_TYPE is intentionally skipped —
+        # loss_run, financial_statement, board_resolution, etc. don't
+        # have a registered extractor and that's fine.
         classification = (
             classify.execution_result.output
             if classify.execution_result and classify.execution_result.output
             else {}
         )
         doc_type = classification.get("document_type")
-        if doc_type != "do_application":
+        extractor_name = _EXTRACTOR_FOR_DOC_TYPE.get(doc_type)
+        if not extractor_name:
             logger.info(
                 "doc_processing skip-extract submission=%s doc_id=%s "
-                "classified_as=%s",
+                "classified_as=%s reason=no_extractor_for_type",
                 submission_id, doc_id, doc_type,
             )
             continue
@@ -185,7 +220,7 @@ async def run_doc_processing(
         extract = await _run_step(
             verity,
             entity_kind="task",
-            entity_name="field_extractor",
+            entity_name=extractor_name,
             input_data=extract_input,
             step_name=f"extract_fields:{doc_label}",
             mock=mock,
@@ -196,28 +231,43 @@ async def run_doc_processing(
         if extract.status != "complete":
             extract_failures += 1
             logger.warning(
-                "doc_processing extract failed submission=%s doc_id=%s reason=%s",
-                submission_id, doc_id, extract.error_message,
+                "doc_processing extract failed submission=%s doc_id=%s "
+                "extractor=%s reason=%s",
+                submission_id, doc_id, extractor_name, extract.error_message,
             )
 
-    # Roll up status. Hard failure on classify already returned above;
-    # extract failures are recorded as 'partial' so the workflow does
-    # not throw away successful work.
-    if extract_failures and extract_failures == extract_attempts:
+    # Roll up status.
+    if extract_attempts == 0:
+        # Every classification ran (otherwise we would have returned
+        # 'failed' above) but no document matched a registered
+        # extractor. This is a real outcome the UI must surface — the
+        # submission has no extracted fields, and that's not a hidden
+        # success.
+        status = "no_extractable_documents"
+        error_message = (
+            f"{classified_count} document(s) classified, none matched a "
+            f"registered extractor. Supported types: "
+            f"{sorted(_EXTRACTOR_FOR_DOC_TYPE.keys())}."
+        )
+    elif extract_failures and extract_failures == extract_attempts:
         status = "failed"
+        error_message = (
+            f"All {extract_attempts} extractions failed."
+        )
     elif extract_failures:
         status = "partial"
+        error_message = (
+            f"{extract_failures} of {extract_attempts} extractions failed."
+        )
     else:
         status = "complete"
+        error_message = None
 
     return WorkflowResult(
         workflow_run_id=workflow_run_id,
         status=status,
         all_steps=all_steps,
-        error_message=(
-            f"{extract_failures} of {extract_attempts} extractions failed"
-            if extract_failures else None
-        ),
+        error_message=error_message,
     )
 
 

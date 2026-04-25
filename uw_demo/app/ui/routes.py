@@ -472,20 +472,48 @@ def create_uw_routes(verity) -> APIRouter:
                                              last_doc_workflow_run_id=run_id)
             return RedirectResponse(url=f"/submissions/{submission_id}", status_code=303)
 
-        # Pipeline succeeded — update workflow
+        # Surface the "classified but nothing was extractable" outcome
+        # honestly. Don't pretend the workflow completed — there are
+        # zero extracted fields and risk-assessment can't run.
+        if result.status == "no_extractable_documents":
+            logger.info(
+                "doc_processing produced no extractable documents for %s: %s",
+                submission_id, result.error_message,
+            )
+            await _update_workflow_step(
+                submission_id, "document_processing", "no_extractable_documents",
+                workflow_run_id=run_id,
+                completed_by=result.error_message or "no documents matched a registered extractor",
+            )
+            await _update_submission_status(
+                submission_id, "intake",
+                last_doc_workflow_run_id=run_id,
+                execution_context_id=str(exec_ctx_id) if exec_ctx_id else None,
+            )
+            return RedirectResponse(url=f"/submissions/{submission_id}", status_code=303)
+
+        # Pipeline succeeded (or partial — at least one extract worked) —
+        # update workflow.
         await _update_workflow_step(submission_id, "document_processing", "complete",
                                      workflow_run_id=run_id, completed_by="system")
         await _update_submission_status(submission_id, "documents_processed",
                                          last_doc_workflow_run_id=run_id,
                                          execution_context_id=str(exec_ctx_id) if exec_ctx_id else None)
 
-        # Write extraction results to uw_db from pipeline output.
-        # Read directly from result.all_steps (works for both mock and live mode).
+        # Write extraction results to uw_db from every per-doc extract
+        # step that succeeded. Per-doc workflow generates step_names
+        # like 'extract_fields:do_app_acme.pdf' — the original
+        # `step_name == "extract_fields"` lookup never matched anything,
+        # so this used to silently no-op for every submission.
         from uw_demo.app.tools.submission_tools import store_extraction_result
-        extract_step = next((s for s in result.all_steps if s.step_name == "extract_fields"), None)
-        if (extract_step and extract_step.status == "complete"
-                and extract_step.execution_result and extract_step.execution_result.output):
-            output = extract_step.execution_result.output
+        extract_steps = [
+            s for s in result.all_steps
+            if s.step_name and s.step_name.startswith("extract_fields:")
+            and s.status == "complete"
+            and s.execution_result and s.execution_result.output
+        ]
+        for s in extract_steps:
+            output = s.execution_result.output
             await store_extraction_result(
                 submission_id=submission_id,
                 fields=output.get("fields", {}),
