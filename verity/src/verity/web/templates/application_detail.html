@@ -61,7 +61,7 @@
 
     {% if entities %}
     <!-- Group entities by type -->
-    {% set entity_types = ['agent', 'task', 'tool', 'prompt', 'pipeline'] %}
+    {% set entity_types = ['agent', 'task', 'tool', 'prompt'] %}
     {% for etype in entity_types %}
         {% set typed_entities = entities|selectattr('entity_type', 'equalto', etype)|list %}
         {% if typed_entities %}

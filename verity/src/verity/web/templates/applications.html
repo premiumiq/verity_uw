@@ -31,7 +31,6 @@
             <th>Tasks</th>
             <th>Tools</th>
             <th>Prompts</th>
-            <th>Pipelines</th>
         </tr>
     </thead>
     <tbody>
@@ -49,7 +48,6 @@
             <td>{{ ents|selectattr('entity_type', 'equalto', 'task')|list|length }}</td>
             <td>{{ ents|selectattr('entity_type', 'equalto', 'tool')|list|length }}</td>
             <td>{{ ents|selectattr('entity_type', 'equalto', 'prompt')|list|length }}</td>
-            <td>{{ ents|selectattr('entity_type', 'equalto', 'pipeline')|list|length }}</td>
         </tr>
         {% endfor %}
     </tbody>

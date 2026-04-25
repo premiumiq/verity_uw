@@ -53,11 +53,10 @@ class CapabilityType(str, Enum):
 
 
 class EntityType(str, Enum):
-    """The five first-class entity types Verity governs."""
+    """The four first-class entity types Verity governs."""
     AGENT = "agent"
     TASK = "task"
     PROMPT = "prompt"
-    PIPELINE = "pipeline"
     TOOL = "tool"
 
 

@@ -49,7 +49,7 @@ CREATE TYPE data_classification AS ENUM (
 );
 
 CREATE TYPE entity_type AS ENUM (
-    'agent', 'task', 'prompt', 'pipeline', 'tool'
+    'agent', 'task', 'prompt', 'tool'
 );
 
 CREATE TYPE governance_tier AS ENUM (
@@ -764,38 +764,6 @@ CREATE INDEX idx_avd_child_name ON agent_version_delegation(child_agent_name);
 CREATE INDEX idx_avd_child_version ON agent_version_delegation(child_agent_version_id);
 
 
--- ── PIPELINES ────────────────────────────────────────────────
-
-CREATE TABLE pipeline (
-    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    name            VARCHAR(100) UNIQUE NOT NULL,
-    display_name    VARCHAR(200) NOT NULL,
-    description     TEXT,
-    current_champion_version_id UUID,
-    created_at      TIMESTAMP DEFAULT NOW()
-);
-
-CREATE TABLE pipeline_version (
-    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    pipeline_id     UUID NOT NULL REFERENCES pipeline(id),
-    version_number  INTEGER NOT NULL,
-    lifecycle_state lifecycle_state NOT NULL DEFAULT 'draft',
-
-    steps           JSONB NOT NULL,
-
-    change_summary  TEXT,
-    developer_name  VARCHAR(200),
-
-    cloned_from_version_id UUID REFERENCES pipeline_version(id),
-
-    valid_from      TIMESTAMP,
-    valid_to        TIMESTAMP,
-    created_at      TIMESTAMP DEFAULT NOW(),
-
-    CONSTRAINT uq_pipeline_version UNIQUE (pipeline_id, version_number)
-);
-
-
 -- ── APPLICATIONS ─────────────────────────────────────────────
 -- Each consuming business application registers itself with Verity.
 -- Enables multi-tenant governance: filter decisions, inventory, and
@@ -810,8 +778,8 @@ CREATE TABLE application (
 );
 
 -- ── APPLICATION ↔ ENTITY MAPPING ─────────────────────────────
--- Many-to-many: which agents, tasks, prompts, tools, pipelines
--- belong to which application. Entities can be shared across apps.
+-- Many-to-many: which agents, tasks, prompts, tools belong to which
+-- application. Entities can be shared across apps.
 
 CREATE TABLE application_entity (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -828,7 +796,7 @@ CREATE INDEX idx_ae_entity ON application_entity(entity_type, entity_id);
 
 -- ── EXECUTION CONTEXT ────────────────────────────────────────
 -- Business-level grouping registered by the consuming application.
--- A context can span multiple pipeline runs (e.g., initial run + re-run).
+-- A context can span multiple workflow runs (e.g., initial run + re-run).
 -- The context_ref is opaque to Verity — the business app defines it.
 -- Uniqueness is per application: (application_id, context_ref).
 
@@ -1884,37 +1852,6 @@ CREATE INDEX IF NOT EXISTS idx_gtrm_kind ON ground_truth_record_mock(record_id, 
 
 
 -- ============================================================
--- PIPELINE RUN — lifecycle tracking for one pipeline invocation
--- ============================================================
--- One row per PipelineExecutor.run_pipeline() call. Written with
--- status='running' at entry and updated at exit with the final
--- status + duration + step counters. Without this table, the
--- /admin/pipeline-runs page could only GUESS whether a run was
--- in flight — it always showed "complete" as soon as the first
--- step's decision row appeared, even when later steps were still
--- executing.
-
-CREATE TABLE IF NOT EXISTS pipeline_run (
-    id                  UUID PRIMARY KEY,
-    pipeline_name       VARCHAR(200) NOT NULL,
-    application         VARCHAR(100) DEFAULT 'default',
-    status              VARCHAR(20) NOT NULL DEFAULT 'running',  -- running/complete/partial/failed
-    started_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    completed_at        TIMESTAMPTZ,
-    duration_ms         INTEGER,
-    step_count          INTEGER,
-    failed_step_count   INTEGER DEFAULT 0,
-    skipped_step_count  INTEGER DEFAULT 0,
-    execution_context_id UUID REFERENCES execution_context(id),
-    error_message       TEXT,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_pr_started     ON pipeline_run(started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_pr_status      ON pipeline_run(status);
-CREATE INDEX IF NOT EXISTS idx_pr_application ON pipeline_run(application);
-
-
--- ============================================================
 -- QUOTAS — soft budget caps per scope
 -- ============================================================
 -- A quota pairs a scope (application / agent / task / model) with a
@@ -1929,7 +1866,7 @@ CREATE INDEX IF NOT EXISTS idx_pr_application ON pipeline_run(application);
 -- budget. Enforcement (hard_stop) is a column here for later, but
 -- no write-side code reads it yet. Intentionally self-contained:
 -- quota breaches do NOT create rows in the `incident` table because
--- the entity_type enum (agent/task/prompt/pipeline/tool) doesn't
+-- the entity_type enum (agent/task/prompt/tool) doesn't
 -- fit application/model scopes; the admin UI reads quota_check
 -- directly for active breach counts.
 
