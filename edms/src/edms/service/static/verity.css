@@ -1,15 +1,27 @@
 /* ============================================================
-   VERITY CSS — PremiumIQ Brand Theme
+   VERITY CSS — Verity Brand Theme
 
-   This file defines the color palette and component styles for
-   the Verity admin web UI. Colors match the PremiumIQ PowerPoint
-   corporate theme.
+   Shared styling for the Verity admin UI and the Vault document
+   service UI. Both surfaces use the same palette and the same
+   `verity-*` component classes so a user navigating between them
+   does not perceive two different products.
+
+   This file is a verbatim copy of
+     verity/src/verity/web/static/verity.css
+   plus a DaisyUI-theme-override block at the bottom.
+
+   File-copy is intentional and temporary: Vault and Verity admin
+   are separate FastAPI services. When a shared static-assets
+   package exists, this duplication goes away. Until then, when you
+   change the Verity admin file, copy it here too — or the two
+   services will drift visually.
 
    HOW TO USE:
    - Colors are defined as CSS variables (--verity-*) at the top
    - Component classes (verity-*) use these variables
    - Tailwind utility classes handle layout (flexbox, spacing, etc.)
-   - This file handles branding and component appearance
+   - DaisyUI components are themed to the same palette so they
+     compose without visual clash (see the override block below)
    ============================================================ */
 
 
@@ -155,13 +167,15 @@ a:hover {
 
 /* Navigation section in sidebar */
 .verity-sidebar-nav {
-    padding: 12px 0;
+    padding: 10px 0;
     flex: 1;
 }
 
-/* Section label (e.g., "Registry", "Governance") */
+/* Section label (e.g., "Registry", "Governance") — tighter vertical
+   padding so the three sections (Registry / Observability / Governance)
+   fit on a standard 768px-tall viewport without scrolling. */
 .verity-nav-section {
-    padding: 8px 16px 4px;
+    padding: 5px 16px 2px;
     font-size: 0.65rem;
     text-transform: uppercase;
     letter-spacing: 1.5px;
@@ -169,11 +183,11 @@ a:hover {
     font-weight: 600;
 }
 
-/* Individual nav link */
+/* Individual nav link — reduced vertical padding in same spirit. */
 .verity-nav-link {
     display: flex;
     align-items: center;
-    padding: 8px 16px;
+    padding: 5px 16px;
     color: var(--verity-text-sidebar);
     font-size: 0.85rem;
     text-decoration: none;
@@ -331,6 +345,15 @@ a:hover {
     cursor: pointer;
 }
 
+/* Wraps a table in a horizontally-scrollable container so dense
+   tables don't break narrow viewports. */
+.verity-table-wrap {
+    overflow-x: auto;
+    width: 100%;
+    border: 1px solid var(--verity-border-light);
+    border-radius: 6px;
+}
+
 
 /* ── BADGES ──────────────────────────────────────────────────
    Small status indicators. Uses RAG colors for lifecycle states
@@ -368,7 +391,107 @@ a:hover {
 /* Status badges */
 .verity-badge-complete { background: var(--verity-green-light); color: #3E6044; }
 .verity-badge-failed   { background: var(--verity-red-light);   color: #A23838; }
-.verity-badge-pending  { background: var(--verity-blue-light);      color: var(--verity-blue-dark); }
+.verity-badge-pending  { background: var(--verity-blue-light);  color: var(--verity-blue-dark); }
+
+/* Async-run lifecycle states surfaced by execution_run_current. */
+.verity-badge-submitted { background: var(--verity-blue-pale);  color: var(--verity-blue-deep); }
+.verity-badge-claimed   { background: var(--verity-blue-light); color: var(--verity-blue-dark); }
+.verity-badge-heartbeat { background: var(--verity-amber-light); color: #816014; }
+.verity-badge-released  { background: var(--verity-gray-light); color: var(--verity-text-light); }
+.verity-badge-cancelled { background: var(--verity-gray-pale);  color: var(--verity-text-light); border: 1px solid var(--verity-border); }
+
+
+/* ── INFO TAG CHIP ───────────────────────────────────────────
+   Lightweight, outline-only chip for INFORMATIONAL labels — file
+   type indicators (PDF / TXT / IMG), per-document tags rendered in
+   tables, etc. Distinct from .verity-badge which is heavy and
+   reserved for STATUS (lifecycle, run state, materiality). Use this
+   when you want to show "this is a label" without the visual weight
+   of a status pill.
+*/
+.verity-tag-chip {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 3px;
+    font-size: 0.68rem;
+    font-weight: 400;
+    color: var(--verity-text-light);
+    background: var(--verity-bg);
+    border: 1px solid var(--verity-border);
+    text-transform: none;
+    letter-spacing: 0;
+    line-height: 1.5;
+    white-space: nowrap;
+}
+
+/* Subtle key-prefix differentiator for tag chips — the bit before
+   the colon (e.g. "transformation:") fades a step further so the
+   value reads first. */
+.verity-tag-chip-key {
+    color: var(--verity-text-light);
+    opacity: 0.7;
+    font-weight: 500;
+}
+
+
+/* ── INTERACTIVE TAG TOGGLE ──────────────────────────────────
+   Clickable pill used for restricted-vocabulary tag selection on
+   forms (upload page, document detail). Replaces the awkward
+   `<select multiple>` "hold Ctrl/Cmd" pattern with intuitive
+   toggle-on/toggle-off pills. The hidden checkbox inside each
+   <label.verity-tag-toggle> carries the form value; the visual
+   state is driven by the `:has(input:checked)` selector so no
+   JavaScript is required to render the toggle. (A small click
+   handler is still wired in the templates to also update an
+   `.active` class for browsers that don't support :has().)
+*/
+.verity-tag-toggle {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 14px;
+    font-size: 0.78rem;
+    font-weight: 400;
+    color: var(--verity-text);
+    background: var(--verity-bg);
+    border: 1px solid var(--verity-border);
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.verity-tag-toggle:hover {
+    background: var(--verity-bg-hover);
+    border-color: var(--verity-blue);
+}
+
+/* Selected state — driven by :has(input:checked) (modern browsers)
+   AND a redundant `.active` class set by JS for older fallbacks. */
+.verity-tag-toggle:has(input:checked),
+.verity-tag-toggle.active {
+    background: var(--verity-blue-deep);
+    border-color: var(--verity-blue-deep);
+    color: #FFFFFF;
+}
+
+/* The actual checkbox lives inside the label but is hidden — the
+   pill itself is the affordance. The form's value comes from this
+   element exactly as it would from a regular checkbox group, so no
+   backend change is required to switch from <select multiple>. */
+.verity-tag-toggle input[type="checkbox"] {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+}
+
+/* Container row for a tag's set of toggle pills. */
+.verity-tag-toggle-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
 
 
 /* ── BUTTONS ───────────────────────────────────────────────── */
@@ -406,6 +529,17 @@ a:hover {
 }
 .verity-btn-secondary:hover {
     background: var(--verity-bg-hover);
+    text-decoration: none;
+}
+
+/* Danger button — red, used for destructive actions like delete */
+.verity-btn-danger {
+    background: var(--verity-red);
+    color: #FFFFFF;
+}
+.verity-btn-danger:hover {
+    background: #C45A1F;
+    color: #FFFFFF;
     text-decoration: none;
 }
 
@@ -468,12 +602,17 @@ a:hover {
     margin-top: 8px;
 }
 
-/* Page description paragraph shown above tables on registry pages */
+/* Boxed page intro shown above tables on every admin page. */
 .verity-page-description {
+    display: block;
+    background: var(--verity-bg);
+    border: 1px solid var(--verity-border);
+    border-radius: 6px;
+    padding: 14px 16px;
     font-size: 0.82rem;
     color: var(--verity-text-light);
     line-height: 1.5;
-    margin: 0 0 16px 0;
+    margin: 0 0 20px 0;
     max-width: 100%;
 }
 
@@ -515,6 +654,79 @@ a:hover {
     background: var(--verity-bg);
 }
 
+/* File input — visually consistent with other form controls. The
+   browser-native widget can't be fully restyled but the wrapper +
+   button-area approximations get close. */
+.verity-file-input {
+    padding: 6px 10px;
+    border: 1px dashed var(--verity-border);
+    border-radius: 4px;
+    background: var(--verity-gray-pale);
+    font-family: var(--verity-font);
+    font-size: 0.85rem;
+    color: var(--verity-text);
+    width: 100%;
+    cursor: pointer;
+}
+
+.verity-file-input::file-selector-button {
+    background: var(--verity-blue-dark);
+    color: #FFFFFF;
+    border: none;
+    padding: 4px 12px;
+    border-radius: 3px;
+    font-family: var(--verity-font);
+    font-size: 0.8rem;
+    font-weight: 500;
+    margin-right: 12px;
+    cursor: pointer;
+}
+
+.verity-file-input::file-selector-button:hover {
+    background: var(--verity-blue-deep);
+}
+
+
+/* ── ALERTS ──────────────────────────────────────────────────
+   Inline message blocks for error / warning / success / info
+   feedback. Use the bare .verity-alert plus a modifier.
+*/
+
+.verity-alert {
+    padding: 12px 16px;
+    border-radius: 4px;
+    border: 1px solid var(--verity-border);
+    font-size: 0.85rem;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.verity-alert-error {
+    background: var(--verity-red-light);
+    border-color: #E2A89E;
+    color: #A23838;
+}
+
+.verity-alert-warning {
+    background: var(--verity-amber-light);
+    border-color: #E0C994;
+    color: #816014;
+}
+
+.verity-alert-success {
+    background: var(--verity-green-light);
+    border-color: #B0CDAF;
+    color: #3E6044;
+}
+
+.verity-alert-info {
+    background: var(--verity-blue-pale);
+    border-color: var(--verity-blue-light);
+    color: var(--verity-blue-deep);
+}
+
 
 /* ── STAT GRID (dashboard) ─────────────────────────────────── */
 
@@ -542,12 +754,7 @@ a:hover {
 }
 
 
-/* ── WORKFLOW STEPPER ────────────────────────────────────────
-   Horizontal step indicator with numbered circles and connectors.
-   Used on submission detail pages to show workflow progression.
-
-   States: -complete (green check), -active (blue pulse), -pending (gray)
-*/
+/* ── WORKFLOW STEPPER ──────────────────────────────────────── */
 
 .verity-stepper {
     display: flex;
@@ -641,10 +848,7 @@ a:hover {
 }
 
 
-/* ── TABS ────────────────────────────────────────────────────
-   Horizontal tab navigation with underline indicator.
-   Works with HTMX for content swapping without page reload.
-*/
+/* ── TABS ──────────────────────────────────────────────────── */
 
 .verity-tabs {
     display: flex;
@@ -691,9 +895,7 @@ a:hover {
 }
 
 
-/* ── ACTION BAR ──────────────────────────────────────────────
-   Contextual action button strip. Shows the next workflow action.
-*/
+/* ── ACTION BAR ────────────────────────────────────────────── */
 
 .verity-action-bar {
     display: flex;
@@ -707,9 +909,7 @@ a:hover {
 }
 
 
-/* ── SPINNER ─────────────────────────────────────────────────
-   CSS-only loading spinner for async operations.
-*/
+/* ── SPINNER ───────────────────────────────────────────────── */
 
 .verity-spinner {
     display: inline-block;
@@ -727,9 +927,7 @@ a:hover {
 }
 
 
-/* ── KPI CARDS ───────────────────────────────────────────────
-   Summary metric cards for dashboards and list pages.
-*/
+/* ── KPI CARDS ─────────────────────────────────────────────── */
 
 .verity-kpi-grid {
     display: grid;
@@ -763,9 +961,7 @@ a:hover {
 }
 
 
-/* ── SUMMARY CARDS ROW ───────────────────────────────────────
-   Horizontal row of key metric cards (revenue, employees, etc.)
-*/
+/* ── SUMMARY CARDS ROW ─────────────────────────────────────── */
 
 .verity-summary-row {
     display: grid;
@@ -797,9 +993,7 @@ a:hover {
 }
 
 
-/* ── HTMX INDICATOR ──────────────────────────────────────────
-   Hidden by default, shown during HTMX requests.
-*/
+/* ── HTMX INDICATOR ────────────────────────────────────────── */
 
 .htmx-indicator {
     display: none;
@@ -808,4 +1002,87 @@ a:hover {
 .htmx-request .htmx-indicator,
 .htmx-request.htmx-indicator {
     display: inline-block;
+}
+
+
+/* ============================================================
+   DAISYUI THEME OVERRIDE
+   ============================================================
+   Vault loads DaisyUI v4 via CDN for richer interactive widgets
+   (drawer, modal, toast, dropdown, tabs) that the verity-* set
+   doesn't cover. By default DaisyUI ships its own blue/purple
+   theme — the override below remaps DaisyUI's runtime CSS
+   variables to the Verity palette so its components render in
+   the same colors as everything else.
+
+   DaisyUI v4 reads channel-tuple variables (HSL, no commas, no
+   hsl() wrapper). When DaisyUI computes a component color it
+   does e.g. `hsl(var(--p) / <alpha-value>)`, so as long as we
+   set the channels here every DaisyUI component inherits the
+   Verity look.
+
+   The HSL values below are conversions of the hex values in
+   the --verity-* palette above:
+     #FFFFFF → 0 0% 100%       (bg)
+     #EDEDED → 0 0% 93%        (bg-alt / border-light)
+     #DBDBDB → 0 0% 86%        (border)
+     #4D4D4D → 0 0% 30%        (text)
+     #3A3A3A → 0 0% 23%        (sidebar)
+     #2B4D8A → 218 52% 35%     (blue-deep — primary)
+     #405A8A → 217 37% 39%     (blue-dark)
+     #8FAADC → 218 51% 71%     (blue)
+     #8AB391 → 127 20% 62%     (green / success)
+     #E3B447 → 43 73% 58%      (amber / warning)
+     #ED7D31 → 20 85% 56%      (red / error)
+   ============================================================ */
+
+[data-theme],
+:root {
+    /* Primary — used by btn-primary, links, focus rings, etc. */
+    --p:  218 52% 35%;
+    --pf: 217 37% 30%;        /* primary focus (slightly darker) */
+    --pc: 0 0% 100%;          /* primary content (text on primary) */
+
+    /* Secondary — used for btn-secondary etc. */
+    --s:  217 37% 39%;
+    --sf: 218 52% 30%;
+    --sc: 0 0% 100%;
+
+    /* Accent — kept neutral; we don't use accent components */
+    --a:  218 51% 71%;
+    --af: 218 51% 60%;
+    --ac: 218 52% 20%;
+
+    /* Neutral — sidebar, dark surfaces */
+    --n:  0 0% 23%;
+    --nf: 0 0% 18%;
+    --nc: 0 0% 100%;
+
+    /* Base — page background and surfaces */
+    --b1: 0 0% 100%;          /* base 100 — main page bg */
+    --b2: 0 0% 96%;           /* base 200 — slightly off */
+    --b3: 0 0% 86%;           /* base 300 — borders */
+    --bc: 0 0% 30%;           /* base content — body text */
+
+    /* Status — info / success / warning / error */
+    --in:  218 51% 71%;
+    --inc: 218 52% 20%;
+    --su:  127 20% 62%;
+    --suc: 0 0% 100%;
+    --wa:  43 73% 58%;
+    --wac: 0 0% 20%;
+    --er:  20 85% 56%;
+    --erc: 0 0% 100%;
+
+    /* Component sizing tokens — keep modest */
+    --rounded-box: 6px;
+    --rounded-btn: 4px;
+    --rounded-badge: 10px;
+    --animation-btn: 0.15s;
+    --animation-input: 0.15s;
+    --btn-text-case: none;
+    --btn-focus-scale: 0.98;
+    --border-btn: 1px;
+    --tab-border: 2px;
+    --tab-radius: 4px;
 }

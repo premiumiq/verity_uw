@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 
-{% block title %}Folders - EDMS{% endblock %}
+{% block title %}Folders — Vault{% endblock %}
 
 {% block breadcrumbs %}
-    <span class="separator">></span>
+    <span class="separator">›</span>
     <span>Folders</span>
 {% endblock %}
 
@@ -11,17 +11,19 @@
 
 {% block content %}
 
-<p class="edms-page-description">
-    Virtual folders within a collection. Select a collection first, then manage its folder hierarchy. Folders are organizational only - they don't change MinIO storage structure.
+<p class="verity-page-description">
+    Virtual folders within a collection. Select a collection first, then
+    manage its folder hierarchy. Folders are organisational only — they
+    don't change MinIO storage structure.
 </p>
 
 <!-- Collection selector -->
-<div class="edms-card" style="margin-bottom: 16px; display: flex; gap: 12px; align-items: end;">
+<div class="verity-card" style="margin-bottom: 16px; display: flex; gap: 12px; align-items: end;">
     <div>
-        <label class="edms-label">Collection</label>
-        <select class="edms-input edms-select" id="collection-select" style="width: 300px;"
+        <label class="verity-label">Collection</label>
+        <select class="verity-select" id="collection-select" style="width: 320px;"
                 onchange="if(this.value) window.location='/ui/folders?collection_id='+this.value">
-            <option value="">Select a collection...</option>
+            <option value="">Select a collection…</option>
             {% for c in collections %}
             <option value="{{ c.id }}" {% if selected_collection and selected_collection.id == c.id %}selected{% endif %}>
                 {{ c.display_name }} ({{ c.storage_container }})
@@ -34,52 +36,59 @@
 {% if selected_collection %}
 
 <!-- Create folder form -->
-<div class="edms-card" style="margin-bottom: 16px;">
-    <h3 class="edms-section-title">Create Folder in {{ selected_collection.display_name }}</h3>
-    <form method="POST" action="/ui/folders" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: end;">
+<div class="verity-card" style="margin-bottom: 16px;">
+    <h3 class="verity-section-title">Create Folder in {{ selected_collection.display_name }}</h3>
+    <form method="POST" action="/ui/folders"
+          style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr) auto;
+                 gap: 12px; align-items: end;">
         <input type="hidden" name="collection_id" value="{{ selected_collection.id }}">
         <div>
-            <label class="edms-label">Name</label>
-            <input type="text" name="name" class="edms-input" style="width: 200px;" required placeholder="e.g., 2026 Q1">
+            <label class="verity-label">Name</label>
+            <input type="text" name="name" class="verity-input" required placeholder="e.g. 2026 Q1">
         </div>
         <div>
-            <label class="edms-label">Parent Folder</label>
-            <select name="parent_folder_id" class="edms-input edms-select" style="width: 220px;">
-                <option value="">Collection Root</option>
+            <label class="verity-label">Parent folder</label>
+            <select name="parent_folder_id" class="verity-select" style="width: 100%;">
+                <option value="">Collection root</option>
                 {% for f in flat_folders %}
                 <option value="{{ f.id }}">{{ f.indent }}{{ f.name }}</option>
                 {% endfor %}
             </select>
         </div>
         <div>
-            <label class="edms-label">Description</label>
-            <input type="text" name="description" class="edms-input" style="width: 200px;" placeholder="What this folder is for">
+            <label class="verity-label">Description</label>
+            <input type="text" name="description" class="verity-input" placeholder="What this folder is for">
         </div>
-        <button type="submit" class="edms-btn edms-btn-primary edms-btn-sm">Create</button>
+        <button type="submit" class="verity-btn verity-btn-primary">Create</button>
     </form>
 </div>
 
 <!-- Folder tree -->
 {% macro render_folder(folder, depth=0) %}
 <div style="margin-left: {{ depth * 24 }}px; margin-bottom: 4px;">
-    <div class="edms-card" style="padding: 8px 14px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 0;">
-        <div>
-            <span style="font-size: 0.9rem;">{% if folder.children %}&#128193;{% else %}&#128194;{% endif %}</span>
-            <span style="font-weight: 600; margin-left: 4px;">{{ folder.name }}</span>
-            <span style="font-size: 0.7rem; color: var(--edms-text-light); margin-left: 8px;">
+    <div class="verity-card" style="padding: 8px 14px; display: flex;
+                                     justify-content: space-between; align-items: center;">
+        <div style="min-width: 0;">
+            <span style="font-weight: 600;">
+                {% if folder.children %}📁{% else %}📂{% endif %}
+                {{ folder.name }}
+            </span>
+            <span class="verity-badge verity-badge-pending" style="margin-left: 8px;">
                 {{ folder.doc_count }} doc{{ 's' if folder.doc_count != 1 else '' }}
             </span>
             {% if folder.description %}
-            <span style="font-size: 0.72rem; color: var(--edms-text-light); margin-left: 8px;">- {{ folder.description }}</span>
+            <span style="font-size: 0.74rem; color: var(--verity-text-light); margin-left: 8px;">
+                — {{ folder.description }}
+            </span>
             {% endif %}
         </div>
-        <div style="display: flex; gap: 4px;">
-            <a href="/ui/?collection_id={{ selected_collection.id }}&folder_id={{ folder.id }}" class="edms-btn edms-btn-secondary edms-btn-sm">Browse</a>
-            <form method="POST" action="/ui/folders/{{ folder.id }}/delete"
-                  onsubmit="return confirm('Delete folder \'{{ folder.name }}\'? Documents will be unlinked.')"
-                  style="display: inline;">
-                <button type="submit" class="edms-btn edms-btn-danger edms-btn-sm">Delete</button>
-            </form>
+        <div style="display: flex; gap: 6px; flex-shrink: 0;">
+            <a href="/ui/?collection_id={{ selected_collection.id }}&folder_id={{ folder.id }}"
+               class="verity-btn verity-btn-secondary verity-btn-sm">Browse</a>
+            <button type="button" class="verity-btn verity-btn-danger verity-btn-sm"
+                    onclick="confirmDeleteFolder('{{ folder.id }}', {{ folder.name | tojson }}, {{ folder.doc_count }})">
+                Delete
+            </button>
         </div>
     </div>
 </div>
@@ -95,17 +104,52 @@
         {{ render_folder(folder) }}
     {% endfor %}
 {% else %}
-<div class="edms-empty">
-    <div style="font-size: 0.9rem;">No folders in this collection yet.</div>
+<div class="verity-empty">
+    <div style="font-size: 2rem; opacity: 0.3;">📁</div>
+    <div class="verity-empty-message">No folders in this collection yet.</div>
 </div>
 {% endif %}
 
 {% else %}
 <!-- No collection selected -->
-<div class="edms-empty">
-    <div style="font-size: 2rem; opacity: 0.3;">&#128193;</div>
-    <div style="font-size: 0.9rem; margin-top: 8px;">Select a collection above to manage its folders.</div>
+<div class="verity-empty">
+    <div style="font-size: 2rem; opacity: 0.3;">📁</div>
+    <div class="verity-empty-message">Select a collection above to manage its folders.</div>
 </div>
 {% endif %}
+
+
+{# ── DaisyUI MODAL: folder delete confirmation ────────────── #}
+<dialog id="delete-folder-modal" class="modal">
+    <div class="modal-box">
+        <h3 class="font-bold" style="font-size: 1rem;">Delete folder?</h3>
+        <p style="margin-top: 8px; font-size: 0.85rem; color: var(--verity-text-light);">
+            Delete folder <strong id="delete-folder-name"></strong>?
+            <span id="delete-folder-impact"></span>
+            Documents inside the folder will be moved back to the collection root
+            (they are <strong>not</strong> deleted).
+        </p>
+        <form id="delete-folder-form" method="POST">
+            <div class="modal-action" style="margin-top: 16px; display: flex; gap: 8px;">
+                <button type="button" class="verity-btn verity-btn-secondary"
+                        onclick="document.getElementById('delete-folder-modal').close()">Cancel</button>
+                <button type="submit" class="verity-btn verity-btn-danger">Delete</button>
+            </div>
+        </form>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+</dialog>
+
+<script>
+    function confirmDeleteFolder(folderId, name, docCount) {
+        document.getElementById('delete-folder-name').textContent = name;
+        document.getElementById('delete-folder-impact').textContent =
+            docCount > 0
+              ? ` This folder currently holds ${docCount} document${docCount === 1 ? '' : 's'}.`
+              : '';
+        document.getElementById('delete-folder-form').action = '/ui/folders/' + folderId + '/delete';
+        document.getElementById('delete-folder-modal').showModal();
+    }
+</script>
 
 {% endblock %}

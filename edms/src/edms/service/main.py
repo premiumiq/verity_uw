@@ -1,4 +1,4 @@
-"""EDMS Service — FastAPI application for document management.
+"""Vault Service — FastAPI application for document management.
 
 Runs as its own container on port 8002. Owns:
 - edms_db (PostgreSQL) for document metadata and lineage
@@ -6,6 +6,10 @@ Runs as its own container on port 8002. Owns:
 
 No other service connects to edms_db directly. All access is through
 these REST APIs.
+
+Naming note: the user-facing brand is "Vault". Internal code identity
+keeps "edms" / "EDMS" (module path, classes, env vars, DB name) — see
+plan in /home/avenugopal/.claude/plans/floating-sauteeing-whistle.md.
 
 Usage (Docker):
     uvicorn edms.service.main:app --host 0.0.0.0 --port 8002
@@ -23,9 +27,11 @@ Endpoints:
 
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 # Configure structured logging before anything else
 from edms.utils.logging import CorrelationMiddleware, setup_logging
@@ -81,14 +87,21 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="EDMS — Enterprise Document Management System",
-    description="Document storage, text extraction, and metadata management",
+    title="Vault — Document Service",
+    description="Document storage, text extraction, lineage, and metadata management",
     version="0.1.0",
     lifespan=lifespan,
 )
 
 # Correlation ID middleware
 app.add_middleware(CorrelationMiddleware)
+
+# Serve the shared verity.css stylesheet (and any other static assets)
+# at /ui/static/. Until a shared static-assets package exists, this is
+# a verbatim copy of the Verity admin file plus a DaisyUI palette
+# override block — see the comment at the top of static/verity.css.
+_STATIC_DIR = Path(__file__).parent / "static"
+app.mount("/ui/static", StaticFiles(directory=str(_STATIC_DIR)), name="vault-static")
 
 
 # ── HEALTH CHECK ──────────────────────────────────────────────

@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 
-{% block title %}Tag Definitions - EDMS{% endblock %}
+{% block title %}Tag Definitions — Vault{% endblock %}
 
 {% block breadcrumbs %}
-    <span class="separator">></span>
+    <span class="separator">›</span>
     <span>Tag Definitions</span>
 {% endblock %}
 
@@ -11,105 +11,158 @@
 
 {% block content %}
 
-<p class="edms-page-description">
-    Tag definitions control what tag keys are allowed on documents and how their values are managed. Restricted tags only accept predefined values (e.g., sensitivity levels). Freetext tags accept any string.
+<p class="verity-page-description">
+    Tag definitions control which tag keys are allowed on documents and
+    how their values are managed. <strong>Restricted</strong> tags only
+    accept predefined values (e.g. sensitivity levels).
+    <strong>Freetext</strong> tags accept any string. Required tags must
+    be supplied or upload fails.
 </p>
 
 <!-- Add new tag definition -->
-<div class="edms-card" style="margin-bottom: 20px;">
-    <h3 class="edms-section-title">Add Tag Definition</h3>
-    <form method="POST" action="/ui/tags" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: end;">
+<div class="verity-card" style="margin-bottom: 20px;">
+    <h3 class="verity-section-title">Add Tag Definition</h3>
+    <form method="POST" action="/ui/tags"
+          style="display: grid;
+                 grid-template-columns: minmax(0,1fr) minmax(0,1fr) minmax(0,1.4fr) auto minmax(0,1.6fr) auto;
+                 gap: 12px; align-items: end;">
         <div>
-            <label class="edms-label">Tag Key</label>
-            <input type="text" name="tag_key" class="edms-input" style="width: 160px;" required placeholder="e.g., sensitivity">
+            <label class="verity-label">Tag Key</label>
+            <input type="text" name="tag_key" class="verity-input" required placeholder="e.g. sensitivity">
         </div>
         <div>
-            <label class="edms-label">Display Name</label>
-            <input type="text" name="display_name" class="edms-input" style="width: 180px;" required placeholder="e.g., Sensitivity Level">
+            <label class="verity-label">Display Name</label>
+            <input type="text" name="display_name" class="verity-input" required placeholder="e.g. Sensitivity Level">
         </div>
         <div>
-            <label class="edms-label">Value Mode</label>
-            <select name="value_mode" class="edms-input edms-select">
+            <label class="verity-label">Value Mode</label>
+            <select name="value_mode" class="verity-select" style="width: 100%;">
                 <option value="restricted">Restricted (predefined values only)</option>
                 <option value="freetext">Freetext (any value)</option>
             </select>
         </div>
         <div>
-            <label class="edms-label">Required?</label>
-            <select name="is_required" class="edms-input edms-select" style="width: 80px;">
+            <label class="verity-label">Required?</label>
+            <select name="is_required" class="verity-select">
                 <option value="false">No</option>
                 <option value="true">Yes</option>
             </select>
         </div>
         <div>
-            <label class="edms-label">Description</label>
-            <input type="text" name="description" class="edms-input" style="width: 250px;" placeholder="What this tag means">
+            <label class="verity-label">Description</label>
+            <input type="text" name="description" class="verity-input" placeholder="What this tag means">
         </div>
-        <button type="submit" class="edms-btn edms-btn-primary edms-btn-sm">Add</button>
+        <button type="submit" class="verity-btn verity-btn-primary">Add</button>
     </form>
 </div>
 
 <!-- Existing tag definitions -->
 {% if tag_definitions %}
 {% for td in tag_definitions %}
-<div class="edms-card" style="margin-bottom: 12px;">
-    <div style="display: flex; justify-content: space-between; align-items: start;">
-        <div>
+<div class="verity-card" style="margin-bottom: 12px;">
+    <div style="display: flex; justify-content: space-between; align-items: start; gap: 12px;">
+        <div style="min-width: 0;">
             <span style="font-weight: 600; font-size: 0.9rem;">{{ td.display_name }}</span>
-            <span style="font-family: monospace; font-size: 0.75rem; color: var(--edms-text-light); margin-left: 8px;">{{ td.tag_key }}</span>
-            <span class="edms-badge edms-badge-{{ td.value_mode }}" style="margin-left: 8px;">{{ td.value_mode }}</span>
-            {% if td.is_required %}<span class="edms-badge edms-badge-required" style="margin-left: 4px;">required</span>{% endif %}
-            {% if not td.active %}<span class="edms-badge edms-badge-failed" style="margin-left: 4px;">inactive</span>{% endif %}
+            <span style="font-family: 'Fira Code', monospace; font-size: 0.74rem;
+                         color: var(--verity-text-light); margin-left: 8px;">{{ td.tag_key }}</span>
+            <span class="verity-badge {% if td.value_mode == 'restricted' %}verity-badge-candidate{% else %}verity-badge-task{% endif %}"
+                  style="margin-left: 8px;">{{ td.value_mode }}</span>
+            {% if td.is_required %}
+            <span class="verity-badge verity-badge-medium" style="margin-left: 4px;">required</span>
+            {% endif %}
+            {% if not td.active %}
+            <span class="verity-badge verity-badge-failed" style="margin-left: 4px;">inactive</span>
+            {% endif %}
             {% if td.description %}
-            <div style="font-size: 0.75rem; color: var(--edms-text-light); margin-top: 2px;">{{ td.description }}</div>
+            <div style="font-size: 0.78rem; color: var(--verity-text-light); margin-top: 4px;">
+                {{ td.description }}
+            </div>
             {% endif %}
         </div>
-        <form method="POST" action="/ui/tags/{{ td.tag_key }}/delete"
-              onsubmit="return confirm('Delete tag definition \'{{ td.tag_key }}\' and all its allowed values?')">
-            <button type="submit" class="edms-btn edms-btn-danger edms-btn-sm">Delete</button>
-        </form>
+        <button type="button" class="verity-btn verity-btn-danger verity-btn-sm"
+                onclick="confirmDeleteTag({{ td.tag_key | tojson }})">
+            Delete
+        </button>
     </div>
 
     {% if td.value_mode == 'restricted' %}
     <!-- Allowed values for this tag -->
-    <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--edms-border);">
-        <div style="font-size: 0.72rem; font-weight: 600; color: var(--edms-text-light); margin-bottom: 6px;">ALLOWED VALUES</div>
+    <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--verity-border-light);">
+        <div style="font-size: 0.72rem; font-weight: 600; color: var(--verity-text-light);
+                    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">
+            Allowed Values
+        </div>
 
         {% if td.allowed_values %}
-        <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">
+        <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
             {% for av in td.allowed_values %}
-            <div style="display: inline-flex; align-items: center; gap: 4px; background: #f0f4f8; padding: 3px 10px; border-radius: 12px; font-size: 0.75rem;">
+            <span class="verity-badge verity-badge-pending"
+                  style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
+                         text-transform: none; letter-spacing: 0;">
                 <span style="font-weight: 500;">{{ av.display_name }}</span>
-                <span style="color: var(--edms-text-light); font-family: monospace; font-size: 0.65rem;">({{ av.value }})</span>
-                <form method="POST" action="/ui/tags/{{ td.tag_key }}/values/{{ av.value }}/delete" style="display: inline; margin: 0;">
-                    <button type="submit" style="background: none; border: none; color: var(--edms-red); cursor: pointer; font-size: 0.8rem; padding: 0 2px;"
-                            onclick="event.stopPropagation();">&times;</button>
+                <span style="color: var(--verity-text-light); font-family: 'Fira Code', monospace;
+                             font-size: 0.65rem;">({{ av.value }})</span>
+                <form method="POST" action="/ui/tags/{{ td.tag_key }}/values/{{ av.value }}/delete"
+                      style="display: inline; margin: 0;">
+                    <button type="submit"
+                            style="background: none; border: none; cursor: pointer;
+                                   color: var(--verity-red); font-size: 0.85rem; padding: 0 2px;">×</button>
                 </form>
-            </div>
+            </span>
             {% endfor %}
         </div>
         {% endif %}
 
         <!-- Add new value -->
-        <form method="POST" action="/ui/tags/{{ td.tag_key }}/values" style="display: flex; gap: 8px; align-items: end;">
+        <form method="POST" action="/ui/tags/{{ td.tag_key }}/values"
+              style="display: flex; gap: 8px; align-items: end;">
             <div>
-                <label class="edms-label">Value</label>
-                <input type="text" name="value" class="edms-input" style="width: 120px;" required placeholder="machine_name">
+                <label class="verity-label">Value</label>
+                <input type="text" name="value" class="verity-input" style="width: 140px;" required placeholder="machine_name">
             </div>
             <div>
-                <label class="edms-label">Display Name</label>
-                <input type="text" name="display_name" class="edms-input" style="width: 150px;" required placeholder="Human Name">
+                <label class="verity-label">Display Name</label>
+                <input type="text" name="display_name" class="verity-input" style="width: 180px;" required placeholder="Human Name">
             </div>
-            <button type="submit" class="edms-btn edms-btn-secondary edms-btn-sm">Add Value</button>
+            <button type="submit" class="verity-btn verity-btn-secondary verity-btn-sm">Add Value</button>
         </form>
     </div>
     {% endif %}
 </div>
 {% endfor %}
 {% else %}
-<div class="edms-empty">
-    <div style="font-size: 0.9rem;">No tag definitions yet. Add one above to get started.</div>
+<div class="verity-empty">
+    <div style="font-size: 2rem; opacity: 0.3;">⌬</div>
+    <div class="verity-empty-message">No tag definitions yet. Add one above to get started.</div>
 </div>
 {% endif %}
+
+
+{# ── DaisyUI MODAL: tag-definition delete confirmation ────── #}
+<dialog id="delete-tag-modal" class="modal">
+    <div class="modal-box">
+        <h3 class="font-bold" style="font-size: 1rem;">Delete tag definition?</h3>
+        <p style="margin-top: 8px; font-size: 0.85rem; color: var(--verity-text-light);">
+            Permanently delete the <strong id="delete-tag-key"></strong> tag definition
+            and every allowed value it carries. This action cannot be undone.
+        </p>
+        <form id="delete-tag-form" method="POST">
+            <div class="modal-action" style="margin-top: 16px; display: flex; gap: 8px;">
+                <button type="button" class="verity-btn verity-btn-secondary"
+                        onclick="document.getElementById('delete-tag-modal').close()">Cancel</button>
+                <button type="submit" class="verity-btn verity-btn-danger">Delete</button>
+            </div>
+        </form>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+</dialog>
+
+<script>
+    function confirmDeleteTag(tagKey) {
+        document.getElementById('delete-tag-key').textContent = tagKey;
+        document.getElementById('delete-tag-form').action = '/ui/tags/' + tagKey + '/delete';
+        document.getElementById('delete-tag-modal').showModal();
+    }
+</script>
 
 {% endblock %}

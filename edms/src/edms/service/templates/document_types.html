@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 
-{% block title %}Document Types - EDMS{% endblock %}
+{% block title %}Document Types — Vault{% endblock %}
 
 {% block breadcrumbs %}
-    <span class="separator">></span>
+    <span class="separator">›</span>
     <span>Document Types</span>
 {% endblock %}
 
@@ -11,81 +11,91 @@
 
 {% block content %}
 
-<p class="edms-page-description">
-    Two-level document type hierarchy. Top-level types group related subtypes (e.g., "Application" groups "D&O Application" and "GL Application"). The classifier agent outputs subtype values. Documents reference the most specific type.
+<p class="verity-page-description">
+    Two-level document type hierarchy. Top-level types group related
+    subtypes (e.g. "Application" groups "D&O Application" and
+    "GL Application"). The classifier agent outputs subtype values;
+    documents reference the most specific type.
 </p>
 
 <!-- Add new type -->
-<div class="edms-card" style="margin-bottom: 20px;">
-    <h3 class="edms-section-title">Add Document Type</h3>
-    <form method="POST" action="/ui/document-types" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: end;">
+<div class="verity-card" style="margin-bottom: 20px;">
+    <h3 class="verity-section-title">Add Document Type</h3>
+    <form method="POST" action="/ui/document-types"
+          style="display: grid;
+                 grid-template-columns: minmax(0,1fr) minmax(0,1fr) minmax(0,1.4fr) minmax(0,1.4fr) auto;
+                 gap: 12px; align-items: end;">
         <div>
-            <label class="edms-label">Type Key</label>
-            <input type="text" name="type_key" class="edms-input" style="width: 180px;" required placeholder="e.g., do_application">
+            <label class="verity-label">Type Key</label>
+            <input type="text" name="type_key" class="verity-input" required placeholder="e.g. do_application">
         </div>
         <div>
-            <label class="edms-label">Display Name</label>
-            <input type="text" name="display_name" class="edms-input" style="width: 200px;" required placeholder="e.g., D&O Application">
+            <label class="verity-label">Display Name</label>
+            <input type="text" name="display_name" class="verity-input" required placeholder="e.g. D&O Application">
         </div>
         <div>
-            <label class="edms-label">Parent Type (blank = top-level)</label>
-            <select name="parent_type_id" class="edms-input edms-select" style="width: 200px;">
-                <option value="">Top Level</option>
+            <label class="verity-label">Parent type (blank = top-level)</label>
+            <select name="parent_type_id" class="verity-select" style="width: 100%;">
+                <option value="">Top level</option>
                 {% for t in top_level_types %}
                 <option value="{{ t.id }}">{{ t.display_name }} ({{ t.type_key }})</option>
                 {% endfor %}
             </select>
         </div>
         <div>
-            <label class="edms-label">Description</label>
-            <input type="text" name="description" class="edms-input" style="width: 250px;" placeholder="What this document type is">
+            <label class="verity-label">Description</label>
+            <input type="text" name="description" class="verity-input" placeholder="What this document type is">
         </div>
-        <button type="submit" class="edms-btn edms-btn-primary edms-btn-sm">Add</button>
+        <button type="submit" class="verity-btn verity-btn-primary">Add</button>
     </form>
 </div>
 
 <!-- Type hierarchy -->
 {% if type_hierarchy %}
 {% for top_type in type_hierarchy %}
-<div class="edms-card" style="margin-bottom: 12px;">
-    <div style="display: flex; justify-content: space-between; align-items: start;">
-        <div>
-            <span style="font-size: 1rem;">&#128203;</span>
-            <span style="font-weight: 600; font-size: 0.95rem; margin-left: 4px;">{{ top_type.display_name }}</span>
-            <span style="font-family: monospace; font-size: 0.72rem; color: var(--edms-text-light); margin-left: 8px;">{{ top_type.type_key }}</span>
+<div class="verity-card" style="margin-bottom: 12px;">
+    <div style="display: flex; justify-content: space-between; align-items: start; gap: 12px;">
+        <div style="min-width: 0;">
+            <span style="font-weight: 600; font-size: 0.95rem;">📋 {{ top_type.display_name }}</span>
+            <span style="font-family: 'Fira Code', monospace; font-size: 0.74rem;
+                         color: var(--verity-text-light); margin-left: 8px;">{{ top_type.type_key }}</span>
             {% if top_type.description %}
-            <div style="font-size: 0.75rem; color: var(--edms-text-light); margin-top: 2px; margin-left: 28px;">{{ top_type.description }}</div>
+            <div style="font-size: 0.78rem; color: var(--verity-text-light); margin-top: 4px;">
+                {{ top_type.description }}
+            </div>
             {% endif %}
         </div>
-        <form method="POST" action="/ui/document-types/{{ top_type.type_key }}/delete"
-              onsubmit="return confirm('Delete type \'{{ top_type.type_key }}\'? Subtypes will become top-level.')"
-              style="display: inline;">
-            <button type="submit" class="edms-btn edms-btn-danger edms-btn-sm">Delete</button>
-        </form>
+        <button type="button" class="verity-btn verity-btn-danger verity-btn-sm"
+                onclick="confirmDeleteType({{ top_type.type_key | tojson }}, true)">
+            Delete
+        </button>
     </div>
 
     {% if top_type.subtypes %}
-    <div style="margin-top: 10px; margin-left: 28px;">
+    <div style="margin-top: 10px;">
         {% for sub in top_type.subtypes %}
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-top: 1px solid var(--edms-border);">
-            <div>
-                <span style="color: var(--edms-text-light);">&#8627;</span>
-                <span style="font-weight: 500; margin-left: 4px;">{{ sub.display_name }}</span>
-                <span style="font-family: monospace; font-size: 0.7rem; color: var(--edms-text-light); margin-left: 8px;">{{ sub.type_key }}</span>
+        <div style="display: flex; justify-content: space-between; align-items: center;
+                    padding: 8px 0; border-top: 1px solid var(--verity-border-light);">
+            <div style="min-width: 0;">
+                <span style="color: var(--verity-text-light);">↳</span>
+                <span style="font-weight: 500;">{{ sub.display_name }}</span>
+                <span style="font-family: 'Fira Code', monospace; font-size: 0.72rem;
+                             color: var(--verity-text-light); margin-left: 8px;">{{ sub.type_key }}</span>
                 {% if sub.description %}
-                <span style="font-size: 0.72rem; color: var(--edms-text-light); margin-left: 8px;">- {{ sub.description }}</span>
+                <span style="font-size: 0.74rem; color: var(--verity-text-light); margin-left: 8px;">
+                    — {{ sub.description }}
+                </span>
                 {% endif %}
             </div>
-            <form method="POST" action="/ui/document-types/{{ sub.type_key }}/delete"
-                  onsubmit="return confirm('Delete subtype \'{{ sub.type_key }}\'?')"
-                  style="display: inline;">
-                <button type="submit" class="edms-btn edms-btn-danger edms-btn-sm">Delete</button>
-            </form>
+            <button type="button" class="verity-btn verity-btn-danger verity-btn-sm"
+                    onclick="confirmDeleteType({{ sub.type_key | tojson }}, false)">
+                Delete
+            </button>
         </div>
         {% endfor %}
     </div>
     {% else %}
-    <div style="margin-top: 8px; margin-left: 28px; font-size: 0.75rem; color: var(--edms-text-light);">
+    <div style="margin-top: 8px; font-size: 0.78rem; color: var(--verity-text-light);">
         No subtypes defined yet.
     </div>
     {% endif %}
@@ -106,27 +116,69 @@
         {% if standalone.append(dt) %}{% endif %}
     {% endif %}
 {% endfor %}
+
 {% if standalone %}
-<h3 class="edms-section-title" style="margin-top: 24px;">Standalone Types (no parent)</h3>
+<h3 class="verity-section-title" style="margin-top: 24px;">Standalone Types (no parent)</h3>
 {% for dt in standalone %}
-<div class="edms-card" style="margin-bottom: 8px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center;">
-    <div>
+<div class="verity-card" style="margin-bottom: 8px; padding: 10px 14px;
+                                 display: flex; justify-content: space-between;
+                                 align-items: center; gap: 12px;">
+    <div style="min-width: 0;">
         <span style="font-weight: 500;">{{ dt.display_name }}</span>
-        <span style="font-family: monospace; font-size: 0.72rem; color: var(--edms-text-light); margin-left: 8px;">{{ dt.type_key }}</span>
-        {% if dt.description %}<span style="font-size: 0.72rem; color: var(--edms-text-light); margin-left: 8px;">- {{ dt.description }}</span>{% endif %}
+        <span style="font-family: 'Fira Code', monospace; font-size: 0.72rem;
+                     color: var(--verity-text-light); margin-left: 8px;">{{ dt.type_key }}</span>
+        {% if dt.description %}
+        <span style="font-size: 0.72rem; color: var(--verity-text-light); margin-left: 8px;">
+            — {{ dt.description }}
+        </span>
+        {% endif %}
     </div>
-    <form method="POST" action="/ui/document-types/{{ dt.type_key }}/delete" style="display: inline;"
-          onsubmit="return confirm('Delete type \'{{ dt.type_key }}\'?')">
-        <button type="submit" class="edms-btn edms-btn-danger edms-btn-sm">Delete</button>
-    </form>
+    <button type="button" class="verity-btn verity-btn-danger verity-btn-sm"
+            onclick="confirmDeleteType({{ dt.type_key | tojson }}, false)">
+        Delete
+    </button>
 </div>
 {% endfor %}
 {% endif %}
 
 {% else %}
-<div class="edms-empty">
-    <div style="font-size: 0.9rem;">No document types defined yet. Add one above to get started.</div>
+<div class="verity-empty">
+    <div style="font-size: 2rem; opacity: 0.3;">📋</div>
+    <div class="verity-empty-message">
+        No document types defined yet. Add one above to get started.
+    </div>
 </div>
 {% endif %}
+
+
+{# ── DaisyUI MODAL: type delete confirmation ──────────────── #}
+<dialog id="delete-type-modal" class="modal">
+    <div class="modal-box">
+        <h3 class="font-bold" style="font-size: 1rem;">Delete document type?</h3>
+        <p style="margin-top: 8px; font-size: 0.85rem; color: var(--verity-text-light);">
+            Permanently delete the <strong id="delete-type-key"></strong> type.
+            <span id="delete-type-impact"></span>
+        </p>
+        <form id="delete-type-form" method="POST">
+            <div class="modal-action" style="margin-top: 16px; display: flex; gap: 8px;">
+                <button type="button" class="verity-btn verity-btn-secondary"
+                        onclick="document.getElementById('delete-type-modal').close()">Cancel</button>
+                <button type="submit" class="verity-btn verity-btn-danger">Delete</button>
+            </div>
+        </form>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+</dialog>
+
+<script>
+    function confirmDeleteType(typeKey, isTopLevel) {
+        document.getElementById('delete-type-key').textContent = typeKey;
+        document.getElementById('delete-type-impact').textContent = isTopLevel
+            ? ' Subtypes of this type become top-level on delete.'
+            : '';
+        document.getElementById('delete-type-form').action = '/ui/document-types/' + typeKey + '/delete';
+        document.getElementById('delete-type-modal').showModal();
+    }
+</script>
 
 {% endblock %}

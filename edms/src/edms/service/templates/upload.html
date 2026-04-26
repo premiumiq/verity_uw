@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
-{% block title %}Upload Document - EDMS{% endblock %}
+{% block title %}Upload Document — Vault{% endblock %}
 
 {% block breadcrumbs %}
-    <span class="separator">></span>
+    <span class="separator">›</span>
     <a href="/ui/">Documents</a>
-    <span class="separator">></span>
+    <span class="separator">›</span>
     <span>Upload</span>
 {% endblock %}
 
@@ -13,128 +13,260 @@
 
 {% block content %}
 
-<div class="edms-card" style="max-width: 650px;">
-    <form method="POST" action="/ui/upload" enctype="multipart/form-data">
+{# Two-column layout on wider viewports: form on the left, an info
+   panel on the right explaining what Vault does after upload. #}
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 24px; align-items: start;">
 
-        <div style="margin-bottom: 16px;">
-            <label class="edms-label">File</label>
-            <input type="file" name="file" class="edms-input" required>
-        </div>
+    <div class="verity-card" style="padding: 20px;">
 
-        <div style="margin-bottom: 16px;">
-            <label class="edms-label">Context Reference</label>
-            <input type="text" name="context_ref" class="edms-input" required
-                   placeholder="e.g., submission:00000001-0001-0001-0001-000000000001">
-            <div style="font-size: 0.7rem; color: var(--edms-text-light); margin-top: 2px;">
-                Business context this document belongs to. Format: type:identifier
-            </div>
-        </div>
-
-        <div style="display: flex; gap: 16px; margin-bottom: 16px;">
-            <div style="flex: 1;">
-                <label class="edms-label">Context Type</label>
-                <select name="context_type" class="edms-input edms-select">
-                    <option value="">Select type...</option>
-                    {% for ct in context_types %}
-                    <option value="{{ ct.type_key }}">{{ ct.display_name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div style="flex: 1;">
-                <label class="edms-label">Uploaded By</label>
-                <input type="text" name="uploaded_by" class="edms-input" value="manual_upload">
-            </div>
-        </div>
-
-        <!-- Collection selector (required - determines MinIO bucket) -->
-        <div style="margin-bottom: 16px;">
-            <label class="edms-label">Collection <span style="color: var(--edms-red);">*</span></label>
-            <select name="collection_id" class="edms-input edms-select" required>
-                <option value="">Select a collection...</option>
-                {% for c in collections %}
-                <option value="{{ c.id }}">{{ c.display_name }} ({{ c.storage_container }})</option>
-                {% endfor %}
-            </select>
-            <div style="font-size: 0.68rem; color: var(--edms-text-light); margin-top: 2px;">
-                Determines where the file is stored. <a href="/ui/collections">Manage collections</a>
-            </div>
-        </div>
-
-        <!-- Folder selector (optional - within the collection) -->
-        <div style="margin-bottom: 16px;">
-            <label class="edms-label">Folder</label>
-            <select name="folder_id" class="edms-input edms-select">
-                <option value="">Collection root (no folder)</option>
-                {% for f in all_folders %}
-                <option value="{{ f.id }}">{{ f.name }}</option>
-                {% endfor %}
-            </select>
-        </div>
-
-        <!-- Document type selector: two-level hierarchy -->
-        <div style="margin-bottom: 16px;">
-            <label class="edms-label">Document Type</label>
-            <select name="document_type" class="edms-input edms-select">
-                <option value="">Unclassified (will be classified later)</option>
-                {% if type_hierarchy %}
-                    {% for top_type in type_hierarchy %}
-                    <optgroup label="{{ top_type.display_name }}">
-                        <!-- Top-level type itself is selectable if it has no subtypes -->
-                        {% if not top_type.subtypes %}
-                        <option value="{{ top_type.type_key }}">{{ top_type.display_name }}</option>
-                        {% endif %}
-                        {% for sub in top_type.subtypes %}
-                        <option value="{{ sub.type_key }}">{{ sub.display_name }}</option>
-                        {% endfor %}
-                    </optgroup>
-                    {% endfor %}
-                {% endif %}
-                <!-- Standalone types (no parent) -->
-                {% for dt in document_types %}
-                    {% set has_parent = dt.parent_type_id is not none %}
-                    {% set is_parent = false %}
-                    {% for th in type_hierarchy if th.id == dt.id %}
-                        {% set is_parent = true %}
-                    {% endfor %}
-                    {% if not has_parent and not is_parent %}
-                    <option value="{{ dt.type_key }}">{{ dt.display_name }}</option>
-                    {% endif %}
-                {% endfor %}
-            </select>
-        </div>
-
-        <!-- Tags -->
-        {% if tag_definitions %}
-        <div style="margin-bottom: 16px;">
-            <label class="edms-label" style="margin-bottom: 8px;">Tags</label>
-            {% for td in tag_definitions %}
-            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
-                <label style="width: 140px; font-size: 0.78rem; font-weight: 500;">
-                    {{ td.display_name }}
-                    {% if td.is_required %}<span style="color: var(--edms-red);">*</span>{% endif %}
-                </label>
-                <div style="flex: 1;">
-                    {% if td.value_mode == 'restricted' %}
-                    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-                        {% for av in td.allowed_values %}
-                        <label style="font-size: 0.78rem; display: flex; align-items: center; gap: 4px; cursor: pointer;">
-                            <input type="checkbox" name="tag_{{ td.tag_key }}" value="{{ av.value }}">
-                            {{ av.display_name }}
-                        </label>
-                        {% endfor %}
-                    </div>
-                    {% else %}
-                    <input type="text" name="tag_{{ td.tag_key }}" class="edms-input"
-                           placeholder="Comma-separated values">
-                    {% endif %}
+        {# Inline error banner — rendered when handle_upload re-renders
+           the form on validation failure. The user's text-field values
+           are echoed back from form_values; the file input has to be
+           re-selected because browsers don't allow programmatic restore. #}
+        {% if error_message %}
+        <div class="verity-alert verity-alert-error">
+            <div>
+                <strong>Upload failed.</strong>
+                <div style="margin-top: 4px;">{{ error_message }}</div>
+                <div style="margin-top: 6px; font-size: 0.78rem; opacity: 0.85;">
+                    Your text inputs have been preserved. Please re-select the file
+                    (browser security prevents auto-restoring file selection) and try again.
                 </div>
             </div>
-            {% endfor %}
         </div>
         {% endif %}
 
-        <button type="submit" class="edms-btn edms-btn-primary">Upload</button>
-    </form>
+        <form method="POST" action="/ui/upload" enctype="multipart/form-data">
+
+            {# ── File ───────────────────────────────────────── #}
+            <div style="margin-bottom: 16px;">
+                <label class="verity-label" for="upload-file">
+                    File <span style="color: var(--verity-red);">*</span>
+                </label>
+                <input id="upload-file" type="file" name="file" required
+                       class="verity-file-input"
+                       onchange="updateFilePreview(this)">
+                <div id="file-preview" style="display: none; margin-top: 8px;
+                                              padding: 8px 12px;
+                                              background: var(--verity-blue-pale);
+                                              border: 1px solid var(--verity-blue-light);
+                                              border-radius: 4px;
+                                              font-size: 0.78rem; color: var(--verity-blue-deep);">
+                    <strong id="file-preview-name"></strong>
+                    <span id="file-preview-meta" style="margin-left: 8px; color: var(--verity-text-light);"></span>
+                </div>
+            </div>
+
+            {# ── Context Reference ─────────────────────────── #}
+            <div style="margin-bottom: 16px;">
+                <label class="verity-label" for="context_ref">
+                    Context Reference <span style="color: var(--verity-red);">*</span>
+                </label>
+                <input id="context_ref" type="text" name="context_ref" required class="verity-input"
+                       placeholder="e.g. submission:00000001-0001-0001-0001-000000000001"
+                       value="{{ form_values.context_ref or '' }}">
+                <div style="font-size: 0.74rem; color: var(--verity-text-light); margin-top: 4px;">
+                    The business entity this document belongs to. Format: <code>type:identifier</code>.
+                </div>
+            </div>
+
+            {# ── Context Type + Uploaded By (two-up) ──────── #}
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                <div>
+                    <label class="verity-label" for="context_type">Context Type</label>
+                    <select id="context_type" name="context_type" class="verity-select" style="width: 100%;">
+                        <option value="">Select type…</option>
+                        {% for ct in context_types %}
+                        <option value="{{ ct.type_key }}"
+                                {% if form_values.context_type == ct.type_key %}selected{% endif %}>
+                            {{ ct.display_name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="verity-label" for="uploaded_by">Uploaded By</label>
+                    <input id="uploaded_by" type="text" name="uploaded_by" class="verity-input"
+                           value="{{ form_values.uploaded_by or 'manual_upload' }}">
+                </div>
+            </div>
+
+            {# ── Collection ────────────────────────────────── #}
+            <div style="margin-bottom: 16px;">
+                <label class="verity-label" for="collection_id">
+                    Collection <span style="color: var(--verity-red);">*</span>
+                </label>
+                <select id="collection_id" name="collection_id" required class="verity-select" style="width: 100%;">
+                    <option value="">Select a collection…</option>
+                    {% for c in collections %}
+                    <option value="{{ c.id }}"
+                            {% if form_values.collection_id == c.id|string %}selected{% endif %}>
+                        {{ c.display_name }} ({{ c.storage_container }})
+                    </option>
+                    {% endfor %}
+                </select>
+                <div style="font-size: 0.74rem; color: var(--verity-text-light); margin-top: 4px;">
+                    Determines the MinIO bucket the file is stored in.
+                    <a href="/ui/collections">Manage collections →</a>
+                </div>
+            </div>
+
+            {# ── Folder (optional) ─────────────────────────── #}
+            <div style="margin-bottom: 16px;">
+                <label class="verity-label" for="folder_id">Folder</label>
+                <select id="folder_id" name="folder_id" class="verity-select" style="width: 100%;">
+                    <option value="">Collection root (no folder)</option>
+                    {% for f in all_folders %}
+                    <option value="{{ f.id }}"
+                            {% if form_values.folder_id == f.id|string %}selected{% endif %}>
+                        {{ f.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            {# ── Document Type (two-level optgroups) ───────── #}
+            <div style="margin-bottom: 16px;">
+                <label class="verity-label" for="document_type">Document Type</label>
+                <select id="document_type" name="document_type" class="verity-select" style="width: 100%;">
+                    <option value="">Unclassified — will be classified later</option>
+                    {% if type_hierarchy %}
+                        {% for top_type in type_hierarchy %}
+                        <optgroup label="{{ top_type.display_name }}">
+                            {% if not top_type.subtypes %}
+                            <option value="{{ top_type.type_key }}"
+                                    {% if form_values.document_type == top_type.type_key %}selected{% endif %}>
+                                {{ top_type.display_name }}
+                            </option>
+                            {% endif %}
+                            {% for sub in top_type.subtypes %}
+                            <option value="{{ sub.type_key }}"
+                                    {% if form_values.document_type == sub.type_key %}selected{% endif %}>
+                                {{ sub.display_name }}
+                            </option>
+                            {% endfor %}
+                        </optgroup>
+                        {% endfor %}
+                    {% endif %}
+                    {# Standalone types (no parent, not in hierarchy) #}
+                    {% for dt in document_types %}
+                        {% set has_parent = dt.parent_type_id is not none %}
+                        {% set is_parent = false %}
+                        {% for th in type_hierarchy if th.id == dt.id %}
+                            {% set is_parent = true %}
+                        {% endfor %}
+                        {% if not has_parent and not is_parent %}
+                        <option value="{{ dt.type_key }}"
+                                {% if form_values.document_type == dt.type_key %}selected{% endif %}>
+                            {{ dt.display_name }}
+                        </option>
+                        {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+
+            {# ── Tags ──────────────────────────────────────── #}
+            {% if tag_definitions %}
+            <div style="margin-bottom: 20px;">
+                <label class="verity-label">Tags</label>
+                <div style="display: flex; flex-direction: column; gap: 10px;
+                            padding: 12px; border: 1px solid var(--verity-border-light);
+                            border-radius: 4px; background: var(--verity-gray-pale);">
+                    {% for td in tag_definitions %}
+                    <div style="display: grid; grid-template-columns: 160px 1fr; gap: 12px; align-items: start;">
+                        <label style="font-size: 0.8rem; font-weight: 500; padding-top: 6px;">
+                            {{ td.display_name }}
+                            {% if td.is_required %}<span style="color: var(--verity-red);">*</span>{% endif %}
+                        </label>
+                        <div>
+                            {% if td.value_mode == 'restricted' %}
+                                {# Restricted vocabulary rendered as toggle-chip pills.
+                                   Click a chip to select; click again to deselect.
+                                   Hidden checkboxes inside each pill carry the form
+                                   value, so the POST data shape is identical to a
+                                   classic checkbox group — backend unchanged. #}
+                                {% set prior = form_tags.get(td.tag_key) or [] %}
+                                <div class="verity-tag-toggle-group">
+                                    {% for av in td.allowed_values %}
+                                    <label class="verity-tag-toggle{% if av.value in prior %} active{% endif %}">
+                                        <input type="checkbox" name="tag_{{ td.tag_key }}"
+                                               value="{{ av.value }}"
+                                               {% if av.value in prior %}checked{% endif %}>
+                                        {{ av.display_name }}
+                                    </label>
+                                    {% endfor %}
+                                </div>
+                            {% else %}
+                                {% set prior = form_tags.get(td.tag_key) or [] %}
+                                <input type="text" name="tag_{{ td.tag_key }}" class="verity-input"
+                                       placeholder="Comma-separated values"
+                                       value="{{ prior | join(', ') if prior else '' }}">
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <div style="display: flex; gap: 8px;">
+                <button type="submit" class="verity-btn verity-btn-primary">Upload</button>
+                <a href="/ui/" class="verity-btn verity-btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+
+    {# ── Side panel: what happens after upload ─────────────── #}
+    <aside class="verity-card" style="padding: 16px; font-size: 0.8rem;">
+        <h3 style="font-size: 0.85rem; font-weight: 600; margin: 0 0 10px 0;">
+            What happens next
+        </h3>
+        <ol style="padding-left: 18px; margin: 0; color: var(--verity-text-light); line-height: 1.6;">
+            <li><strong style="color: var(--verity-text);">Stored in MinIO.</strong>
+                File is uploaded to the bucket configured on the chosen collection.</li>
+            <li><strong style="color: var(--verity-text);">Text extraction.</strong>
+                On first read, Vault extracts text from PDFs and other supported types
+                and stores the result as a lineage child of the original.</li>
+            <li><strong style="color: var(--verity-text);">Tag governance.</strong>
+                Tags are validated against the controlled vocabulary; required tags
+                must be supplied or the upload fails.</li>
+            <li><strong style="color: var(--verity-text);">Available to Verity.</strong>
+                Once stored, governed Verity tasks and agents can fetch the document
+                via the <code>edms</code> data connector (e.g. classifier vision blocks,
+                extractor text fetches).</li>
+        </ol>
+    </aside>
+
 </div>
+
+
+<script>
+    // Render a small inline preview when a file is selected.
+    function updateFilePreview(input) {
+        const preview = document.getElementById('file-preview');
+        if (!input.files || !input.files[0]) {
+            preview.style.display = 'none';
+            return;
+        }
+        const f = input.files[0];
+        document.getElementById('file-preview-name').textContent = f.name;
+        const sizeKb = (f.size / 1024).toFixed(1);
+        const type = f.type || 'application/octet-stream';
+        document.getElementById('file-preview-meta').textContent =
+            `${sizeKb} KB · ${type}`;
+        preview.style.display = 'block';
+    }
+
+    // Toggle-chip behaviour: keep the visual `.active` class in
+    // sync with the hidden checkbox state. Modern browsers handle
+    // this via :has(input:checked) in CSS, but the explicit class
+    // toggle keeps things working on older browsers and lets us
+    // style consistently.
+    document.querySelectorAll('.verity-tag-toggle input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', () => {
+            cb.closest('.verity-tag-toggle').classList.toggle('active', cb.checked);
+        });
+    });
+</script>
 
 {% endblock %}

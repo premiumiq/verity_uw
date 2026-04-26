@@ -44,7 +44,7 @@ from IPython.display import HTML
 
 # ── Inline stylesheet — ported from verity/src/verity/web/static/verity.css ──
 # Kept small: only the classes the primitives below emit. Colours are
-# the PremiumIQ palette — match them to the admin UI so a screenshot
+# the Verity palette — match them to the admin UI so a screenshot
 # of a notebook cell looks indistinguishable from the admin view.
 
 VERITY_STYLESHEET = """
@@ -348,7 +348,7 @@ def render_cards(tiles: list[tuple[str, Any, Optional[str]]]) -> HTML:
     `(label, value, footer or None)` tuple.
 
     Use inside any notebook to show counts / totals as a compact
-    row of PremiumIQ-blue cards. For a specific entity's "stat"
+    row of Verity-blue cards. For a specific entity's "stat"
     grid (decisions + overrides + contexts + mappings for an
     application, say), just build the tile list from your data
     and hand it to this function.

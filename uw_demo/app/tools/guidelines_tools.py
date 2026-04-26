@@ -8,7 +8,7 @@ guideline section has specific criteria that the agent evaluates.
 
 _DO_GUIDELINES = """
 DIRECTORS & OFFICERS LIABILITY — UNDERWRITING GUIDELINES
-PremiumIQ Insurance Company
+Verity Insurance Company
 Effective: January 1, 2026
 
 §1. GENERAL ELIGIBILITY
@@ -49,7 +49,7 @@ Effective: January 1, 2026
 
 _GL_GUIDELINES = """
 GENERAL LIABILITY — UNDERWRITING GUIDELINES
-PremiumIQ Insurance Company
+Verity Insurance Company
 Effective: January 1, 2026
 
 §1. GENERAL ELIGIBILITY

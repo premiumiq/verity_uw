@@ -77,7 +77,7 @@ class _UnifiedDecisions(DecisionsReader, DecisionsWriter):
 
 
 class Verity:
-    """PremiumIQ Verity SDK client.
+    """Verity SDK client.
 
     Single entry point for all governance + runtime operations:
     registry, lifecycle, execution, decisions, testing, reporting, pipelines.
