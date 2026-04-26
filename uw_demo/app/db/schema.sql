@@ -119,12 +119,6 @@ CREATE TABLE IF NOT EXISTS submission_assessment (
 );
 
 -- ══════════════════════════════════════════════════════════════
--- LOSS HISTORY: Claims data per submission account
--- ══════════════════════════════════════════════════════════════
--- In production this would come from a loss run system or carrier API.
--- For the demo, seeded with realistic data.
-
--- ══════════════════════════════════════════════════════════════
 -- WORKFLOW_STEP: Tracks progression through the underwriting workflow
 -- ══════════════════════════════════════════════════════════════
 -- Each submission has 5 workflow steps. Step 1 (intake) is auto-completed
@@ -145,12 +139,6 @@ CREATE TABLE IF NOT EXISTS workflow_step (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(submission_id, step_name)
 );
-
--- ══════════════════════════════════════════════════════════════
--- LOSS HISTORY: Claims data per submission account
--- ══════════════════════════════════════════════════════════════
--- In production this would come from a loss run system or carrier API.
--- For the demo, seeded with realistic data.
 
 -- ══════════════════════════════════════════════════════════════
 -- APP_SETTINGS: Key-value configuration (no restart needed)
@@ -181,3 +169,66 @@ CREATE TABLE IF NOT EXISTS loss_history (
     reserves            NUMERIC(15,2) NOT NULL DEFAULT 0,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ══════════════════════════════════════════════════════════════
+-- DOCUMENT: Per-submission document references
+-- ══════════════════════════════════════════════════════════════
+-- One row per document UW cares about for a submission. The actual
+-- file content lives in EDMS (a separate database/service); we keep
+-- only a reference plus the metadata UW needs to display, route, and
+-- track per-document extraction status.
+--
+-- Why this table exists, given documents already live in EDMS:
+--   1. # Docs column on the submissions list — single SQL join
+--      instead of one HTTP round-trip per row.
+--   2. Documents tab on the detail page — render from uw_db so the
+--      page doesn't break if EDMS is briefly unreachable.
+--   3. Per-document extraction tracking — UW knows which docs have
+--      been classified vs extracted vs skipped (not_applicable).
+--   4. Discovery → extraction split — discovery writes here once,
+--      extraction reads from here, and re-runs are idempotent.
+--
+-- The edms_document_id is the EDMS-side UUID. It's a value, not a
+-- foreign key, because the two databases are independent.
+--
+-- discovery_status: how this document arrived in the table.
+--   'received'  — confirmed present in EDMS (the normal path)
+--   'pending'   — UW expects it but EDMS hasn't seen it yet
+--   'failed'    — EDMS lookup failed last attempt
+--
+-- extraction_status: where this document is in UW's pipeline.
+--   'pending'        — has not been classified or extracted yet
+--   'in_progress'    — a doc-processing run is currently working it
+--   'complete'       — classifier + (any) extractor finished cleanly
+--   'not_applicable' — classifier ran but no extractor is registered
+--                      for this doc_type (e.g. loss_run, board_resolution).
+--                      This is a normal terminal state, NOT a failure.
+
+CREATE TABLE IF NOT EXISTS document (
+    id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    submission_id               UUID NOT NULL REFERENCES submission(id) ON DELETE CASCADE,
+    -- The reference into EDMS (cross-DB, so a value not an FK)
+    edms_document_id            UUID NOT NULL,
+    -- File-level metadata (mirrored from EDMS at discovery time)
+    filename                    TEXT NOT NULL,
+    content_type                TEXT,
+    file_size_bytes             INTEGER,
+    page_count                  INTEGER,
+    -- Classification (filled by the classifier task at extraction time)
+    document_type               TEXT,
+    classification_confidence   REAL,
+    -- Lifecycle flags (see comments above for value sets)
+    discovery_status            TEXT NOT NULL DEFAULT 'received',
+    extraction_status           TEXT NOT NULL DEFAULT 'pending',
+    -- Timestamps
+    received_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- One row per (submission, edms_document_id) pair — re-running
+    -- discovery is a no-op (UPSERT) on the same EDMS document.
+    UNIQUE(submission_id, edms_document_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_submission
+    ON document(submission_id);
+
+CREATE INDEX IF NOT EXISTS idx_document_extraction_status
+    ON document(extraction_status);

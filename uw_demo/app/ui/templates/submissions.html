@@ -51,6 +51,7 @@
             <th>LOB</th>
             <th>Effective Date</th>
             <th>Industry</th>
+            <th># Docs</th>
             <th>Status</th>
             <th>Risk Score</th>
             <th>Appetite</th>
@@ -64,6 +65,7 @@
             <td><span class="verity-badge verity-badge-agent">{{ sub.lob }}</span></td>
             <td>{{ sub.effective_date.strftime('%b %d, %Y') if sub.effective_date else '—' }}</td>
             <td>{{ sub.sic_description[:30] if sub.sic_description else '—' }}{% if sub.sic_description and sub.sic_description|length > 30 %}...{% endif %}</td>
+            <td>{{ sub.doc_count if sub.doc_count else '—' }}</td>
             <td>
                 {% if sub.status == 'assessed' %}
                     <span class="verity-badge verity-badge-champion">Assessed</span>
@@ -75,6 +77,8 @@
                     <span class="verity-badge verity-badge-shadow">Review</span>
                 {% elif sub.status == 'documents_processed' %}
                     <span class="verity-badge verity-badge-staging">Docs Done</span>
+                {% elif sub.status == 'documents_received' %}
+                    <span class="verity-badge verity-badge-staging">Docs Received</span>
                 {% else %}
                     <span class="verity-badge verity-badge-draft">Intake</span>
                 {% endif %}

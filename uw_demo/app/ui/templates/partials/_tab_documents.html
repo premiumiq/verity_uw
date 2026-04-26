@@ -1,0 +1,209 @@
+<!--
+  Tab: Documents — list of EDMS-backed documents for this submission.
+
+  Reads from uw_db `document` rows (populated by /discover-documents
+  or by the seed script). Does NOT call EDMS at render time — the
+  filename / classification / size were mirrored at discovery time;
+  if you need the file itself, click "Open in EDMS".
+
+  Rendered by GET /submissions/{id}/tab/documents.
+-->
+{% if not documents %}
+
+<!-- Empty state: no documents yet. Always offer the "Discover from
+     Vault" path AND a manual Upload path so the user can recover
+     regardless of how the submission got here. -->
+<div class="verity-empty">
+    <div class="verity-empty-message">
+        No documents discovered yet for this submission.
+    </div>
+    <div style="display: flex; gap: 8px; justify-content: center; margin-top: 12px;">
+        <form method="POST" action="/submissions/{{ submission_id }}/discover-documents" style="margin: 0;">
+            <button type="submit" class="verity-btn verity-btn-primary">
+                Discover Documents
+            </button>
+        </form>
+        <button type="button" class="verity-btn verity-btn-secondary"
+                onclick="document.getElementById('upload-modal').showModal()">
+            Upload Document
+        </button>
+    </div>
+</div>
+
+{% else %}
+
+<!-- Toolbar: upload action visible whenever there's already at least
+     one document. (When empty, the buttons live inside the empty
+     state above.) -->
+<div style="display: flex; justify-content: flex-end; margin-bottom: 12px;">
+    <button type="button" class="verity-btn verity-btn-secondary verity-btn-sm"
+            onclick="document.getElementById('upload-modal').showModal()">
+        + Upload Document
+    </button>
+</div>
+
+<!-- One card per document -->
+<div class="verity-stats-grid">
+    {% for d in documents %}
+    <div class="verity-card">
+        <div class="verity-card-header">
+            <span title="{{ d.filename }}">
+                {% if d.filename and d.filename|length > 38 %}
+                    {{ d.filename[:35] }}…
+                {% else %}
+                    {{ d.filename or '(unnamed)' }}
+                {% endif %}
+            </span>
+
+            <!-- Classification pill — colored by document_type -->
+            {% set t = d.document_type %}
+            {% if t in ('do_application', 'gl_application') %}
+                <span class="verity-badge verity-badge-agent">{{ t | replace('_', ' ') | title }}</span>
+            {% elif t == 'loss_run' %}
+                <span class="verity-badge verity-badge-staging">Loss Run</span>
+            {% elif t == 'financial_statement' %}
+                <span class="verity-badge verity-badge-candidate">Financial Statement</span>
+            {% elif t == 'board_resolution' %}
+                <span class="verity-badge verity-badge-candidate">Board Resolution</span>
+            {% elif t and t.startswith('supplemental') %}
+                <span class="verity-badge verity-badge-shadow">Supplemental</span>
+            {% elif t %}
+                <span class="verity-badge verity-badge-draft">{{ t | replace('_', ' ') | title }}</span>
+            {% else %}
+                <span class="verity-badge verity-badge-draft">Unclassified</span>
+            {% endif %}
+        </div>
+
+        <div class="verity-detail-grid">
+            <div class="verity-detail-label">Size</div>
+            <div class="verity-detail-value">
+                {% if d.file_size_bytes %}
+                    {% if d.file_size_bytes < 1024 %}
+                        {{ d.file_size_bytes }} B
+                    {% elif d.file_size_bytes < 1048576 %}
+                        {{ "%.1f"|format(d.file_size_bytes / 1024) }} KB
+                    {% else %}
+                        {{ "%.1f"|format(d.file_size_bytes / 1048576) }} MB
+                    {% endif %}
+                {% else %}
+                    —
+                {% endif %}
+            </div>
+
+            <div class="verity-detail-label">Pages</div>
+            <div class="verity-detail-value">{{ d.page_count or '—' }}</div>
+
+            <div class="verity-detail-label">Received</div>
+            <div class="verity-detail-value">
+                {{ d.received_at.strftime('%b %d, %Y %H:%M') if d.received_at else '—' }}
+            </div>
+
+            <!-- Extraction status chip — distinct from classification.
+                 'pending' / 'in_progress' / 'complete' / 'not_applicable'. -->
+            <div class="verity-detail-label">Extraction</div>
+            <div class="verity-detail-value">
+                {% if d.extraction_status == 'complete' %}
+                    <span class="verity-badge verity-badge-champion">Complete</span>
+                {% elif d.extraction_status == 'in_progress' %}
+                    <span class="verity-badge verity-badge-pending">In Progress</span>
+                {% elif d.extraction_status == 'not_applicable' %}
+                    <span class="verity-badge verity-badge-draft">N/A</span>
+                {% else %}
+                    <span class="verity-badge verity-badge-draft">Pending</span>
+                {% endif %}
+            </div>
+
+            {% if d.classification_confidence %}
+            <div class="verity-detail-label">Class Conf.</div>
+            <div class="verity-detail-value">{{ "%.0f"|format(d.classification_confidence * 100) }}%</div>
+            {% endif %}
+        </div>
+
+        <div class="verity-card-footer">
+            <a href="http://localhost:8002/ui/documents/{{ d.edms_document_id }}"
+               class="verity-btn verity-btn-secondary verity-btn-sm" target="_blank">
+                Open in Vault ↗
+            </a>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% endif %}
+
+<!-- ── UPLOAD MODAL ──────────────────────────────────────────
+     Native HTML <dialog> element. .showModal() opens with a backdrop
+     and traps focus; .close() dismisses. No JS framework required.
+     The form submits multipart/form-data to the upload endpoint;
+     server redirects back to the detail page on success, which
+     re-renders this tab with the new document card. -->
+<dialog id="upload-modal" style="border: 1px solid #ccc; border-radius: 6px; padding: 0; max-width: 480px; width: 90%;">
+    <form method="POST"
+          action="/submissions/{{ submission_id }}/upload-document"
+          enctype="multipart/form-data"
+          style="padding: 20px; margin: 0;">
+        <h3 style="margin-top: 0;">Upload Document to Vault</h3>
+
+        <div style="margin-bottom: 12px;">
+            <label class="verity-detail-label" for="upload-file">File</label>
+            <input id="upload-file" name="file" type="file" required
+                   style="display: block; margin-top: 4px;">
+        </div>
+
+        <div style="margin-bottom: 12px;">
+            <label class="verity-detail-label" for="upload-doctype">Document Type</label>
+            <select id="upload-doctype" name="document_type" required
+                    style="display: block; margin-top: 4px; width: 100%;">
+                <option value="">— select —</option>
+                <option value="do_application">D&O Application</option>
+                <option value="gl_application">GL Application</option>
+                <option value="loss_run">Loss Run</option>
+                <option value="financial_statement">Financial Statement</option>
+                <option value="board_resolution">Board Resolution</option>
+                <option value="supplemental">Supplemental</option>
+                <option value="other">Other</option>
+            </select>
+        </div>
+
+        <div style="margin-bottom: 12px;">
+            <label class="verity-detail-label" for="upload-sensitivity">Sensitivity</label>
+            <select id="upload-sensitivity" name="sensitivity" required
+                    style="display: block; margin-top: 4px; width: 100%;">
+                <option value="public">Public</option>
+                <option value="internal" selected>Internal</option>
+                <option value="confidential">Confidential</option>
+                <option value="pii">PII</option>
+                <option value="phi">PHI</option>
+            </select>
+        </div>
+
+        <div style="margin-bottom: 16px;">
+            <label class="verity-detail-label" for="upload-category">Category</label>
+            <select id="upload-category" name="category" required
+                    style="display: block; margin-top: 4px; width: 100%;">
+                <option value="application">Application</option>
+                <option value="loss_report">Loss Report</option>
+                <option value="financial">Financial</option>
+                <option value="governance">Governance</option>
+                <option value="supplemental">Supplemental</option>
+                <option value="correspondence">Correspondence</option>
+                <option value="regulatory">Regulatory</option>
+                <option value="other">Other</option>
+            </select>
+        </div>
+
+        <!-- The LOB tag is derived from the submission server-side and
+             not shown to the user. Collection, context_ref, context_type,
+             uploaded_by are also auto-populated server-side. -->
+
+        <div style="display: flex; gap: 8px; justify-content: flex-end;">
+            <button type="button" class="verity-btn verity-btn-secondary"
+                    onclick="document.getElementById('upload-modal').close()">
+                Cancel
+            </button>
+            <button type="submit" class="verity-btn verity-btn-primary">
+                Upload to Vault
+            </button>
+        </div>
+    </form>
+</dialog>

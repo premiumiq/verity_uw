@@ -586,8 +586,8 @@ a:hover {
 }
 
 .verity-step-active .verity-step-circle {
-    background: var(--verity-blue-dark);
-    border-color: var(--verity-blue-dark);
+    background: var(--verity-amber);
+    border-color: var(--verity-amber);
     color: white;
     animation: verity-pulse 2s ease-in-out infinite;
 }
@@ -636,8 +636,9 @@ a:hover {
 }
 
 @keyframes verity-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(64, 90, 138, 0.4); }
-    50% { box-shadow: 0 0 0 8px rgba(64, 90, 138, 0); }
+    /* Pulse halo color tuned to match the amber active circle. */
+    0%, 100% { box-shadow: 0 0 0 0 rgba(227, 180, 71, 0.55); }
+    50% { box-shadow: 0 0 0 8px rgba(227, 180, 71, 0); }
 }
 
 
@@ -688,6 +689,13 @@ a:hover {
     border-radius: 10px;
     margin-left: 6px;
     vertical-align: middle;
+}
+
+/* Neutral variant — for informational counts (e.g., # of documents)
+   that should NOT read as a warning. Same shape, muted background. */
+.verity-tab-badge-neutral {
+    background: var(--verity-gray-medium, #999);
+    color: white;
 }
 
 

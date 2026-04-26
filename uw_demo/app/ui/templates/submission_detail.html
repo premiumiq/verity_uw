@@ -21,58 +21,97 @@
 
 {% block content %}
 
-<!-- ── WORKFLOW STEPPER ───────────────────────────────────── -->
+<!-- ── WORKFLOW STEPPER ─────────────────────────────────────
+     Compact horizontal pipeline. Each step is a numbered circle
+     with a label below; status is encoded by color (green=complete,
+     blue+pulse=running, grey=pending, red=failed, muted=skipped).
+     Hover any circle for the full status + completion timestamp.
+
+     Context strip above shows received / current stage + age /
+     last update — workflow-relevant info that fits in the space
+     freed by replacing the old vertical table. -->
 <div class="verity-card verity-section">
-    <table class="verity-table">
-        <thead>
-            <tr>
-                <th>Step</th>
-                <th>Stage</th>
-                <th>Status</th>
-                <th>Completed</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for step in workflow_steps %}
-            <tr>
-                <td>
-                    {% if step.status == 'complete' %}
-                        <span class="verity-badge verity-badge-champion">{{ step.step_order }}</span>
-                    {% elif step.status == 'running' %}
-                        <span class="verity-badge verity-badge-pending">{{ step.step_order }}</span>
-                    {% elif step.status == 'skipped' %}
-                        <span class="verity-badge verity-badge-draft">{{ step.step_order }}</span>
-                    {% elif step.status == 'failed' %}
-                        <span class="verity-badge verity-badge-failed">{{ step.step_order }}</span>
-                    {% else %}
-                        <span class="verity-badge verity-badge-draft">{{ step.step_order }}</span>
-                    {% endif %}
-                </td>
-                <td class="verity-detail-value">{{ step.step_name | replace('_', ' ') | title }}</td>
-                <td>
-                    {% if step.status == 'complete' %}
-                        <span class="verity-badge verity-badge-complete">Complete</span>
-                    {% elif step.status == 'running' %}
-                        <span class="verity-badge verity-badge-pending">Running</span>
-                    {% elif step.status == 'skipped' %}
-                        <span class="verity-badge verity-badge-draft">Skipped</span>
-                    {% elif step.status == 'failed' %}
-                        <span class="verity-badge verity-badge-failed">Failed</span>
-                    {% else %}
-                        <span class="verity-badge verity-badge-draft">Pending</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if step.completed_at %}
-                        {{ step.completed_at.strftime('%b %d, %Y  %H:%M') }}
-                    {% else %}
-                        —
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+
+    <!-- Context strip: received / current stage / last update -->
+    <div style="display: flex; gap: 32px; flex-wrap: wrap;
+                font-size: 0.75rem; padding-bottom: 8px;
+                border-bottom: 1px solid var(--verity-border-light);
+                margin-bottom: 12px;">
+        <div>
+            <span class="verity-detail-label">Received</span>
+            <span class="verity-detail-value" style="margin-left: 6px;">
+                {{ sub.created_at.strftime('%b %d, %Y %H:%M') if sub.created_at else '—' }}
+            </span>
+        </div>
+        <div>
+            <span class="verity-detail-label">Current stage</span>
+            <span class="verity-detail-value" style="margin-left: 6px;">
+                {{ current_stage_label }}
+                <span style="color: var(--verity-text-light);">· {{ current_stage_age }}</span>
+            </span>
+        </div>
+        <div>
+            <span class="verity-detail-label">Last update</span>
+            <span class="verity-detail-value" style="margin-left: 6px;">
+                {{ sub.updated_at.strftime('%b %d, %Y %H:%M') if sub.updated_at else '—' }}
+            </span>
+        </div>
+    </div>
+
+    <!-- Horizontal stepper. Connector segments between circles are
+         colored complete (green) when the LEFT step finished, so the
+         "filled bar" grows from left to right as the pipeline runs.
+
+         Class mapping for each step:
+           - complete  → green     ('verity-step-complete')
+           - failed    → red       ('verity-step-failed')
+           - skipped   → muted     ('verity-step-skipped')
+           - running   → amber+pulse ('verity-step-active') — set by live pipeline
+           - the FIRST pending step also → amber ('verity-step-active')
+             so the "current stage" the context strip names is visually
+             highlighted on the stepper itself
+           - subsequent pending steps → grey ('verity-step-pending')
+
+         A namespace flag tracks whether we've already crowned a step
+         "current" — Jinja loop scopes don't share variables otherwise. -->
+    {%- set ns = namespace(current_seen=false) -%}
+    <div class="verity-stepper">
+        {% for step in workflow_steps %}
+            {%- if step.status == 'complete' -%}
+                {%- set step_class = 'verity-step-complete' -%}
+            {%- elif step.status == 'failed' -%}
+                {%- set step_class = 'verity-step-failed' -%}
+            {%- elif step.status == 'skipped' -%}
+                {%- set step_class = 'verity-step-skipped' -%}
+            {%- elif step.status == 'running' -%}
+                {%- set step_class = 'verity-step-active' -%}
+                {%- set ns.current_seen = true -%}
+            {%- elif not ns.current_seen -%}
+                {# first non-complete pending step — promote to current/active #}
+                {%- set step_class = 'verity-step-active' -%}
+                {%- set ns.current_seen = true -%}
+            {%- else -%}
+                {%- set step_class = 'verity-step-pending' -%}
+            {%- endif -%}
+            {%- set tooltip = (step.step_name | replace('_',' ') | title) ~ ' — ' ~ (step.status | title) -%}
+            {%- if step.completed_at -%}
+                {%- set tooltip = tooltip ~ ' (' ~ step.completed_at.strftime('%b %d, %H:%M') ~ ')' -%}
+            {%- endif -%}
+            <div class="verity-step {{ step_class }}" title="{{ tooltip }}">
+                <div class="verity-step-circle">{{ step.step_order }}</div>
+                <div class="verity-step-label">{{ step.step_name | replace('_', ' ') | title }}</div>
+                {% if step.completed_at %}
+                <div class="verity-step-time">{{ step.completed_at.strftime('%b %d') }}</div>
+                {% endif %}
+            </div>
+            {# Connector between this step and the next one — colored
+               complete when this step finished. Skip after last step. #}
+            {% if not loop.last %}
+                {%- set connector_class = 'verity-connector-complete' if step.status == 'complete' else '' -%}
+                <div class="verity-step-connector {{ connector_class }}"></div>
+            {% endif %}
+        {% endfor %}
+    </div>
 
     {% if execution_context_id %}
     <div class="verity-card-footer">
@@ -194,6 +233,16 @@
             hx-swap="innerHTML"
             onclick="setActiveTab(this)">
         Submission Details
+    </button>
+    <button class="verity-tab" data-tab="documents"
+            hx-get="/submissions/{{ sub.id }}/tab/documents"
+            hx-target="#tab-content"
+            hx-swap="innerHTML"
+            onclick="setActiveTab(this)">
+        Documents
+        {# Always render the badge (including at 0) so empty state is visually flagged.
+           Neutral color — informational, not a warning. #}
+        <span class="verity-tab-badge verity-tab-badge-neutral">{{ doc_count }}</span>
     </button>
     <button class="verity-tab" data-tab="extraction"
             hx-get="/submissions/{{ sub.id }}/tab/extraction"

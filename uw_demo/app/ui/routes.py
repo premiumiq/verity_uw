@@ -30,7 +30,7 @@ import psycopg
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -73,10 +73,23 @@ async def _use_mock() -> bool:
 
 
 async def _get_submissions():
-    """Read all submissions from uw_db."""
+    """Read all submissions from uw_db, with the count of associated
+    documents joined in. The doc_count is read directly from uw_db's
+    `document` table — once UW has discovered docs for a submission,
+    the count is local and a single SQL query gives us every row's
+    count without any per-row EDMS round trip."""
     async with await _get_conn() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("SELECT * FROM submission ORDER BY created_at")
+            await cur.execute(
+                """SELECT s.*, COALESCE(d.doc_count, 0) AS doc_count
+                FROM submission s
+                LEFT JOIN (
+                    SELECT submission_id, COUNT(*) AS doc_count
+                    FROM document
+                    GROUP BY submission_id
+                ) d ON d.submission_id = s.id
+                ORDER BY s.created_at"""
+            )
             cols = [d.name for d in cur.description]
             rows = await cur.fetchall()
             return [dict(zip(cols, row)) for row in rows]
@@ -200,16 +213,67 @@ async def _get_status_counts():
             return {row[0]: row[1] for row in rows}
 
 
+def _humanize_age(timestamp) -> str:
+    """Convert a past timestamp into a short relative age string,
+    e.g. 'just now', '12m', '3h', '2d'. Returns '—' for None."""
+    if not timestamp:
+        return "—"
+    delta = datetime.now(timezone.utc) - timestamp
+    secs = int(delta.total_seconds())
+    if secs < 60:
+        return "just now"
+    if secs < 3600:
+        return f"{secs // 60}m"
+    if secs < 86400:
+        return f"{secs // 3600}h"
+    return f"{secs // 86400}d"
+
+
+def _compute_current_stage(workflow_steps: list[dict]) -> tuple[str, object]:
+    """Find the workflow's current stage (first running step, else first
+    pending step, else 'Complete'). Returns (label, since_timestamp).
+
+    For a running step we use its `started_at`. For a pending step there
+    is no entry timestamp on the step itself, so the caller should fall
+    back to `submission.updated_at` to get a sensible "since when" age."""
+    for s in workflow_steps:
+        if s.get("status") == "running":
+            return (
+                s["step_name"].replace("_", " ").title(),
+                s.get("started_at"),
+            )
+    for s in workflow_steps:
+        if s.get("status") == "pending":
+            return (
+                "Awaiting " + s["step_name"].replace("_", " ").title(),
+                None,
+            )
+    return ("Complete", None)
+
+
 def _compute_next_action(sub: dict, submission_id: str) -> dict | None:
-    """Compute the contextual next action based on submission status."""
+    """Compute the contextual next action based on submission status.
+
+    The workflow has two ingestion steps before extraction:
+      1. discover-documents — UW fetches the EDMS index and records
+         one document row per file in uw_db. Status: intake → documents_received.
+      2. process-documents — UW classifies + extracts fields from the
+         already-discovered docs. Status: documents_received → documents_processed.
+    Splitting these two means the Documents tab can render after step 1
+    even before extraction is run."""
     status = sub["status"]
     sid = str(submission_id)
     if status == "intake":
-        return {"label": "Process Documents", "url": f"/submissions/{sid}/process-documents", "method": "POST"}
+        return {"label": "Discover Documents",
+                "url": f"/submissions/{sid}/discover-documents", "method": "POST"}
+    elif status == "documents_received":
+        return {"label": "Process Documents",
+                "url": f"/submissions/{sid}/process-documents", "method": "POST"}
     elif status == "review":
         return {"label": "Review & Approve Fields", "tab": "extraction"}
     elif status in ("approved", "documents_processed"):
-        return {"label": "Assess Risk", "url": f"/submissions/{sid}/assess-risk", "method": "POST"}
+        return {"label": "Assess Risk",
+                "url": f"/submissions/{sid}/assess-risk", "method": "POST"}
     return None  # assessed, triaged = complete
 
 
@@ -232,6 +296,120 @@ async def _fetch_document_index(submission_id: str) -> list[dict]:
         if resp.status_code != 200:
             return []
         return resp.json().get("documents", [])
+
+
+# Module-level cache for collection name → UUID. Vault's /upload
+# endpoint takes a collection_id (UUID), not a name; the lookup is
+# stable for the life of the process.
+_COLLECTION_ID_CACHE: dict[str, str] = {}
+
+
+async def _get_collection_id(name: str) -> str | None:
+    """Resolve a Vault collection name (e.g. 'underwriting') to its
+    UUID. Cached per process — Vault collections rarely change."""
+    if name in _COLLECTION_ID_CACHE:
+        return _COLLECTION_ID_CACHE[name]
+    async with httpx.AsyncClient(base_url=settings.EDMS_URL, timeout=10.0) as http:
+        resp = await http.get("/collections")
+        if resp.status_code != 200:
+            return None
+        for c in resp.json().get("collections", []):
+            if c.get("name") == name:
+                _COLLECTION_ID_CACHE[name] = c["id"]
+                return c["id"]
+    return None
+
+
+# ══════════════════════════════════════════════════════════════
+# DOCUMENT REFERENCES (uw_db)
+# ══════════════════════════════════════════════════════════════
+#
+# Discovery is the act of writing one row per EDMS document into
+# uw_db's `document` table. Once persisted, every downstream surface
+# (submissions list count, Documents tab, extraction pipeline) reads
+# from uw_db — the EDMS lookup happens once at discovery time, not
+# on every page load.
+
+async def _persist_documents(submission_id: str, edms_docs: list[dict]) -> int:
+    """Upsert EDMS document references into uw_db `document`.
+
+    The EDMS index dicts carry: id, filename, content_type, document_type
+    (and possibly more). We mirror only the metadata UW needs to display
+    and route on; content stays in EDMS, addressed by edms_document_id.
+
+    UPSERT semantics: re-running discovery for a submission is a no-op
+    when EDMS hasn't changed; if a doc has new metadata (e.g. a fresher
+    classification from EDMS), the row updates in place.
+
+    Returns the number of rows written.
+    """
+    if not edms_docs:
+        return 0
+
+    async with await _get_conn() as conn:
+        async with conn.cursor() as cur:
+            for d in edms_docs:
+                await cur.execute(
+                    """INSERT INTO document (
+                        submission_id, edms_document_id, filename,
+                        content_type, file_size_bytes, page_count,
+                        document_type, discovery_status, extraction_status
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'received', 'pending')
+                    ON CONFLICT (submission_id, edms_document_id) DO UPDATE SET
+                        filename = EXCLUDED.filename,
+                        content_type = EXCLUDED.content_type,
+                        file_size_bytes = COALESCE(EXCLUDED.file_size_bytes, document.file_size_bytes),
+                        page_count = COALESCE(EXCLUDED.page_count, document.page_count),
+                        -- Don't clobber a UW-side classification with an
+                        -- EDMS-side null — only update document_type when
+                        -- EDMS actually has a value.
+                        document_type = COALESCE(EXCLUDED.document_type, document.document_type),
+                        discovery_status = 'received'
+                    """,
+                    (
+                        submission_id,
+                        d.get("id"),
+                        d.get("filename") or "(unnamed)",
+                        d.get("content_type"),
+                        d.get("file_size_bytes"),
+                        d.get("page_count"),
+                        d.get("document_type"),
+                    ),
+                )
+        await conn.commit()
+    return len(edms_docs)
+
+
+async def _get_documents(submission_id: str) -> list[dict]:
+    """Read all `document` rows for a submission from uw_db, ordered
+    by received_at. Returns dicts keyed by column name."""
+    async with await _get_conn() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT * FROM document WHERE submission_id = %s "
+                "ORDER BY received_at",
+                (submission_id,),
+            )
+            cols = [c.name for c in cur.description]
+            rows = await cur.fetchall()
+            return [dict(zip(cols, row)) for row in rows]
+
+
+def _docs_for_workflow(docs: list[dict]) -> list[dict]:
+    """Translate uw_db `document` rows into the dict shape the
+    Verity workflow expects — same keys as `_fetch_document_index`
+    returned previously, so workflow code is unchanged. The id passed
+    is the EDMS document id (the runtime's source_binding fetches
+    against EDMS, not against uw_db)."""
+    return [
+        {
+            "id": str(d["edms_document_id"]),
+            "filename": d.get("filename"),
+            "content_type": d.get("content_type"),
+            "document_type": d.get("document_type"),
+        }
+        for d in docs
+    ]
 
 
 # ══════════════════════════════════════════════════════════════
@@ -314,8 +492,19 @@ def create_uw_routes(verity) -> APIRouter:
         extractions = await _get_extractions(submission_id)
         assessments = await _get_assessments(submission_id)
         review_count = sum(1 for e in extractions if e.get("needs_review"))
+        # doc_count drives the badge on the Documents tab (mirrors the
+        # review_count badge on Extracted Fields). 0 is a real value —
+        # we render the badge even at zero so the empty state is loud.
+        documents = await _get_documents(submission_id)
+        doc_count = len(documents)
         next_action = _compute_next_action(sub, submission_id)
         run_id = str(sub.get("last_risk_workflow_run_id") or sub.get("last_doc_workflow_run_id") or "")
+
+        # Current-stage label + humanized age — used by the new
+        # stepper context strip. For pending stages we use
+        # sub.updated_at as the "since when" anchor.
+        current_stage_label, stage_since = _compute_current_stage(workflow_steps)
+        current_stage_age = _humanize_age(stage_since or sub.get("updated_at"))
 
         pipeline_mode = await _get_setting("pipeline_mode", "mock")
         return templates.TemplateResponse(request, "submission_detail.html", {
@@ -325,6 +514,9 @@ def create_uw_routes(verity) -> APIRouter:
             "assessments": assessments,
             "next_action": next_action,
             "review_count": review_count,
+            "doc_count": doc_count,
+            "current_stage_label": current_stage_label,
+            "current_stage_age": current_stage_age,
             "run_id": run_id if run_id else None,
             # execution_context_id scopes the "View in Verity" link to
             # ALL decisions for the submission (every workflow_run_id),
@@ -339,6 +531,17 @@ def create_uw_routes(verity) -> APIRouter:
     async def tab_details(request: Request, submission_id: str):
         sub = await _get_submission(submission_id)
         return templates.TemplateResponse(request, "partials/_tab_details.html", {"sub": sub})
+
+    @router.get("/submissions/{submission_id}/tab/documents", response_class=HTMLResponse)
+    async def tab_documents(request: Request, submission_id: str):
+        """Render the Documents tab — one card per uw_db `document` row.
+        No EDMS round-trip; data was mirrored at discovery time."""
+        documents = await _get_documents(submission_id)
+        # Pass submission_id so the empty-state Discover button and the
+        # Upload modal know which submission to POST against.
+        return templates.TemplateResponse(request, "partials/_tab_documents.html",
+                                           {"documents": documents,
+                                            "submission_id": submission_id})
 
     @router.get("/submissions/{submission_id}/tab/extraction", response_class=HTMLResponse)
     async def tab_extraction(request: Request, submission_id: str):
@@ -394,6 +597,139 @@ def create_uw_routes(verity) -> APIRouter:
             "execution_context_id": str(ctx_id) if ctx_id else None,
         })
 
+    # ── DOCUMENT DISCOVERY ───────────────────────────────────
+    #
+    # Discovery is the first step UW takes on a fresh submission:
+    # ask EDMS what documents arrived for this submission, then
+    # persist a row per document into uw_db's `document` table.
+    # Once persisted, the Documents tab and the # Docs column on
+    # the list page can render from uw_db without any EDMS round
+    # trip per page load.
+    #
+    # This endpoint is separate from /process-documents (which now
+    # only runs classify+extract on already-discovered docs). Splitting
+    # the two lets UW track which submissions have docs but haven't
+    # been processed yet — a real status, not an implicit one.
+
+    @router.post("/submissions/{submission_id}/discover-documents",
+                  response_class=HTMLResponse)
+    async def run_document_discovery(request: Request, submission_id: str):
+        """Pull the document index from EDMS for this submission and
+        write one row per document into uw_db `document`. Idempotent
+        — re-running on the same submission is a no-op (UPSERT)."""
+        sub = await _get_submission(submission_id)
+        if not sub:
+            return HTMLResponse("<h1>Submission not found</h1>", status_code=404)
+
+        # Fetch from EDMS using the existing helper. Returns [] on error
+        # or empty submission; we still persist (zero rows) and continue.
+        edms_docs = await _fetch_document_index(submission_id)
+        await _persist_documents(submission_id, edms_docs)
+
+        # Status transition: intake → documents_received. The state
+        # machine helper that guards transitions is added in a later
+        # phase; for now we update the column directly.
+        await _update_submission_status(submission_id, "documents_received")
+
+        return RedirectResponse(url=f"/submissions/{submission_id}",
+                                 status_code=303)
+
+    # ── DOCUMENT UPLOAD (manual, via the UI modal) ───────────
+    #
+    # Lets a user push a file straight into Vault from the Documents
+    # tab without going through Vault's own UI. The user picks the
+    # file, document type, sensitivity, and category; the rest
+    # (collection, context_ref, context_type, lob, uploaded_by) is
+    # auto-populated server-side from the submission.
+    #
+    # User-picked document_type is authoritative — when the AI
+    # classifier later runs, the value already on the row should be
+    # respected. (Workflow change to actually skip the classifier
+    # step for already-classified docs is deferred to Phase 4.)
+
+    @router.post("/submissions/{submission_id}/upload-document",
+                  response_class=HTMLResponse)
+    async def upload_document_to_vault(
+        request: Request, submission_id: str,
+        file: UploadFile = File(...),
+        document_type: str = Form(...),
+        sensitivity: str = Form(...),
+        category: str = Form(...),
+    ):
+        """Forward a user-selected file to Vault, then mirror the
+        new document reference into uw_db so the Documents tab
+        shows it immediately."""
+        sub = await _get_submission(submission_id)
+        if not sub:
+            return HTMLResponse("<h1>Submission not found</h1>", status_code=404)
+
+        # Resolve underwriting collection UUID (cached after first call).
+        coll_id = await _get_collection_id("underwriting")
+        if not coll_id:
+            return HTMLResponse("Vault 'underwriting' collection not found",
+                                 status_code=500)
+
+        # Map UW LOB code (DO/GL) to Vault's lob tag value (do/gl).
+        # The lob tag is added automatically; the user does not pick it.
+        lob_tag = (sub.get("lob") or "").lower()
+        tags = {
+            "sensitivity": sensitivity,
+            "category": category,
+            "lob": lob_tag,
+        }
+
+        # Read the upload into memory once. The file is small (insurance
+        # docs); streaming is overkill for the demo.
+        content = await file.read()
+
+        # POST multipart/form-data to Vault. httpx handles the boundary
+        # encoding when we pass `files` and `data` separately.
+        files = {
+            "file": (
+                file.filename or "uploaded.bin",
+                content,
+                file.content_type or "application/octet-stream",
+            ),
+        }
+        data = {
+            "collection_id": coll_id,
+            "context_ref": f"submission:{submission_id}",
+            "context_type": "submission",
+            "document_type": document_type,
+            "tags": json.dumps(tags),
+            "uploaded_by": "uw_user",
+        }
+        async with httpx.AsyncClient(base_url=settings.EDMS_URL,
+                                       timeout=60.0) as http:
+            resp = await http.post("/upload", files=files, data=data)
+            if resp.status_code != 200:
+                logger.error(
+                    "Vault upload failed for submission=%s status=%s body=%s",
+                    submission_id, resp.status_code, resp.text[:500],
+                )
+                return HTMLResponse(
+                    f"Vault upload failed: {resp.status_code}",
+                    status_code=502,
+                )
+            new_doc = resp.json()
+
+        # Mirror the new doc into uw_db. Build the same dict shape
+        # _persist_documents expects, including file_size_bytes so the
+        # Documents tab can render the size column right away.
+        await _persist_documents(submission_id, [{
+            "id": new_doc.get("id"),
+            "filename": new_doc.get("filename"),
+            "content_type": new_doc.get("content_type"),
+            "file_size_bytes": new_doc.get("file_size_bytes") or len(content),
+            "page_count": None,
+            # User-picked document_type is authoritative — pass it through
+            # so the classifier step can be short-circuited later.
+            "document_type": document_type,
+        }])
+
+        return RedirectResponse(url=f"/submissions/{submission_id}",
+                                 status_code=303)
+
     # ── PIPELINE 1: DOCUMENT PROCESSING ──────────────────────
 
     @router.post("/submissions/{submission_id}/process-documents", response_class=HTMLResponse)
@@ -431,16 +767,14 @@ def create_uw_routes(verity) -> APIRouter:
         # connector at execution time, so the audit input_json carries
         # exactly the references that were considered, with no inlined
         # content of any kind.
-        edms_docs = await _fetch_document_index(submission_id)
-        documents = [
-            {
-                "id": d["id"],
-                "filename": d.get("filename"),
-                "content_type": d.get("content_type"),
-                "document_type": d.get("document_type"),
-            }
-            for d in edms_docs
-        ]
+        #
+        # Source of truth: uw_db `document` table (populated by
+        # /discover-documents). The Verity workflow shape is unchanged —
+        # _docs_for_workflow translates rows back into the same
+        # {id, filename, content_type, document_type} dicts the workflow
+        # used to receive directly from EDMS.
+        uw_docs = await _get_documents(submission_id)
+        documents = _docs_for_workflow(uw_docs)
 
         pipeline_context = {
             "submission_id": submission_id,
@@ -631,16 +965,21 @@ async def _run_risk_assessment_internal(verity, submission_id: str, sub: dict, t
 
     await _update_workflow_step(submission_id, "triage", "running")
 
-    # Create execution context
-    try:
-        ctx = await verity.create_execution_context(
-            context_ref=f"submission:{submission_id}",
-            context_type="submission",
-            metadata={"named_insured": sub["named_insured"], "lob": sub["lob"]},
-        )
-        exec_ctx_id = ctx["id"]
-    except Exception:
-        exec_ctx_id = None
+    # Resolve the execution context: reuse the submission's existing
+    # one if it already has one (created during doc-processing or a
+    # prior risk-assessment), otherwise mint a new one and persist
+    # it below so future runs and the "View in Verity" link find it.
+    exec_ctx_id = sub.get("execution_context_id")
+    if not exec_ctx_id:
+        try:
+            ctx = await verity.create_execution_context(
+                context_ref=f"submission:{submission_id}",
+                context_type="submission",
+                metadata={"named_insured": sub["named_insured"], "lob": sub["lob"]},
+            )
+            exec_ctx_id = ctx["id"]
+        except Exception:
+            exec_ctx_id = None
 
     pipeline_context = {
         "submission_id": submission_id,
@@ -662,7 +1001,8 @@ async def _run_risk_assessment_internal(verity, submission_id: str, sub: dict, t
         logger.error(f"Risk-assessment workflow failed for {submission_id}: {e}")
         await _update_workflow_step(submission_id, "triage", "failed",
                                      completed_by=f"error: {str(e)[:200]}")
-        await _update_submission_status(submission_id, "approved")
+        await _update_submission_status(submission_id, "approved",
+                                         execution_context_id=str(exec_ctx_id) if exec_ctx_id else None)
         return
 
     # Check pipeline result status
@@ -679,7 +1019,8 @@ async def _run_risk_assessment_internal(verity, submission_id: str, sub: dict, t
         await _update_workflow_step(submission_id, "triage", "failed",
                                      workflow_run_id=run_id, completed_by=f"error: {error_msg[:200]}")
         await _update_submission_status(submission_id, "approved",
-                                         last_risk_workflow_run_id=run_id)
+                                         last_risk_workflow_run_id=run_id,
+                                         execution_context_id=str(exec_ctx_id) if exec_ctx_id else None)
         return
 
     # Pipeline succeeded — update workflow steps per actual step status
@@ -755,7 +1096,9 @@ async def _run_risk_assessment_internal(verity, submission_id: str, sub: dict, t
     )
     if all_complete:
         await _update_submission_status(submission_id, "assessed",
-                                         last_risk_workflow_run_id=run_id)
+                                         last_risk_workflow_run_id=run_id,
+                                         execution_context_id=str(exec_ctx_id) if exec_ctx_id else None)
     else:
         await _update_submission_status(submission_id, "approved",
-                                         last_risk_workflow_run_id=run_id)
+                                         last_risk_workflow_run_id=run_id,
+                                         execution_context_id=str(exec_ctx_id) if exec_ctx_id else None)
