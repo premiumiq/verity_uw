@@ -15,7 +15,7 @@ import sys
 def main():
     parser = argparse.ArgumentParser(
         prog="verity",
-        description="PremiumIQ Verity — AI Trust & Compliance Framework",
+        description="Verity — AI Trust & Compliance Framework",
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
@@ -68,7 +68,7 @@ def main():
         from fastapi import FastAPI
 
         verity = Verity(database_url=args.database_url)
-        app = FastAPI(title="PremiumIQ Verity")
+        app = FastAPI(title="Verity")
         app.mount("/api", create_verity_api(verity))
         app.mount("/", create_verity_web(verity))
         uvicorn.run(app, host=args.host, port=args.port)

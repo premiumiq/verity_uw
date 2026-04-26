@@ -1,6 +1,6 @@
 -- ============================================================
 -- VERITY_DB: AI Trust & Compliance Metamodel
--- PremiumIQ Verity v3.0
+-- Verity v3.0
 --
 -- Full schema with 7-state lifecycle, pgvector columns,
 -- and all governance tables.

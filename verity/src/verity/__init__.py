@@ -1,4 +1,4 @@
-"""PremiumIQ Verity — AI Trust & Compliance Framework."""
+"""Verity — AI Trust & Compliance Framework."""
 
 import logging
 

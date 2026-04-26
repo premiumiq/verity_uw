@@ -79,7 +79,7 @@ It is not an AI application. It is the governance infrastructure that AI applica
 |                      SHARED SERVICES                               |
 |                                                                    |
 |  +------------------+  +------------------+  +------------------+  |
-|  | EDMS             |  | MDM              |  | Enrichment       |  |
+|  | Vault            |  | MDM              |  | Enrichment       |  |
 |  | (Port 8002)      |  | (Future)         |  | (Future)         |  |
 |  |                  |  |                  |  |                  |  |
 |  | Document storage |  | Entity resolution|  | LexisNexis       |  |
@@ -97,7 +97,7 @@ It is not an AI application. It is the governance infrastructure that AI applica
 
 **Verity** governs everything. It stores the agent definitions, manages their lifecycle, executes them (or delegates execution to an external orchestrator), logs every decision, and provides the compliance reporting layer. Verity knows nothing about insurance - it knows about AI governance.
 
-**Shared Services** are independent systems that agents access through governed tool calls. EDMS manages documents. MDM resolves entities. Enrichment provides external data. Each service owns its own database and APIs. Verity governs the tool calls to these services but never connects to them directly.
+**Shared Services** are independent systems that agents access through governed tool calls. Vault manages documents. MDM resolves entities. Enrichment provides external data. Each service owns its own database and APIs. Verity governs the tool calls to these services but never connects to them directly.
 
 ### Separation of Concerns
 
@@ -110,7 +110,7 @@ It is not an AI application. It is the governance infrastructure that AI applica
 | Which model was used, what it cost, who paid | Verity (Model Management, Usage & Spend) |
 | When an application is over budget | Verity (Quotas & Incidents) |
 | What the D&O underwriting guidelines say | Business App (domain knowledge) |
-| How to extract text from a PDF | EDMS (shared service) |
+| How to extract text from a PDF | Vault (shared service) |
 | What company "Acme Corp" maps to in the golden record | MDM (shared service) |
 
 ---
@@ -292,14 +292,14 @@ A commercial insurance submission arrives for a D&O liability application. The u
 
 ### Step 1: Documents Enter the System
 
-The broker uploads a D&O application PDF, a board resolution, and a loss run report to EDMS. EDMS stores the files in MinIO, runs text extraction once per document and stores the result as a lineage child, and tags the originals.
+The broker uploads a D&O application PDF, a board resolution, and a loss run report to Vault. Vault stores the files in MinIO, runs text extraction once per document and stores the result as a lineage child, and tags the originals.
 
 ```
 Broker uploads documents
         |
         v
 +------------------+
-| EDMS Service     |
+| Vault Service    |
 | - Store in MinIO |
 | - Extract text   |
 | - Track lineage  |
@@ -309,12 +309,12 @@ Broker uploads documents
 
 ### Step 2: The Document-Processing Workflow Runs (per-document)
 
-The underwriting app creates an execution context in Verity (`context_ref="submission:SUB-001"`), generates a fresh `workflow_run_id`, and pulls the document index from EDMS — `GET /documents?context_ref=submission:SUB-001` returns the **originals only** (lineage children are filtered out by default). The app then iterates the documents, calling Verity per-document.
+The underwriting app creates an execution context in Verity (`context_ref="submission:SUB-001"`), generates a fresh `workflow_run_id`, and pulls the document index from Vault — `GET /documents?context_ref=submission:SUB-001` returns the **originals only** (lineage children are filtered out by default). The app then iterates the documents, calling Verity per-document.
 
 ```
 UW App orchestration (plain Python, threading workflow_run_id):
 
-for each document in submission's EDMS index:
+for each document in submission's Vault index:
     classify = await verity.run_task(
         "document_classifier",
         input = {
@@ -345,14 +345,14 @@ What Verity does on each call:
                                -> document text bound to {{document_text}}
    Runtime:    call Claude (one decision_log row + one model_invocation_log row)
    Runtime:    fire declared write_targets
-                 - extractor: create_derived_json against EDMS, payload
+                 - extractor: create_derived_json against Vault, payload
                               built per target_payload_field rows; the
                               JSON-derivative becomes a child document
                               of the source PDF on lineage
    Runtime:    insert event-sourced execution_run lifecycle rows
 ```
 
-The audit clusters under one workflow_run_id: N classify rows + M extract rows, all tagged with `submission:SUB-001` via execution_context_id. Each row's `input_json` carries the EDMS reference list — not inlined PDFs or extracted text.
+The audit clusters under one workflow_run_id: N classify rows + M extract rows, all tagged with `submission:SUB-001` via execution_context_id. Each row's `input_json` carries the Vault reference list — not inlined PDFs or extracted text.
 
 ### Step 3: The Risk-Assessment Workflow Runs
 
@@ -413,7 +413,7 @@ Verity writes a decision log entry per AI invocation - one per classified docume
 - The application tag (`uw_demo`) for spend attribution
 - The workflow_run_id for end-to-end audit trails across one workflow invocation
 - The execution_run_id linking the audit row to the event-sourced run lifecycle (claim/heartbeat/terminal events)
-- Per-binding `source_resolutions` (which connector calls fired, sizes, modality) and per-target `target_writes` (mode, mode_reason, status, EDMS handle)
+- Per-binding `source_resolutions` (which connector calls fired, sizes, modality) and per-target `target_writes` (mode, mode_reason, status, Vault handle)
 
 In parallel, the `model_invocation_log` captures per-call model usage. Joined with `model_price` through `v_model_invocation_cost`, this powers the Usage & Spend dashboard and the soft quotas.
 
@@ -608,9 +608,9 @@ The scaffolding they need - incidents, validation runs, HITL overrides, 7-state 
 
 ## Shared Services
 
-### EDMS (Enterprise Document Management System)
+### Vault (formerly EDMS)
 
-Independent service for document storage, text extraction, metadata management, and governance.
+Independent service for document storage, text extraction, metadata management, and governance. The user-facing brand is "Vault"; the codebase keeps the legacy `edms` identifiers (module path `edms/`, database `edms_db`, env vars `EDMS_URL` etc.) — see [docs/glossary/vault.md](glossary/vault.md).
 
 - **Collection-based storage:** Documents organized into governed collections that map to MinIO buckets. Collections carry lifecycle status, default tags, and ownership.
 - **Virtual folder hierarchy:** Folders within collections for organizational structure. Tag inheritance: collection defaults -> folder defaults -> document tags (overrideable at each level).
@@ -733,14 +733,14 @@ Status legend: **Shipped** = in production and exercised by the UW demo; **Parti
 |                        Docker Compose                             |
 |                                                                   |
 |  +------------+  +--------+  +-------+  +--------+  +---------+  |
-|  | PostgreSQL |  | MinIO  |  | EDMS  |  | Verity |  | UW Demo |  |
+|  | PostgreSQL |  | MinIO  |  | Vault |  | Verity |  | UW Demo |  |
 |  | (pg16 +    |  | Object |  | :8002 |  | :8000  |  | :8001   |  |
 |  |  pgvector) |  | Store  |  |       |  |        |  |         |  |
 |  |            |  |        |  | Own DB|  | Own DB |  | Uses    |  |
 |  | verity_db  |  | Buckets|  | edms_ |  | verity_|  | Verity  |  |
 |  | uw_db      |  |        |  | db    |  | db     |  | SDK +   |  |
-|  | edms_db    |  |        |  |       |  |        |  | EDMS    |  |
-|  +------------+  +--------+  +-------+  +--------+  | Client  |  |
+|  | edms_db    |  |        |  |       |  |        |  | Vault   |  |
+|  +------------+  +--------+  +-------+  +--------+  | client  |  |
 |                                                      +---------+  |
 |                                                                   |
 |  +-----------------+                                              |
@@ -771,7 +771,7 @@ Status legend: **Shipped** = in production and exercised by the UW demo; **Parti
 4. **Version composition is immutable.** What was tested is what runs.
 5. **Schema-first.** The database schema is the source of truth, built complete from day one.
 6. **Governance and Runtime are separable.** Today they share a process; tomorrow Governance can run as a sidecar to an external orchestrator - the Governance Contract is the boundary.
-7. **Shared services are independent.** EDMS, MDM, enrichment each own their database and APIs.
+7. **Shared services are independent.** Vault, MDM, enrichment each own their database and APIs.
 8. **Declarative over imperative.** Verity's governance primitives (schemas, sources/targets, quotas, thresholds, mock kinds) are stored in the metamodel and validated at admit time. Imperative extension mechanisms — e.g. pre/post execution hooks (FC-3) — are deliberately NOT offered; they would sit outside the metamodel, unversioned and invisible to governance reviewers. See [future_capabilities.md § FC-3](future_capabilities.md) for the full rationale.
 9. **Orchestration lives in the application, not Verity.** Verity executes exactly one unit of work at a time (Task or Agent — pipelines are descoped) and returns a canonical envelope. Multi-step workflows are plain Python in the consuming app, threading a caller-supplied `workflow_run_id` through every call so the audit clusters correctly. Triggers, chaining, waits, and retries across units are the app's responsibility. See [verity_execution_architecture.md](verity_execution_architecture.md) for the full Task/Agent contracts, declarative I/O grammar, and envelope spec.
 

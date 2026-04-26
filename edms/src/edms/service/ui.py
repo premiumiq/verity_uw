@@ -139,9 +139,13 @@ def create_ui_routes(
 
     # ── UPLOAD PAGE ───────────────────────────────────────────
 
-    @router.get("/upload", response_class=HTMLResponse)
-    async def upload_page(request: Request):
-        """Show the upload form with folder, type hierarchy, and tag editors."""
+    async def _build_upload_context(request: Request, **overrides):
+        """Common context loader for the upload form (GET + validation re-render).
+
+        Returns the dict of context the upload.html template expects.
+        Overrides let the POST handler re-render the form with an error
+        message + the user's previous text-field values preserved.
+        """
         doc_types = await db.list_document_type_definitions()
         type_hierarchy = await db.get_type_hierarchy()
         tag_defs = await db.list_tag_definitions()
@@ -154,16 +158,28 @@ def create_ui_routes(
         all_folders_result = await db._conn.execute("SELECT * FROM folder ORDER BY name")
         all_folders = await all_folders_result.fetchall()
         context_types = await db.list_context_type_definitions()
+        ctx = {
+            "active_page": "upload",
+            "document_types": doc_types,
+            "type_hierarchy": type_hierarchy,
+            "tag_definitions": tag_defs,
+            "collections": collections,
+            "all_folders": all_folders,
+            "context_types": context_types,
+            # Re-population values for inline-error re-render. Empty by
+            # default so the template can render "" for the inputs.
+            "error_message": None,
+            "form_values": {},
+            "form_tags": {},
+        }
+        ctx.update(overrides)
+        return ctx
 
-        return _render(request, "upload.html",
-            active_page="upload",
-            document_types=doc_types,
-            type_hierarchy=type_hierarchy,
-            tag_definitions=tag_defs,
-            collections=collections,
-            all_folders=all_folders,
-            context_types=context_types,
-        )
+    @router.get("/upload", response_class=HTMLResponse)
+    async def upload_page(request: Request):
+        """Show the upload form with folder, type hierarchy, and tag editors."""
+        ctx = await _build_upload_context(request)
+        return _render(request, "upload.html", **ctx)
 
     @router.post("/upload")
     async def handle_upload(
@@ -176,26 +192,59 @@ def create_ui_routes(
         document_type: str = Form(None),
         folder_id: str = Form(None),
     ):
-        """Handle file upload from the UI form. Collection determines the MinIO bucket."""
+        """Handle file upload from the UI form. Collection determines the MinIO bucket.
+
+        On validation failure, re-render the upload form inline with
+        an error banner and the user's text-field values preserved.
+        The browser cannot restore the file selection (security), so
+        the user has to re-pick the file — but every other field
+        survives.
+        """
         import io
+
+        # Snapshot text-field values up front so we can echo them back
+        # if validation fails. File input survival isn't possible.
+        form_values = {
+            "context_ref": context_ref or "",
+            "context_type": context_type or "",
+            "uploaded_by": uploaded_by or "",
+            "collection_id": collection_id or "",
+            "folder_id": folder_id or "",
+            "document_type": document_type or "",
+        }
+
+        form_data = await request.form()
+        tags_dict = _extract_tags_from_form(form_data)
+
+        async def _render_error(message: str):
+            ctx = await _build_upload_context(
+                request,
+                error_message=message,
+                form_values=form_values,
+                form_tags=tags_dict,
+            )
+            return _render(request, "upload.html", **ctx)
 
         # Resolve collection for bucket
         coll = await db.get_collection(UUID(collection_id))
         if not coll:
-            return RedirectResponse("/ui/upload", status_code=303)
+            return await _render_error(
+                "The selected collection no longer exists. Pick a different collection."
+            )
         bucket = coll["storage_container"]
 
-        # Build tags from form fields
-        form_data = await request.form()
-        tags_dict = _extract_tags_from_form(form_data)
+        # Validate tags against the governance vocabulary
         tag_errors = await db.validate_tags(tags_dict)
         if tag_errors:
-            return RedirectResponse("/ui/upload", status_code=303)
+            return await _render_error(
+                "Tag validation failed: " + "; ".join(tag_errors)
+            )
 
+        # Validate document type
         if document_type:
             type_error = await db.validate_document_type(document_type)
             if type_error:
-                return RedirectResponse("/ui/upload", status_code=303)
+                return await _render_error(f"Document type validation failed: {type_error}")
         else:
             document_type = None
 

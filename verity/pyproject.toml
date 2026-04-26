@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "Proprietary"}
 authors = [
-    {name = "PremiumIQ"},
+    {name = "Anil Venugopal"},
 ]
 
 # Base dependencies: everything the governance plane needs.

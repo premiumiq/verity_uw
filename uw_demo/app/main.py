@@ -1,4 +1,4 @@
-"""UW Demo Application — Powered by PremiumIQ Verity.
+"""UW Demo Application — Powered by Verity.
 
 A standalone business application that uses the Verity SDK for
 AI governance. Runs on its own port (8001), separate from Verity (8000).
@@ -108,7 +108,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="UW Demo — Powered by PremiumIQ Verity",
+    title="UW Demo — Powered by Verity",
     description="Commercial underwriting platform with AI governance",
     version="0.1.0",
     lifespan=lifespan,
@@ -125,7 +125,7 @@ async def health():
 
 
 # ── STATIC FILES ──────────────────────────────────────────────
-# CSS and images for the UW app (same PremiumIQ branding as Verity)
+# CSS and images for the UW app (same branding as Verity)
 _static_dir = Path(__file__).parent / "ui" / "static"
 app.mount("/static", StaticFiles(directory=str(_static_dir)), name="uw-static")
 

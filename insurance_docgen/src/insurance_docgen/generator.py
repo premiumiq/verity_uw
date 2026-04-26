@@ -241,7 +241,7 @@ def _profile_to_data(profile: CompanyProfile, doc_type: str) -> dict:
     # ACORD 125 specific
     data["mailing_address"] = f"{profile.address}, {profile.city}, {profile.state} {profile.zip}"
     data["application_date"] = "03/01/2026"
-    data["agency"] = "PremiumIQ Insurance Services"
+    data["agency"] = "Verity Insurance Services"
     data["proposed_eff_date"] = profile.effective_date
     data["proposed_exp_date"] = profile.expiration_date
     data["date_business_started"] = profile.date_established

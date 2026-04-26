@@ -65,7 +65,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="PremiumIQ Verity",
+    title="Verity",
     description="AI Trust & Compliance Platform",
     version="0.1.0",
     lifespan=lifespan,

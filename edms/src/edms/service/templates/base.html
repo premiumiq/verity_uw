@@ -1,213 +1,150 @@
+<!--
+  BASE TEMPLATE — Vault Document Service Web UI
+
+  Mirrors the Verity admin base.html layout (left sidebar +
+  content area, breadcrumbs, page title) so a user navigating
+  between Verity admin and Vault sees a single consistent product.
+
+  EXTENDING THIS TEMPLATE:
+  Pages override these Jinja2 blocks:
+  - block title          — Browser tab title
+  - block breadcrumbs    — Breadcrumb navigation items (after "Vault")
+  - block page_title     — H1 heading shown below breadcrumbs
+  - block header_actions — Optional action button on the right
+  - block content        — Main page content
+
+  STACK
+    Fonts:     Poppins via Google Fonts CDN
+    CSS:       Tailwind via CDN (layout utilities)
+               + DaisyUI v4 via CDN (richer interactive widgets)
+               + verity.css (palette + verity-* component primitives)
+    JS:        HTMX via CDN (dynamic page updates without writing JS)
+
+  COMPONENT-SELECTION RULE
+    Page shell, page title, breadcrumb, table, base buttons, badge,
+    forms → verity-* classes (so Vault looks identical to Verity admin).
+    Drawer, modal, toast, dropdown, tab, alert with icon, dropzone
+    → DaisyUI classes. DaisyUI is themed to the Verity palette by the
+    override block at the bottom of verity.css, so the two libraries
+    compose without colour clash.
+
+  Naming note: the user-facing brand is "Vault". Internal code identity
+  (module path edms/, class names EdmsProvider, env var EDMS_URL,
+  database edms_db, Docker service `edms`, port 8002) keeps "EDMS" by
+  design — see /home/avenugopal/.claude/plans/floating-sauteeing-whistle.md.
+-->
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}EDMS{% endblock %}</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Vault{% endblock %}</title>
 
-    <!-- Tailwind CSS via CDN -->
-    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.7.2/dist/full.min.css" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- HTMX for dynamic updates -->
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    <!-- Google Fonts: Poppins (consistent with Verity) -->
+    <!-- Poppins font from Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
-    <style>
-        :root {
-            --edms-bg: #f8f9fb;
-            --edms-sidebar: #1a2332;
-            --edms-blue: #4a90d9;
-            --edms-blue-dark: #2c5f8a;
-            --edms-text: #2d3748;
-            --edms-text-light: #718096;
-            --edms-border: #e2e8f0;
-            --edms-green: #48bb78;
-            --edms-amber: #ed8936;
-            --edms-red: #f56565;
-        }
-        * { font-family: 'Poppins', sans-serif; }
-        body { background: var(--edms-bg); color: var(--edms-text); margin: 0; }
+    <!-- DaisyUI v4 (theme overridden in verity.css below) -->
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.7.2/dist/full.min.css" rel="stylesheet">
 
-        /* Sidebar */
-        .edms-sidebar {
-            width: 220px; min-height: 100vh; background: var(--edms-sidebar);
-            color: rgba(255,255,255,0.85); position: fixed; top: 0; left: 0;
-            display: flex; flex-direction: column;
-        }
-        .edms-sidebar-logo {
-            padding: 20px 16px 12px; font-size: 1.1rem; font-weight: 600;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-        }
-        .edms-sidebar-logo span { color: var(--edms-blue); }
-        .edms-nav-section {
-            font-size: 0.6rem; text-transform: uppercase; letter-spacing: 1px;
-            color: rgba(255,255,255,0.4); padding: 16px 16px 4px; font-weight: 600;
-        }
-        .edms-nav-link {
-            display: flex; align-items: center; gap: 8px; padding: 7px 16px;
-            font-size: 0.8rem; color: rgba(255,255,255,0.7); text-decoration: none;
-            transition: all 0.15s;
-        }
-        .edms-nav-link:hover { background: rgba(255,255,255,0.08); color: #fff; }
-        .edms-nav-link.active { background: rgba(74,144,217,0.2); color: #fff; border-left: 3px solid var(--edms-blue); }
-        .edms-nav-icon { font-size: 0.9rem; width: 20px; text-align: center; }
+    <!-- Tailwind CSS — utility classes for layout (flexbox, spacing, grid) -->
+    <script src="https://cdn.tailwindcss.com"></script>
 
-        /* Main content */
-        .edms-main { margin-left: 220px; padding: 24px 32px; min-height: 100vh; }
+    <!-- HTMX — dynamic page updates without writing JavaScript -->
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
 
-        /* Header */
-        .edms-header {
-            display: flex; align-items: center; justify-content: space-between;
-            margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--edms-border);
-        }
-        .edms-header h1 { font-size: 1.3rem; font-weight: 600; margin: 0; }
-        .edms-breadcrumbs {
-            font-size: 0.75rem; color: var(--edms-text-light); margin-bottom: 4px;
-        }
-        .edms-breadcrumbs a { color: var(--edms-blue); text-decoration: none; }
-        .edms-breadcrumbs .separator { margin: 0 6px; }
-
-        /* Cards */
-        .edms-card {
-            background: #fff; border: 1px solid var(--edms-border);
-            border-radius: 8px; padding: 16px; margin-bottom: 12px;
-        }
-
-        /* Tables */
-        .edms-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-        .edms-table th {
-            text-align: left; padding: 8px 12px; font-weight: 600; font-size: 0.7rem;
-            text-transform: uppercase; letter-spacing: 0.5px; color: var(--edms-text-light);
-            border-bottom: 2px solid var(--edms-border);
-        }
-        .edms-table td { padding: 8px 12px; border-bottom: 1px solid var(--edms-border); }
-        .edms-table tr.clickable { cursor: pointer; }
-        .edms-table tr.clickable:hover { background: rgba(74,144,217,0.04); }
-
-        /* Badges */
-        .edms-badge {
-            display: inline-block; padding: 2px 8px; border-radius: 10px;
-            font-size: 0.65rem; font-weight: 600; text-transform: uppercase;
-        }
-        .edms-badge-pdf { background: #fee2e2; color: #991b1b; }
-        .edms-badge-txt { background: #dbeafe; color: #1e40af; }
-        .edms-badge-complete { background: #dcfce7; color: #166534; }
-        .edms-badge-pending { background: #fef3c7; color: #92400e; }
-        .edms-badge-failed { background: #fee2e2; color: #991b1b; }
-        .edms-badge-restricted { background: #ede9fe; color: #5b21b6; }
-        .edms-badge-freetext { background: #dbeafe; color: #1e40af; }
-        .edms-badge-required { background: #fce7f3; color: #9d174d; }
-
-        /* Buttons */
-        .edms-btn {
-            display: inline-flex; align-items: center; gap: 6px;
-            padding: 6px 14px; border-radius: 6px; font-size: 0.8rem;
-            font-weight: 500; text-decoration: none; border: none; cursor: pointer;
-            transition: all 0.15s;
-        }
-        .edms-btn-primary { background: var(--edms-blue); color: #fff; }
-        .edms-btn-primary:hover { background: var(--edms-blue-dark); }
-        .edms-btn-secondary { background: #fff; color: var(--edms-text); border: 1px solid var(--edms-border); }
-        .edms-btn-secondary:hover { border-color: var(--edms-blue); color: var(--edms-blue); }
-        .edms-btn-danger { background: var(--edms-red); color: #fff; }
-        .edms-btn-danger:hover { background: #e53e3e; }
-        .edms-btn-sm { padding: 3px 10px; font-size: 0.72rem; }
-
-        /* Forms */
-        .edms-input {
-            width: 100%; padding: 8px 12px; border: 1px solid var(--edms-border);
-            border-radius: 6px; font-size: 0.82rem; font-family: 'Poppins', sans-serif;
-        }
-        .edms-input:focus { outline: none; border-color: var(--edms-blue); box-shadow: 0 0 0 2px rgba(74,144,217,0.15); }
-        .edms-label { font-size: 0.72rem; font-weight: 600; color: var(--edms-text-light); margin-bottom: 4px; display: block; }
-        .edms-select { padding: 8px 12px; border: 1px solid var(--edms-border); border-radius: 6px; font-size: 0.82rem; }
-
-        /* Detail grid */
-        .edms-detail-grid { display: grid; grid-template-columns: 160px 1fr; gap: 8px 16px; font-size: 0.82rem; }
-        .edms-detail-label { font-weight: 600; color: var(--edms-text-light); font-size: 0.72rem; text-transform: uppercase; }
-
-        /* Section titles */
-        .edms-section { margin-bottom: 24px; }
-        .edms-section-title { font-size: 0.85rem; font-weight: 600; margin-bottom: 10px; color: var(--edms-text); }
-
-        /* Empty state */
-        .edms-empty { text-align: center; padding: 40px 20px; color: var(--edms-text-light); }
-
-        /* Text preview */
-        .edms-text-preview {
-            background: #f7fafc; border: 1px solid var(--edms-border); border-radius: 6px;
-            padding: 16px; font-family: monospace; font-size: 0.75rem; line-height: 1.5;
-            max-height: 400px; overflow-y: auto; white-space: pre-wrap;
-        }
-
-        /* Page description */
-        .edms-page-description {
-            font-size: 0.82rem; color: var(--edms-text-light); line-height: 1.5;
-            margin: 0 0 16px 0; max-width: 100%;
-        }
-    </style>
+    <!-- Verity custom CSS — palette + verity-* component primitives.
+         Loaded last so its DaisyUI palette override wins. -->
+    <link rel="stylesheet" href="/ui/static/verity.css">
 </head>
 <body>
 
-<!-- ── SIDEBAR ────────────────────────────────────────────── -->
-<div class="edms-sidebar">
-    <div class="edms-sidebar-logo">
-        <span>EDMS</span> Document Management
-        <div style="font-size: 0.55rem; color: rgba(255,255,255,0.4); margin-top: 2px;">By PremiumIQ</div>
-    </div>
+<!-- ============================================================
+     PAGE LAYOUT: Sidebar (fixed left) + Main Content (right)
+     ============================================================ -->
+<div class="verity-layout">
 
-    <div style="flex: 1; overflow-y: auto; padding: 8px 0;">
-        <div class="edms-nav-section">Documents</div>
-        <a href="/ui/" class="edms-nav-link {% if active_page == 'documents' %}active{% endif %}">
-            <span class="edms-nav-icon">&#128196;</span> Browse
-        </a>
-        <a href="/ui/upload" class="edms-nav-link {% if active_page == 'upload' %}active{% endif %}">
-            <span class="edms-nav-icon">&#8679;</span> Upload
-        </a>
-        <a href="/ui/tasks" class="edms-nav-link {% if active_page == 'tasks' %}active{% endif %}">
-            <span class="edms-nav-icon">&#9881;</span> Tasks
-        </a>
+    <!-- ── LEFT SIDEBAR ─────────────────────────────────────── -->
+    <nav class="verity-sidebar">
 
-        <div class="edms-nav-section" style="margin-top: 16px;">Organization</div>
-        <a href="/ui/collections" class="edms-nav-link {% if active_page == 'collections' %}active{% endif %}">
-            <span class="edms-nav-icon">&#128230;</span> Collections
-        </a>
-        <a href="/ui/folders" class="edms-nav-link {% if active_page == 'folders' %}active{% endif %}">
-            <span class="edms-nav-icon">&#128193;</span> Folders
-        </a>
+        <!-- Brand / Logo area -->
+        <div class="verity-sidebar-brand">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <img src="/ui/static/images/vault.png" alt=""
+                     style="width: 28px; height: 28px; object-fit: contain;">
+                <h1 style="margin: 0;">Vault</h1>
+            </div>
+            <div class="verity-subtitle" style="text-transform: none;">BY VERITY.ai</div>
+        </div>
 
-        <div class="edms-nav-section" style="margin-top: 16px;">Governance</div>
-        <a href="/ui/tags" class="edms-nav-link {% if active_page == 'tags' %}active{% endif %}">
-            <span class="edms-nav-icon">&#127991;</span> Tag Definitions
-        </a>
-        <a href="/ui/document-types" class="edms-nav-link {% if active_page == 'document_types' %}active{% endif %}">
-            <span class="edms-nav-icon">&#128203;</span> Document Types
-        </a>
-    </div>
+        <!-- Navigation links -->
+        <div class="verity-sidebar-nav">
 
-    <div style="padding: 12px 16px; border-top: 1px solid rgba(255,255,255,0.15);">
-        <a href="/docs" style="color: rgba(255,255,255,0.6); font-size: 0.75rem; text-decoration: none;"
-           onmouseover="this.style.color='#4a90d9'" onmouseout="this.style.color='rgba(255,255,255,0.6)'">
-            API Docs (Swagger) &rarr;
-        </a>
-        <div style="font-size: 0.6rem; color: rgba(255,255,255,0.3); margin-top: 4px;">EDMS v0.1.0</div>
-    </div>
-</div>
+            <!-- DOCUMENTS -->
+            <div class="verity-nav-section">Documents</div>
+            <a href="/ui/" class="verity-nav-link {% if active_page == 'documents' %}active{% endif %}">
+                <span class="verity-nav-icon">▤</span> Browse
+            </a>
+            <a href="/ui/upload" class="verity-nav-link {% if active_page == 'upload' %}active{% endif %}">
+                <span class="verity-nav-icon">↑</span> Upload
+            </a>
+            <a href="/ui/tasks" class="verity-nav-link {% if active_page == 'tasks' %}active{% endif %}">
+                <span class="verity-nav-icon">⚙</span> Tasks
+            </a>
 
-<!-- ── MAIN CONTENT ───────────────────────────────────────── -->
-<div class="edms-main">
-    <div class="edms-breadcrumbs">
-        <a href="/ui/">EDMS</a>
-        {% block breadcrumbs %}{% endblock %}
-    </div>
+            <!-- ORGANIZATION -->
+            <div class="verity-nav-section" style="margin-top: 10px;">Organization</div>
+            <a href="/ui/collections" class="verity-nav-link {% if active_page == 'collections' %}active{% endif %}">
+                <span class="verity-nav-icon">▦</span> Collections
+            </a>
+            <a href="/ui/folders" class="verity-nav-link {% if active_page == 'folders' %}active{% endif %}">
+                <span class="verity-nav-icon">▣</span> Folders
+            </a>
 
-    <div class="edms-header">
-        <h1>{% block page_title %}EDMS{% endblock %}</h1>
-        <div>{% block header_actions %}{% endblock %}</div>
-    </div>
+            <!-- GOVERNANCE -->
+            <div class="verity-nav-section" style="margin-top: 10px;">Governance</div>
+            <a href="/ui/tags" class="verity-nav-link {% if active_page == 'tags' %}active{% endif %}">
+                <span class="verity-nav-icon">⌬</span> Tag Definitions
+            </a>
+            <a href="/ui/document-types" class="verity-nav-link {% if active_page == 'document_types' %}active{% endif %}">
+                <span class="verity-nav-icon">¶</span> Document Types
+            </a>
 
-    {% block content %}{% endblock %}
+        </div>
+
+        <!-- Footer: API docs link + version -->
+        <div style="padding: 12px 16px; border-top: 1px solid rgba(255,255,255,0.15);">
+            <a href="/docs" target="_blank"
+               style="color: var(--verity-text-sidebar-dim); font-size: 0.75rem; text-decoration: none;">
+                API Docs (Swagger) ↗
+            </a>
+            <div style="font-size: 0.6rem; color: rgba(255,255,255,0.3); margin-top: 4px;">Vault v0.1.0</div>
+        </div>
+    </nav>
+
+    <!-- ── MAIN CONTENT AREA ───────────────────────────────── -->
+    <main class="verity-main">
+
+        <!-- Top bar with breadcrumbs + page title -->
+        <div class="verity-topbar">
+            <div class="verity-breadcrumbs">
+                <a href="/ui/">Vault</a>
+                {% block breadcrumbs %}{% endblock %}
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+                <h1 class="verity-page-title">{% block page_title %}Vault{% endblock %}</h1>
+                <div>{% block header_actions %}{% endblock %}</div>
+            </div>
+        </div>
+
+        <!-- Page content -->
+        <div class="verity-content">
+            {% block content %}{% endblock %}
+        </div>
+
+    </main>
+
 </div>
 
 </body>
