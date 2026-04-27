@@ -36,7 +36,19 @@ The intended outcome: a UW demo with persisted document references, a real submi
 - HITL queue table in uw_db + minimal queue UI
 - 10 demo submissions across DO/GL with varied stages
 
-**Deferred — eventual full ontology trajectory:**
+**Future — Phase 8: evidence base, agentic flow refactor**
+
+When stages become re-entrant (4c revised) the workflow can already loop, but every triage run still re-fetches enrichment data from inside the agent loop (D&B, Pitchbook, FactSet, LexisNexis). Phase 8 separates evidence gathering from synthesis:
+
+- New `external_evidence` table per (submission, source). Idempotent fetch with `fetched_at` + a staleness rule.
+- Pull enrichment fetches **out** of the triage / appetite agent prompts — they read evidence from `external_evidence`, they don't fetch it.
+- A small "Refresh enrichment" UI action triggers fetches; the agents synthesize.
+- Re-running triage with newer information becomes cheap because the evidence base persists.
+- Maps to Cluster 7 (External Data) of the underwriting ontology.
+
+Also in Phase 8: **incremental document processing** — `process-documents` only handles docs with `extraction_status = 'pending'`, so uploading additional docs mid-flow doesn't reclassify or re-extract the ones already done.
+
+**Other deferred items — eventual full ontology trajectory:**
 - Cluster 1: separate `account` / `account_term` / `location` / `account_financials` / `entity_hierarchy`
 - Cluster 2 (full): `extracted_fact` (per-source) + `fact_node` (resolved) split; `gl_coverage_intent` / `do_coverage_intent`
 - Cluster 3: `gl_operation_class`, `gl_exposure_base`
@@ -254,9 +266,27 @@ CREATE TABLE IF NOT EXISTS submission_extraction_audit (
 );
 ```
 
-### 4c. UW-side state machine
+### 4c. UW-side state machine — stage-aware, re-entrant (revised)
 
-- New PostgreSQL ENUM `submission_status_enum`: `intake`, `documents_received`, `documents_processed`, `review`, `approved`, `assessed`, `declined`. `triaged` is dropped — the existing intermediate isn't load-bearing.
+The original 4c had `submission.status` as a flat enum collapsing two orthogonal dimensions (which stage you're in *and* what's happening within it) into one column. That model can't represent re-entry — Information Review going back to Document Processing when a missing doc is uploaded — and forces ad-hoc "in stage X for Y hours" computation. Replacing with a stage-aware model:
+
+**Schema:**
+- New ENUM `submission_stage_enum`: `intake`, `document_processing`, `information_review` (renamed from `review`), `triage`, `appetite`, `declined`. Each value names a workflow *stage*, not a state.
+- New ENUM `stage_status_enum`: `pending`, `running`, `blocked_on_input`, `complete`, `failed`. Each value describes what's happening *within* the stage.
+- New table `submission_stage` — one row per (submission, stage). Carries `status`, `started_at`, `completed_at`, `blocked_reason`, `last_run_id`, `enter_count`. Re-entering a stage flips its status back from `complete` to `running` and bumps `enter_count`.
+- **Dropped:** `submission_status_enum`, `submission.status` column, `workflow_step` table. Stage info is sole-sourced from `submission_stage`.
+
+**ALLOWED_TRANSITIONS** moves into the helper as per-stage rules: which `stage_status` values can transition to which, plus which stages can be re-entered from where (e.g. `information_review` and later stages can pull `document_processing` back to `running`).
+
+**Helpers in `uw_demo/app/db/state.py`:**
+- `transition_stage(cur, submission_id, stage, new_status, ...)` — guards transitions, writes a `state_change` event.
+- `current_stage(cur, submission_id)` — returns the active stage (the lowest-priority stage whose status is not `complete`, or `declined` / `appetite` if all done).
+- `record_event(...)` — unchanged.
+
+**UI implications:**
+- Action bar derives the next action from `current_stage(...)` + that stage's `status`.
+- The horizontal stepper at the top of the detail page renders one circle per stage, color-coded by `stage_status` (green = complete, amber + pulse = running, grey = pending, blue = blocked_on_input, red = failed).
+- Submissions list shows the current stage name + its status as the pill.
 - New append-only table `submission_event` — the canonical UW-side audit log. Covers state changes, user actions, pipeline lifecycle events, and system events in one stream so the Audit Trail tab can render a unified timeline (merged with Verity's decision log at the UI layer). The originally planned narrower `submission_status_history` is subsumed by this; status changes are just the `event_category='state_change'` rows.
 
   ```sql

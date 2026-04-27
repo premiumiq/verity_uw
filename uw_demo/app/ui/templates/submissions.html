@@ -15,26 +15,28 @@
 
 {% block content %}
 
-<!-- KPI Summary Cards -->
+<!-- KPI Summary Cards — counts by current stage. Keys are stage
+     names from STAGE_ORDER plus the synthetic 'all_complete' bucket
+     for submissions whose forward stages are all done. -->
 <div class="verity-stats-grid">
     <div class="verity-card">
         <div class="verity-card-value">{{ status_counts.get('intake', 0) }}</div>
         <div class="verity-card-header">Intake</div>
     </div>
     <div class="verity-card">
-        <div class="verity-card-value">{{ status_counts.get('documents_processed', 0) }}</div>
-        <div class="verity-card-header">Processing</div>
+        <div class="verity-card-value">{{ status_counts.get('document_processing', 0) }}</div>
+        <div class="verity-card-header">Document Processing</div>
     </div>
     <div class="verity-card">
-        <div class="verity-card-value">{{ status_counts.get('review', 0) }}</div>
-        <div class="verity-card-header">Pending Review</div>
+        <div class="verity-card-value">{{ status_counts.get('information_review', 0) }}</div>
+        <div class="verity-card-header">Information Review</div>
     </div>
     <div class="verity-card">
-        <div class="verity-card-value">{{ status_counts.get('approved', 0) }}</div>
-        <div class="verity-card-header">Ready to Assess</div>
+        <div class="verity-card-value">{{ status_counts.get('triage', 0) + status_counts.get('appetite', 0) }}</div>
+        <div class="verity-card-header">Risk Assessment</div>
     </div>
     <div class="verity-card">
-        <div class="verity-card-value">{{ status_counts.get('triaged', 0) + status_counts.get('assessed', 0) }}</div>
+        <div class="verity-card-value">{{ status_counts.get('all_complete', 0) }}</div>
         <div class="verity-card-header">Assessed</div>
     </div>
     <div class="verity-card">
@@ -67,21 +69,23 @@
             <td>{{ sub.sic_description[:30] if sub.sic_description else '—' }}{% if sub.sic_description and sub.sic_description|length > 30 %}...{% endif %}</td>
             <td>{{ sub.doc_count if sub.doc_count else '—' }}</td>
             <td>
-                {% if sub.status == 'assessed' %}
-                    <span class="verity-badge verity-badge-champion">Assessed</span>
-                {% elif sub.status == 'triaged' %}
-                    <span class="verity-badge verity-badge-staging">Triaged</span>
-                {% elif sub.status == 'approved' %}
-                    <span class="verity-badge verity-badge-candidate">Approved</span>
-                {% elif sub.status == 'review' %}
-                    <span class="verity-badge verity-badge-shadow">Review</span>
-                {% elif sub.status == 'documents_processed' %}
-                    <span class="verity-badge verity-badge-staging">Docs Done</span>
-                {% elif sub.status == 'documents_received' %}
-                    <span class="verity-badge verity-badge-staging">Docs Received</span>
-                {% else %}
-                    <span class="verity-badge verity-badge-draft">Intake</span>
-                {% endif %}
+                {# Pill is driven by current_stage + current_stage_status.
+                   Color reads from the stage-status semantics:
+                   complete=champion (green), running=shadow (amber),
+                   blocked_on_input=staging (blue-ish), failed=high (red),
+                   pending=draft (grey). #}
+                {% set s = sub.current_stage %}
+                {% set st = sub.current_stage_status %}
+                {%- set badge_class =
+                       'verity-badge-champion' if st == 'complete'
+                  else 'verity-badge-shadow'   if st == 'running'
+                  else 'verity-badge-staging'  if st == 'blocked_on_input'
+                  else 'verity-badge-high'     if st == 'failed'
+                  else 'verity-badge-draft' -%}
+                <span class="verity-badge {{ badge_class }}"
+                      title="{{ s | replace('_',' ') | title }} — {{ st | replace('_',' ') | title }}">
+                  {{ s | replace('_',' ') | title }}
+                </span>
             </td>
             <td>
                 {% if sub.risk_score == 'Green' %}

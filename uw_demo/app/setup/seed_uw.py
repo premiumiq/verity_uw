@@ -36,6 +36,10 @@ import psycopg
 # We import SUBMISSION_DOCS so this script and seed_edms agree on
 # which files belong to which submission. Single source of truth.
 from uw_demo.app.setup.seed_edms import SUBMISSION_DOCS
+# Stage-aware state machine helpers — the seed script uses the same
+# transition path the runtime uses so we don't drift away from rule
+# checks in seed-time data shaping.
+from uw_demo.app.db.state import ensure_stages, transition_stage
 
 
 # ── DATABASE URL ─────────────────────────────────────────────
@@ -465,7 +469,9 @@ ASSESSMENTS_BY_SUBMISSION: dict[str, dict[str, dict]] = {
 
 async def _seed_submission_row(cur, sub: dict) -> None:
     """Insert one row into `submission`. Idempotency is handled by the
-    caller before this is invoked."""
+    caller before this is invoked. The submission table has no
+    `status` column — stage state lives in submission_stage rows
+    (seeded by _seed_submission_stages)."""
     await cur.execute(
         """INSERT INTO submission (
             id, named_insured, lob, fein, entity_type,
@@ -473,14 +479,14 @@ async def _seed_submission_row(cur, sub: dict) -> None:
             annual_revenue, employee_count, board_size,
             independent_directors, effective_date, expiration_date,
             limits_requested, retention_requested,
-            prior_carrier, prior_premium, status
+            prior_carrier, prior_premium
         ) VALUES (
             %s, %s, %s, %s, %s,
             %s, %s, %s,
             %s, %s, %s,
             %s, %s, %s,
             %s, %s,
-            %s, %s, %s
+            %s, %s
         )""",
         (
             sub["id"], sub["named_insured"], sub["lob"],
@@ -492,7 +498,6 @@ async def _seed_submission_row(cur, sub: dict) -> None:
             sub.get("effective_date"), sub.get("expiration_date"),
             sub.get("limits_requested"), sub.get("retention_requested"),
             sub.get("prior_carrier"), sub.get("prior_premium"),
-            sub.get("status", "intake"),
         ),
     )
 
@@ -512,57 +517,74 @@ async def _seed_loss_history(cur, sub: dict) -> None:
         )
 
 
-async def _seed_workflow_steps(cur, sub: dict) -> None:
-    """Insert workflow_step rows reflecting the submission's status.
-    The stepper in the UI reads from this table.
+async def _seed_submission_stages(cur, sub: dict) -> None:
+    """Seed submission_stage rows so the new submission lands in
+    the same workflow position the old `status` enum implied.
 
-    Each step's status is derived from the submission status. Today
-    workflow_step is a UI cache; the formal state machine moves
-    elsewhere in a later phase."""
+    Status mapping (from the legacy `status` field on the seed dict
+    to the per-stage statuses we now write):
+
+      intake               — all stages pending
+      documents_received   — intake.complete,
+                             document_processing.blocked_on_input
+                             (waiting for the user to click Process)
+      review               — intake + document_processing complete,
+                             information_review.running
+      approved             — through information_review complete
+      assessed             — all forward stages complete
+      declined             — declined.failed (terminal)
+
+    Re-uses the runtime's transition_stage helper so the audit
+    events the runtime would emit are emitted here too — seeded
+    submissions get a coherent submission_event timeline.
+    """
+    sid = sub["id"]
     status = sub.get("status", "intake")
-    now = datetime.now(timezone.utc)
 
-    # Determine which steps are 'complete' / 'pending' based on
-    # where the submission sits in the workflow.
-    completed_steps: set[str] = {"intake"}
-    if status in ("documents_received", "documents_processed",
-                   "review", "approved", "assessed"):
-        # 'documents_received' is between intake and document_processing —
-        # docs have been discovered (Vault index pulled into uw_db) but
-        # the classify+extract pipeline hasn't run yet. Intake is done,
-        # document_processing is still pending.
-        pass
-    if status in ("documents_processed", "review", "approved", "assessed"):
-        completed_steps.add("document_processing")
+    # Always create the row-per-stage skeleton first.
+    await ensure_stages(cur, sid)
+
+    # Intake is "we have the submission record" — true by virtue of
+    # the row existing. Transition unconditionally so even the
+    # freshest 'intake' submission has its first stage marked done
+    # and current_stage moves to document_processing.
+    await transition_stage(cur, sid, "intake", "complete",
+                            changed_by="seed_script",
+                            reason="seed: intake auto-complete (row exists)")
+
+    # Walk forward stages to the position implied by the legacy
+    # `status` field. transition_stage is idempotent on same-status,
+    # so unhit stages stay at their default 'pending'.
+
+    if status == "documents_received":
+        await transition_stage(cur, sid, "document_processing",
+                                "blocked_on_input",
+                                changed_by="seed_script",
+                                blocked_reason="awaiting_pipeline_trigger",
+                                reason="seed: docs discovered, awaiting processing")
+
+    if status in ("review", "approved", "assessed"):
+        await transition_stage(cur, sid, "document_processing", "complete",
+                                changed_by="seed_script",
+                                reason="seed: doc-processing pipeline finished")
+
+    if status == "review":
+        await transition_stage(cur, sid, "information_review", "running",
+                                changed_by="seed_script",
+                                reason="seed: HITL review pending")
+
     if status in ("approved", "assessed"):
-        # extraction_review is either complete (HITL approved) or
-        # skipped (no flags). Mark complete for the seed.
-        completed_steps.add("extraction_review")
-    if status == "assessed":
-        completed_steps.add("triage")
-        completed_steps.add("appetite")
+        await transition_stage(cur, sid, "information_review", "complete",
+                                changed_by="seed_script",
+                                reason="seed: review approved (auto or HITL)")
 
-    workflow_steps = [
-        ("intake", 1),
-        ("document_processing", 2),
-        ("extraction_review", 3),
-        ("triage", 4),
-        ("appetite", 5),
-    ]
-    for step_name, step_order in workflow_steps:
-        is_done = step_name in completed_steps
-        await cur.execute(
-            """INSERT INTO workflow_step (
-                submission_id, step_name, step_order, status,
-                completed_at, completed_by
-            ) VALUES (%s, %s, %s, %s, %s, %s)""",
-            (
-                sub["id"], step_name, step_order,
-                "complete" if is_done else "pending",
-                now if is_done else None,
-                "seed_script" if is_done else None,
-            ),
-        )
+    if status == "assessed":
+        await transition_stage(cur, sid, "triage", "complete",
+                                changed_by="seed_script",
+                                reason="seed: triage complete")
+        await transition_stage(cur, sid, "appetite", "complete",
+                                changed_by="seed_script",
+                                reason="seed: appetite complete")
 
 
 async def _seed_documents(cur, sub: dict, edms_doc_ids: dict[str, str]) -> int:
@@ -600,10 +622,12 @@ async def _seed_documents(cur, sub: dict, edms_doc_ids: dict[str, str]) -> int:
 
 
 async def _seed_extractions(cur, sub: dict) -> int:
-    """Insert per-field extraction rows for submissions in stages
-    that should have extraction data (review / approved / assessed).
-    Uses only columns that exist in the current schema; provenance
-    columns are added in a later phase and will be backfilled then."""
+    """Insert per-field extraction rows in the new ai_*/hitl_* model.
+
+    Seeded rows populate the AI channel (`ai_value`, `ai_confidence`,
+    `ai_found=TRUE`). The HITL channel stays NULL — Phase 6 will add
+    rich provenance fields and any seeded human edits when the
+    sparkle/pen UX lands."""
     fields = EXTRACTIONS_BY_SUBMISSION.get(sub["id"])
     if not fields:
         return 0
@@ -611,9 +635,10 @@ async def _seed_extractions(cur, sub: dict) -> int:
     for f in fields:
         await cur.execute(
             """INSERT INTO submission_extraction (
-                submission_id, field_name, extracted_value,
-                confidence, needs_review, review_reason
-            ) VALUES (%s, %s, %s, %s, %s, %s)
+                submission_id, field_name,
+                ai_value, ai_confidence, ai_found,
+                needs_review, review_reason
+            ) VALUES (%s, %s, %s, %s, TRUE, %s, %s)
             ON CONFLICT (submission_id, field_name) DO NOTHING
             """,
             (
@@ -697,7 +722,7 @@ async def seed_uw_db(edms_doc_ids: dict[str, str] | None = None):
 
                 await _seed_submission_row(cur, sub)
                 await _seed_loss_history(cur, sub)
-                await _seed_workflow_steps(cur, sub)
+                await _seed_submission_stages(cur, sub)
 
                 # For non-intake rows, seed documents + extractions
                 # (and assessments for 'assessed').

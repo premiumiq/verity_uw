@@ -58,59 +58,72 @@
         </div>
     </div>
 
-    <!-- Horizontal stepper. Connector segments between circles are
-         colored complete (green) when the LEFT step finished, so the
-         "filled bar" grows from left to right as the pipeline runs.
+    <!-- Horizontal stepper. One circle per submission_stage row.
+         The route pre-orders `stages` in canonical order (intake → ...
+         → declined). The terminal `declined` row is hidden unless its
+         status is non-pending (i.e. the submission was actually
+         declined) so the happy-path stepper has 5 circles.
 
-         Class mapping for each step:
-           - complete  → green     ('verity-step-complete')
-           - failed    → red       ('verity-step-failed')
-           - skipped   → muted     ('verity-step-skipped')
-           - running   → amber+pulse ('verity-step-active') — set by live pipeline
-           - the FIRST pending step also → amber ('verity-step-active')
-             so the "current stage" the context strip names is visually
-             highlighted on the stepper itself
-           - subsequent pending steps → grey ('verity-step-pending')
-
-         A namespace flag tracks whether we've already crowned a step
-         "current" — Jinja loop scopes don't share variables otherwise. -->
-    {%- set ns = namespace(current_seen=false) -%}
+         Class mapping per stage_status:
+           - complete         → green     ('verity-step-complete')
+           - failed           → red       ('verity-step-failed')
+           - blocked_on_input → blue      ('verity-step-skipped')
+           - running          → amber+pulse ('verity-step-active')
+           - first non-complete pending  → amber ('verity-step-active') too
+             (so the "current stage" reads visually even when the
+              system is idle on a pending stage)
+           - subsequent pending → grey ('verity-step-pending') -->
+    {%- set ns = namespace(current_seen=false, ordinal=0) -%}
+    {%- set forward_stages = stages | rejectattr('stage', 'equalto', 'declined') | list -%}
+    {%- set declined_row = (stages | selectattr('stage', 'equalto', 'declined') | list | first) -%}
     <div class="verity-stepper">
-        {% for step in workflow_steps %}
-            {%- if step.status == 'complete' -%}
+        {% for stage_row in forward_stages %}
+            {%- set ns.ordinal = ns.ordinal + 1 -%}
+            {%- if stage_row.status == 'complete' -%}
                 {%- set step_class = 'verity-step-complete' -%}
-            {%- elif step.status == 'failed' -%}
+            {%- elif stage_row.status == 'failed' -%}
                 {%- set step_class = 'verity-step-failed' -%}
-            {%- elif step.status == 'skipped' -%}
+            {%- elif stage_row.status == 'blocked_on_input' -%}
                 {%- set step_class = 'verity-step-skipped' -%}
-            {%- elif step.status == 'running' -%}
+                {%- set ns.current_seen = true -%}
+            {%- elif stage_row.status == 'running' -%}
                 {%- set step_class = 'verity-step-active' -%}
                 {%- set ns.current_seen = true -%}
             {%- elif not ns.current_seen -%}
-                {# first non-complete pending step — promote to current/active #}
                 {%- set step_class = 'verity-step-active' -%}
                 {%- set ns.current_seen = true -%}
             {%- else -%}
                 {%- set step_class = 'verity-step-pending' -%}
             {%- endif -%}
-            {%- set tooltip = (step.step_name | replace('_',' ') | title) ~ ' — ' ~ (step.status | title) -%}
-            {%- if step.completed_at -%}
-                {%- set tooltip = tooltip ~ ' (' ~ step.completed_at.strftime('%b %d, %H:%M') ~ ')' -%}
+            {%- set tooltip = (stage_row.stage | replace('_',' ') | title) ~ ' — ' ~ (stage_row.status | replace('_',' ') | title) -%}
+            {%- if stage_row.completed_at -%}
+                {%- set tooltip = tooltip ~ ' (' ~ stage_row.completed_at.strftime('%b %d, %H:%M') ~ ')' -%}
+            {%- elif stage_row.blocked_reason -%}
+                {%- set tooltip = tooltip ~ ' — ' ~ stage_row.blocked_reason -%}
             {%- endif -%}
             <div class="verity-step {{ step_class }}" title="{{ tooltip }}">
-                <div class="verity-step-circle">{{ step.step_order }}</div>
-                <div class="verity-step-label">{{ step.step_name | replace('_', ' ') | title }}</div>
-                {% if step.completed_at %}
-                <div class="verity-step-time">{{ step.completed_at.strftime('%b %d') }}</div>
+                <div class="verity-step-circle">{{ ns.ordinal }}</div>
+                <div class="verity-step-label">{{ stage_row.stage | replace('_', ' ') | title }}</div>
+                {% if stage_row.completed_at %}
+                <div class="verity-step-time">{{ stage_row.completed_at.strftime('%b %d') }}</div>
                 {% endif %}
             </div>
-            {# Connector between this step and the next one — colored
-               complete when this step finished. Skip after last step. #}
             {% if not loop.last %}
-                {%- set connector_class = 'verity-connector-complete' if step.status == 'complete' else '' -%}
+                {%- set connector_class = 'verity-connector-complete' if stage_row.status == 'complete' else '' -%}
                 <div class="verity-step-connector {{ connector_class }}"></div>
             {% endif %}
         {% endfor %}
+
+        {# Declined is shown only when actually declined — no point
+           taking visual space for a terminal stage we never entered. #}
+        {% if declined_row and declined_row.status != 'pending' %}
+            <div class="verity-step-connector"></div>
+            <div class="verity-step verity-step-failed"
+                 title="Declined — {{ declined_row.status | title }}{% if declined_row.completed_at %} ({{ declined_row.completed_at.strftime('%b %d, %H:%M') }}){% endif %}">
+                <div class="verity-step-circle">×</div>
+                <div class="verity-step-label">Declined</div>
+            </div>
+        {% endif %}
     </div>
 
     {% if execution_context_id %}
