@@ -1,4 +1,4 @@
-# PremiumIQ Verity
+# Verity - AI Trust and Compliance Platform
 
 **The governance infrastructure that AI applications run on.** Compliant, auditable, and built for regulated industries — starting with P&C insurance.
 
