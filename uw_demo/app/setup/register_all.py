@@ -166,9 +166,11 @@ async def main():
         await seed_platform_settings(verity)
 
         # ── STEP 19: Seed UW database ─────────────────────────
-        print("Step 19: Seeding UW database (submissions + loss history)...")
+        # Pass the EDMS doc id map so seed_uw can populate uw_db's
+        # `document` table for non-intake submissions (rows 6-10).
+        print("Step 19: Seeding UW database (submissions + docs + extractions + assessments)...")
         from uw_demo.app.setup.seed_uw import seed_uw_db
-        await seed_uw_db()
+        await seed_uw_db(edms_doc_ids=edms_doc_ids)
 
         print("\n✓ Seed complete. All demo data loaded.")
         print("  Verity:  http://localhost:8000/admin/")

@@ -12,10 +12,10 @@
 
 <!-- Data Completeness Metric -->
 {% set total = extractions|length %}
-{% set present = extractions|selectattr('extracted_value')|list|length %}
+{% set present = extractions|selectattr('ai_value')|list|length %}
 {% set pct = (present / total * 100) if total > 0 else 0 %}
 {% set flagged = extractions|selectattr('needs_review')|list %}
-{% set missing = extractions|rejectattr('extracted_value')|list %}
+{% set missing = extractions|rejectattr('ai_value')|list %}
 
 <div class="verity-card">
     <div class="verity-card-header">Data Completeness: {{ "%.1f"|format(pct) }}% ({{ present }}/{{ total }} fields)</div>
@@ -54,20 +54,20 @@
             <tr>
                 <td><code>{{ ext.field_name }}</code></td>
                 <td>
-                    {% if ext.extracted_value %}
-                        {{ ext.extracted_value }}
+                    {% if ext.ai_value %}
+                        {{ ext.ai_value }}
                     {% else %}
                         <span class="verity-badge verity-badge-high">Not found</span>
                     {% endif %}
                 </td>
                 <td>
-                    {% if ext.confidence is not none %}
-                        {% if ext.confidence >= 0.85 %}
-                            <span class="verity-badge verity-badge-champion">{{ "%.0f"|format(ext.confidence * 100) }}%</span>
-                        {% elif ext.confidence >= 0.70 %}
-                            <span class="verity-badge verity-badge-shadow">{{ "%.0f"|format(ext.confidence * 100) }}%</span>
+                    {% if ext.ai_confidence is not none %}
+                        {% if ext.ai_confidence >= 0.85 %}
+                            <span class="verity-badge verity-badge-champion">{{ "%.0f"|format(ext.ai_confidence * 100) }}%</span>
+                        {% elif ext.ai_confidence >= 0.70 %}
+                            <span class="verity-badge verity-badge-shadow">{{ "%.0f"|format(ext.ai_confidence * 100) }}%</span>
                         {% else %}
-                            <span class="verity-badge verity-badge-high">{{ "%.0f"|format(ext.confidence * 100) }}%</span>
+                            <span class="verity-badge verity-badge-high">{{ "%.0f"|format(ext.ai_confidence * 100) }}%</span>
                         {% endif %}
                     {% else %}
                         —
@@ -123,28 +123,28 @@
         <tr>
             <td><code>{{ ext.field_name }}</code></td>
             <td>
-                {% if ext.overridden %}
-                    {{ ext.override_value }}
+                {% if ext.hitl_value %}
+                    {{ ext.hitl_value }}
                     <span class="verity-badge verity-badge-shadow">overridden</span>
                 {% else %}
-                    {{ ext.extracted_value or '—' }}
+                    {{ ext.ai_value or '—' }}
                 {% endif %}
             </td>
             <td>
-                {% if ext.confidence is not none %}
-                    {% if ext.confidence >= 0.85 %}
-                        <span class="verity-badge verity-badge-champion">{{ "%.0f"|format(ext.confidence * 100) }}%</span>
-                    {% elif ext.confidence >= 0.70 %}
-                        <span class="verity-badge verity-badge-shadow">{{ "%.0f"|format(ext.confidence * 100) }}%</span>
+                {% if ext.ai_confidence is not none %}
+                    {% if ext.ai_confidence >= 0.85 %}
+                        <span class="verity-badge verity-badge-champion">{{ "%.0f"|format(ext.ai_confidence * 100) }}%</span>
+                    {% elif ext.ai_confidence >= 0.70 %}
+                        <span class="verity-badge verity-badge-shadow">{{ "%.0f"|format(ext.ai_confidence * 100) }}%</span>
                     {% else %}
-                        <span class="verity-badge verity-badge-high">{{ "%.0f"|format(ext.confidence * 100) }}%</span>
+                        <span class="verity-badge verity-badge-high">{{ "%.0f"|format(ext.ai_confidence * 100) }}%</span>
                     {% endif %}
                 {% else %}
                     —
                 {% endif %}
             </td>
             <td>
-                {% if ext.overridden %}
+                {% if ext.hitl_value %}
                     <span class="verity-badge verity-badge-shadow">Overridden</span>
                 {% elif ext.needs_review %}
                     <span class="verity-badge verity-badge-high">{{ ext.review_reason }}</span>

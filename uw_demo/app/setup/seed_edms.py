@@ -37,6 +37,7 @@ TIMEOUT = 60.0
 # ── 4 UW SUBMISSIONS (go to 'underwriting' collection) ──────
 
 SUBMISSION_DOCS = {
+    # Rows 1-4: existing 4 submissions, all in 'intake' status.
     "00000001-0001-0001-0001-000000000001": [
         "do_app_acme_dynamics.pdf",
         "loss_run_acme_dynamics.txt",
@@ -55,6 +56,42 @@ SUBMISSION_DOCS = {
     "00000004-0004-0004-0004-000000000004": [
         "gl_app_atlas_building.pdf",
         "loss_run_acme_dynamics.txt",
+    ],
+    # Row 5: 5th 'intake' submission — DO, small revenue, data analytics.
+    "00000005-0005-0005-0005-000000000005": [
+        "do_app_brightline_analytics.pdf",
+        "loss_run_brightline_analytics.txt",
+        "financial_stmt_brightline_analytics.txt",
+    ],
+    # Row 6: 'review' — DO, mid revenue, software.
+    "00000006-0006-0006-0006-000000000006": [
+        "do_app_pinnacle_software.pdf",
+        "loss_run_pinnacle_software.txt",
+    ],
+    # Row 7: 'review' — DO, large revenue, hardware mfg.
+    "00000007-0007-0007-0007-000000000007": [
+        "do_app_westfield_manufacturing.pdf",
+        "loss_run_westfield_manufacturing.txt",
+        "financial_stmt_westfield_manufacturing.txt",
+        "board_resolution_westfield_manufacturing.txt",
+    ],
+    # Row 8: 'approved' — GL, mid revenue, precision parts.
+    "00000008-0008-0008-0008-000000000008": [
+        "gl_app_cascade_precision.pdf",
+        "loss_run_cascade_precision.txt",
+        "supplemental_gl_cascade_precision.txt",
+    ],
+    # Row 9: 'approved' — GL, large revenue, structural metal.
+    "00000009-0009-0009-0009-000000000009": [
+        "gl_app_ironworks_heavy.pdf",
+        "loss_run_ironworks_heavy.txt",
+        "supplemental_gl_ironworks_heavy.txt",
+    ],
+    # Row 10: 'assessed' — GL, mid-large revenue, chemicals.
+    "00000010-0010-0010-0010-000000000010": [
+        "gl_app_bayview_chemical.pdf",
+        "loss_run_bayview_chemical.txt",
+        "supplemental_gl_bayview_chemical.txt",
     ],
 }
 

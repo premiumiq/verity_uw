@@ -44,11 +44,16 @@ async def get_submission_context(submission_id: str) -> dict:
             cols = [d.name for d in cur.description]
             sub = dict(zip(cols, row))
 
-            # Get finalized extracted fields (overridden values take precedence)
+            # Get finalized extracted fields. The two-channel model
+            # (ai_*, hitl_*) means the displayed/used value is
+            # hitl_value if set, else ai_value. `overridden` is
+            # derived: the field has a HITL value.
             await cur.execute(
                 """SELECT field_name,
-                    CASE WHEN overridden THEN override_value ELSE extracted_value END AS value,
-                    confidence, overridden, needs_review
+                    COALESCE(hitl_value, ai_value) AS value,
+                    ai_confidence,
+                    (hitl_value IS NOT NULL) AS overridden,
+                    needs_review
                 FROM submission_extraction
                 WHERE submission_id = %s""",
                 (submission_id,),
@@ -100,7 +105,6 @@ async def get_submission_context(submission_id: str) -> dict:
             "retention_requested": sub.get("retention_requested"),
             "prior_carrier": sub.get("prior_carrier"),
             "prior_premium": sub.get("prior_premium"),
-            "status": sub.get("status"),
         },
         "extracted_fields": extracted_fields,
         "loss_history": loss_history,
@@ -195,36 +199,50 @@ async def store_extraction_result(
                 if needs_review:
                     flagged += 1
 
-                # Upsert — update if re-running extraction
+                # Upsert into the AI channel of submission_extraction.
+                # ai_found is TRUE for any field the AI produced a row
+                # for — even if the produced value is NULL ("AI looked
+                # but didn't find") which is the unextractable case.
+                # hitl_* columns are untouched here; the approve_extraction
+                # handler is the only writer to that channel.
+                ai_found = field_name not in unextractable
+                # Map the extractor's free-form note to source_snippet
+                # (the verbatim quote that drives the sparkle tooltip);
+                # if the extractor didn't supply one we leave it null.
+                source_snippet = note or None
                 await cur.execute(
                     """INSERT INTO submission_extraction (
-                        submission_id, field_name, extracted_value,
-                        confidence, extraction_notes, needs_review, review_reason,
-                        source_document_id
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        submission_id, field_name,
+                        ai_value, ai_confidence, ai_found,
+                        source_document_id, source_snippet,
+                        needs_review, review_reason
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (submission_id, field_name)
                     DO UPDATE SET
-                        extracted_value = EXCLUDED.extracted_value,
-                        confidence = EXCLUDED.confidence,
-                        extraction_notes = EXCLUDED.extraction_notes,
-                        needs_review = EXCLUDED.needs_review,
-                        review_reason = EXCLUDED.review_reason,
-                        source_document_id = EXCLUDED.source_document_id
+                        ai_value           = EXCLUDED.ai_value,
+                        ai_confidence      = EXCLUDED.ai_confidence,
+                        ai_found           = EXCLUDED.ai_found,
+                        source_document_id = EXCLUDED.source_document_id,
+                        source_snippet     = EXCLUDED.source_snippet,
+                        needs_review       = EXCLUDED.needs_review,
+                        review_reason      = EXCLUDED.review_reason
                     """,
                     (
-                        submission_id, field_name, str(value) if value is not None else None,
-                        confidence, note, needs_review, review_reason,
-                        source_document_id,
+                        submission_id, field_name,
+                        str(value) if value is not None else None,
+                        confidence, ai_found,
+                        source_document_id, source_snippet,
+                        needs_review, review_reason,
                     ),
                 )
                 stored += 1
 
-            # Update submission status
-            status = "review" if flagged > 0 else "documents_processed"
-            await cur.execute(
-                "UPDATE submission SET status = %s, updated_at = NOW() WHERE id = %s",
-                (status, submission_id),
-            )
+            # NOTE: stage transitions are owned by the route handler
+            # (run_document_processing decides whether to flip
+            # information_review to running vs complete based on
+            # whether any field needs_review). This tool no longer
+            # writes to the old submission.status column — that
+            # column was dropped in 4.1.
 
         await conn.commit()
 
