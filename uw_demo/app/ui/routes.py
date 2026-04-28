@@ -501,6 +501,10 @@ def _compute_next_action(
     function just decides what UI button to show right now."""
     sid = str(submission_id)
 
+    # Pretty stage labels — used both for "running" indicators and
+    # any contextual messaging the action bar might show.
+    stage_label = stage.replace("_", " ").title()
+
     # Document Processing stage covers both "discovery" (pull
     # references from Vault) and "processing" (classify + extract).
     # Discovery is implied by has_docs; processing is the next step
@@ -514,15 +518,21 @@ def _compute_next_action(
             return {"label": "Process Documents",
                     "url": f"/submissions/{sid}/process-documents",
                     "method": "POST"}
-        # running: action bar shows nothing; the page polls.
+        if stage_status == "running":
+            # AI is processing documents server-side. There's
+            # nothing for the user to click; the action bar
+            # shows a "running" indicator so coming back to the
+            # page mid-run doesn't read as "Workflow Complete".
+            return {"label": f"{stage_label} in progress…",
+                    "running": True}
         return None
 
     if stage == "information_review":
+        # Information Review is HITL — `running` here means "user
+        # is in the middle of reviewing", not "AI is running".
+        # The action button shows in both running and
+        # blocked_on_input so the user can complete the review.
         if stage_status in ("running", "blocked_on_input"):
-            # Per-field corrections happen inline on the Details
-            # tab (sparkle + pen). The action bar's job is just
-            # to mark the review complete and let the workflow
-            # advance to triage + appetite.
             return {"label": "Complete Review",
                     "url": f"/submissions/{sid}/approve-extraction",
                     "method": "POST"}
@@ -537,7 +547,10 @@ def _compute_next_action(
             return {"label": "Assess Risk",
                     "url": f"/submissions/{sid}/assess-risk",
                     "method": "POST"}
-        return None  # running → poll; complete → all done
+        if stage_status == "running":
+            return {"label": f"{stage_label} in progress…",
+                    "running": True}
+        return None  # complete — handled by the all-done case below
 
     # intake / declined / unknown — no contextual action.
     return None
