@@ -160,7 +160,7 @@ canonical_requirements:
     description: |
       Documentation of purpose, inputs, outputs, authority thresholds,
       validation results — sufficient for a qualified actuarial reviewer
-      (ASOP 56 §3.4).
+      (ASOP 56 Sec. 3.4).
     sort_seq: 20
     coverage:
       level: substantial
@@ -191,7 +191,7 @@ canonical_requirements:
         For LLM agents, full scope of limitations (hallucination risk, prompt
         sensitivity, out-of-distribution behavior) not automatically characterized.
         Supplementary documentation required. Proactive disclosure to
-        management (ASOP 56 §3.8) is a customer process.
+        management (ASOP 56 Sec. 3.8) is a customer process.
     feature_links:
       - { code: agent_version_registration, role: supporting }
       - { code: validation_report_storage, role: supporting }
@@ -728,7 +728,7 @@ canonical_requirements:
     title: Annual compliance certification
     description: |
       Annual certification to the regulator that AI systems comply with
-      applicable requirements (CO §10-3-1104.9(5); CT MC-25).
+      applicable requirements (CO Sec. 10-3-1104.9(5); CT MC-25).
     sort_seq: 20
     coverage:
       level: partial
@@ -801,7 +801,7 @@ provisions:
 
   # ----- SR 11-7 (12 provisions) ---------------------------------------------
   - framework: SR_11_7
-    citation: "§I — Model inventory & registration"
+    citation: "Sec. I — Model inventory & registration"
     title: Model inventory & registration
     text: All models must be identified, catalogued, and tracked.
     sort_seq: 1
@@ -809,7 +809,7 @@ provisions:
       - { canonical: model_inventory_registration, match_strength: 1.00 }
 
   - framework: SR_11_7
-    citation: "§I — Model ownership & accountability"
+    citation: "Sec. I — Model ownership & accountability"
     title: Model ownership & accountability
     text: Each model must have a designated owner.
     sort_seq: 2
@@ -817,7 +817,7 @@ provisions:
       - { canonical: model_ownership_accountability, match_strength: 1.00 }
 
   - framework: SR_11_7
-    citation: "§II.A — Conceptual soundness"
+    citation: "Sec. II.A — Conceptual soundness"
     title: Conceptual soundness
     text: Model design must be documented — theory, assumptions, logic.
     sort_seq: 3
@@ -825,7 +825,7 @@ provisions:
       - { canonical: model_conceptual_soundness, match_strength: 1.00 }
 
   - framework: SR_11_7
-    citation: "§II.A — Data quality & appropriateness"
+    citation: "Sec. II.A — Data quality & appropriateness"
     title: Data quality & appropriateness
     text: Input data must be assessed for quality and relevance.
     sort_seq: 4
@@ -833,7 +833,7 @@ provisions:
       - { canonical: input_data_quality, match_strength: 1.00 }
 
   - framework: SR_11_7
-    citation: "§II.B — Pre-deployment testing & validation"
+    citation: "Sec. II.B — Pre-deployment testing & validation"
     title: Pre-deployment testing & validation
     text: Models must be tested before deployment.
     sort_seq: 5
@@ -841,7 +841,7 @@ provisions:
       - { canonical: pre_deployment_testing, match_strength: 1.00 }
 
   - framework: SR_11_7
-    citation: "§II.B — Independent validation"
+    citation: "Sec. II.B — Independent validation"
     title: Independent validation
     text: Validation must be performed by staff independent of development.
     sort_seq: 6
@@ -849,7 +849,7 @@ provisions:
       - { canonical: independent_qualified_validation, match_strength: 1.00 }
 
   - framework: SR_11_7
-    citation: "§II.C — Ongoing monitoring"
+    citation: "Sec. II.C — Ongoing monitoring"
     title: Ongoing monitoring
     text: Performance must be monitored continuously against benchmarks.
     sort_seq: 7
@@ -857,7 +857,7 @@ provisions:
       - { canonical: ongoing_performance_monitoring, match_strength: 1.00 }
 
   - framework: SR_11_7
-    citation: "§II.C — Model change management"
+    citation: "Sec. II.C — Model change management"
     title: Model change management
     text: Any change must go through defined change management with approval.
     sort_seq: 8
@@ -865,7 +865,7 @@ provisions:
       - { canonical: change_management_versioning, match_strength: 1.00 }
 
   - framework: SR_11_7
-    citation: "§II.A — Limitations documentation"
+    citation: "Sec. II.A — Limitations documentation"
     title: Model limitations documentation
     text: Known limitations and conditions under which model may fail must be documented.
     sort_seq: 9
@@ -873,7 +873,7 @@ provisions:
       - { canonical: model_limitations_documentation, match_strength: 1.00 }
 
   - framework: SR_11_7
-    citation: "§I — Use and user controls"
+    citation: "Sec. I — Use and user controls"
     title: Use and user controls
     text: Controls must ensure model used only for intended purpose by authorized users.
     sort_seq: 10
@@ -881,7 +881,7 @@ provisions:
       - { canonical: use_user_authorization_controls, match_strength: 1.00 }
 
   - framework: SR_11_7
-    citation: "§III — Vendor model oversight"
+    citation: "Sec. III — Vendor model oversight"
     title: Vendor model oversight
     text: Third-party models subject to equivalent governance.
     sort_seq: 11
@@ -889,7 +889,7 @@ provisions:
       - { canonical: third_party_vendor_oversight, match_strength: 1.00 }
 
   - framework: SR_11_7
-    citation: "§IV — Board & senior management reporting"
+    citation: "Sec. IV — Board & senior management reporting"
     title: Board & senior management reporting
     text: Regular reports on model risk to senior management and board.
     sort_seq: 12
@@ -898,7 +898,7 @@ provisions:
 
   # ----- NAIC AI Bulletin (15 provisions) ------------------------------------
   - framework: NAIC_AI_BULLETIN
-    citation: "§III.A — Accountability"
+    citation: "Sec. III.A — Accountability"
     title: Accountability
     text: Insurers accountable for all AI decisions, including third-party.
     sort_seq: 1
@@ -906,7 +906,7 @@ provisions:
       - { canonical: model_ownership_accountability, match_strength: 1.00 }
 
   - framework: NAIC_AI_BULLETIN
-    citation: "§III.B — Compliance with insurance laws"
+    citation: "Sec. III.B — Compliance with insurance laws"
     title: Compliance with insurance laws
     text: AI must comply with all applicable insurance laws including rate filing.
     sort_seq: 2
@@ -914,7 +914,7 @@ provisions:
       - { canonical: insurance_law_compliance, match_strength: 1.00 }
 
   - framework: NAIC_AI_BULLETIN
-    citation: "§III.C — Transparency"
+    citation: "Sec. III.C — Transparency"
     title: Transparency
     text: Plain-language description of AI use for regulators and policyholders.
     sort_seq: 3
@@ -922,7 +922,7 @@ provisions:
       - { canonical: ai_transparency_descriptions, match_strength: 1.00 }
 
   - framework: NAIC_AI_BULLETIN
-    citation: "§III.D — Explainability"
+    citation: "Sec. III.D — Explainability"
     title: Explainability
     text: AI decisions must be explainable in specific, plain-language terms.
     sort_seq: 4
@@ -930,7 +930,7 @@ provisions:
       - { canonical: decision_explainability, match_strength: 1.00 }
 
   - framework: NAIC_AI_BULLETIN
-    citation: "§III.E — Fairness, pre-deployment testing"
+    citation: "Sec. III.E — Fairness, pre-deployment testing"
     title: Fairness — pre-deployment testing
     text: AI must not unfairly discriminate; must test for proxy discrimination.
     sort_seq: 5
@@ -938,7 +938,7 @@ provisions:
       - { canonical: fairness_pre_deployment, match_strength: 1.00 }
 
   - framework: NAIC_AI_BULLETIN
-    citation: "§III.E — Fairness, production monitoring"
+    citation: "Sec. III.E — Fairness, production monitoring"
     title: Fairness — production monitoring
     text: Ongoing monitoring for discriminatory outcomes.
     sort_seq: 6
@@ -946,7 +946,7 @@ provisions:
       - { canonical: fairness_production_monitoring, match_strength: 1.00 }
 
   - framework: NAIC_AI_BULLETIN
-    citation: "§III.F — Privacy & data security"
+    citation: "Sec. III.F — Privacy & data security"
     title: Privacy & data security
     text: AI must comply with state data privacy and security laws.
     sort_seq: 7
@@ -954,7 +954,7 @@ provisions:
       - { canonical: privacy_data_security, match_strength: 1.00 }
 
   - framework: NAIC_AI_BULLETIN
-    citation: "§III.G — Robustness"
+    citation: "Sec. III.G — Robustness"
     title: Robustness
     text: AI must perform reliably across conditions including edge cases.
     sort_seq: 8
@@ -962,7 +962,7 @@ provisions:
       - { canonical: robustness_edge_cases, match_strength: 1.00 }
 
   - framework: NAIC_AI_BULLETIN
-    citation: "§III.H — Human oversight & intervention"
+    citation: "Sec. III.H — Human oversight & intervention"
     title: Human oversight & intervention
     text: Meaningful human oversight; ability to override or shut down.
     sort_seq: 9
@@ -970,7 +970,7 @@ provisions:
       - { canonical: human_oversight_intervention, match_strength: 1.00 }
 
   - framework: NAIC_AI_BULLETIN
-    citation: "§3.1 — Written AIS Program"
+    citation: "Sec. 3.1 — Written AIS Program"
     title: Written AIS Program
     text: Documented AI program governing all AI use in regulated practices.
     sort_seq: 10
@@ -979,7 +979,7 @@ provisions:
       - { canonical: model_inventory_registration, match_strength: 0.40 }
 
   - framework: NAIC_AI_BULLETIN
-    citation: "§3.3 — Consumer notification of AI use"
+    citation: "Sec. 3.3 — Consumer notification of AI use"
     title: Consumer notification of AI use
     text: Inform consumers when AI is used in decisions affecting them.
     sort_seq: 11
@@ -987,7 +987,7 @@ provisions:
       - { canonical: consumer_ai_notification, match_strength: 1.00 }
 
   - framework: NAIC_AI_BULLETIN
-    citation: "§3.2 — Risk-proportionate controls"
+    citation: "Sec. 3.2 — Risk-proportionate controls"
     title: Risk-proportionate controls
     text: Controls commensurate with risk (5-factor NAIC assessment).
     sort_seq: 12
@@ -995,7 +995,7 @@ provisions:
       - { canonical: risk_proportionate_controls, match_strength: 1.00 }
 
   - framework: NAIC_AI_BULLETIN
-    citation: "§3.4 — Third-party vendor management program"
+    citation: "Sec. 3.4 — Third-party vendor management program"
     title: Third-party vendor management program
     text: Documented standards for assessing, acquiring, using third-party AI.
     sort_seq: 13
@@ -1003,7 +1003,7 @@ provisions:
       - { canonical: third_party_vendor_oversight, match_strength: 1.00 }
 
   - framework: NAIC_AI_BULLETIN
-    citation: "§4 — Regulatory examination readiness"
+    citation: "Sec. 4 — Regulatory examination readiness"
     title: Regulatory examination readiness
     text: Prepared to produce documentation during market conduct examinations.
     sort_seq: 14
@@ -1011,7 +1011,7 @@ provisions:
       - { canonical: regulatory_examination_readiness, match_strength: 1.00 }
 
   - framework: NAIC_AI_BULLETIN
-    citation: "§1 — UTPA compliance for AI decisions"
+    citation: "Sec. 1 — UTPA compliance for AI decisions"
     title: UTPA compliance for AI decisions
     text: AI decisions must comply with Unfair Trade Practices Act.
     sort_seq: 15
@@ -1029,7 +1029,7 @@ provisions:
 
   # ----- CO SB21-169 (7 provisions) ------------------------------------------
   - framework: CO_SB21_169
-    citation: "§10-3-1104.9(3) — Proxy screening (input level)"
+    citation: "Sec. 10-3-1104.9(3) — Proxy screening (input level)"
     title: Prohibition on unfair discrimination — proxy screening
     text: Input-level — may not use proxies for protected classes.
     sort_seq: 1
@@ -1037,7 +1037,7 @@ provisions:
       - { canonical: proxy_discrimination_screening, match_strength: 1.00 }
 
   - framework: CO_SB21_169
-    citation: "§10-3-1104.9(3) — Output disparate impact"
+    citation: "Sec. 10-3-1104.9(3) — Output disparate impact"
     title: Prohibition — output disparate impact
     text: Output-level — outcomes must not produce disparate impact.
     sort_seq: 2
@@ -1045,7 +1045,7 @@ provisions:
       - { canonical: fairness_production_monitoring, match_strength: 1.00 }
 
   - framework: CO_SB21_169
-    citation: "§10-3-1104.9(4) — External data & algorithm governance"
+    citation: "Sec. 10-3-1104.9(4) — External data & algorithm governance"
     title: External data & algorithm governance
     text: List of external data sources and algorithms, producible on request.
     sort_seq: 3
@@ -1053,7 +1053,7 @@ provisions:
       - { canonical: external_data_algorithm_governance, match_strength: 1.00 }
 
   - framework: CO_SB21_169
-    citation: "§10-3-1104.9(5) — Annual certification"
+    citation: "Sec. 10-3-1104.9(5) — Annual certification"
     title: Annual certification
     text: Annual certification to commissioner that AI complies.
     sort_seq: 4
@@ -1061,7 +1061,7 @@ provisions:
       - { canonical: annual_compliance_certification, match_strength: 1.00 }
 
   - framework: CO_SB21_169
-    citation: "§10-3-1104.9(4)(b) — Data governance documentation"
+    citation: "Sec. 10-3-1104.9(4)(b) — Data governance documentation"
     title: Data governance documentation
     text: Documented governance policies for external data.
     sort_seq: 5
@@ -1069,7 +1069,7 @@ provisions:
       - { canonical: data_governance_documentation, match_strength: 1.00 }
 
   - framework: CO_SB21_169
-    citation: "§10-3-1104.9(4)(a) — Bias testing methodology"
+    citation: "Sec. 10-3-1104.9(4)(a) — Bias testing methodology"
     title: Bias testing methodology
     text: Describe methodology and produce results on request.
     sort_seq: 6
@@ -1077,7 +1077,7 @@ provisions:
       - { canonical: bias_testing_methodology, match_strength: 1.00 }
 
   - framework: CO_SB21_169
-    citation: "§10-3-1104.9(6) — Adverse action explainability"
+    citation: "Sec. 10-3-1104.9(6) — Adverse action explainability"
     title: Adverse action explainability
     text: Adverse action notice must include specific understandable reasons.
     sort_seq: 7
@@ -1086,7 +1086,7 @@ provisions:
 
   # ----- ORSA / ASOP 56 / CAS (9 provisions) ---------------------------------
   - framework: ORSA_ASOP_56_CAS
-    citation: "ORSA §2.3 — Model risk identification & classification"
+    citation: "ORSA Sec. 2.3 — Model risk identification & classification"
     title: Model risk identification & classification
     text: Identify and classify models by risk level for ERM purposes.
     sort_seq: 1
@@ -1094,7 +1094,7 @@ provisions:
       - { canonical: model_risk_identification_classification, match_strength: 1.00 }
 
   - framework: ORSA_ASOP_56_CAS
-    citation: "ASOP 56 §3.4 — Model documentation"
+    citation: "ASOP 56 Sec. 3.4 — Model documentation"
     title: Model documentation
     text: Documentation sufficient for a qualified reviewer.
     sort_seq: 2
@@ -1102,7 +1102,7 @@ provisions:
       - { canonical: model_documentation_for_qualified_review, match_strength: 1.00 }
 
   - framework: ORSA_ASOP_56_CAS
-    citation: "ASOP 56 §3.6 — Validation by qualified reviewer"
+    citation: "ASOP 56 Sec. 3.6 — Validation by qualified reviewer"
     title: Validation by qualified reviewer
     text: Named validator separate from developer with appropriate qualifications.
     sort_seq: 3
@@ -1110,7 +1110,7 @@ provisions:
       - { canonical: independent_qualified_validation, match_strength: 1.00 }
 
   - framework: ORSA_ASOP_56_CAS
-    citation: "ASOP 56 §3.8 — Disclosure of limitations"
+    citation: "ASOP 56 Sec. 3.8 — Disclosure of limitations"
     title: Disclosure of limitations
     text: Limitations and degradation conditions disclosed proactively.
     sort_seq: 4
@@ -1118,7 +1118,7 @@ provisions:
       - { canonical: model_limitations_documentation, match_strength: 1.00 }
 
   - framework: ORSA_ASOP_56_CAS
-    citation: "ORSA §3.5 — Model governance structure"
+    citation: "ORSA Sec. 3.5 — Model governance structure"
     title: Model governance structure
     text: Governance structure — committee, roles, escalation.
     sort_seq: 5
@@ -1126,7 +1126,7 @@ provisions:
       - { canonical: ai_governance_organizational_structure, match_strength: 1.00 }
 
   - framework: ORSA_ASOP_56_CAS
-    citation: "CAS §4 / ORSA §2.3 — Continuous monitoring & back-testing"
+    citation: "CAS Sec. 4 / ORSA Sec. 2.3 — Continuous monitoring & back-testing"
     title: Continuous monitoring & back-testing
     text: Comparing decisions to realized outcomes over 12–24 months.
     sort_seq: 6
@@ -1134,7 +1134,7 @@ provisions:
       - { canonical: outcome_back_testing, match_strength: 1.00 }
 
   - framework: ORSA_ASOP_56_CAS
-    citation: "CAS §2 — AI accountability & ownership"
+    citation: "CAS Sec. 2 — AI accountability & ownership"
     title: AI accountability & ownership
     text: AI ownership enforced; audit trail links AI outcome to named approver.
     sort_seq: 7
@@ -1142,7 +1142,7 @@ provisions:
       - { canonical: model_ownership_accountability, match_strength: 1.00 }
 
   - framework: ORSA_ASOP_56_CAS
-    citation: "CAS §3 — Bias prevention & fairness"
+    citation: "CAS Sec. 3 — Bias prevention & fairness"
     title: Bias prevention & fairness
     text: Methodology, results, proxy screening for fairness.
     sort_seq: 8
@@ -1152,7 +1152,7 @@ provisions:
       - { canonical: proxy_discrimination_screening, match_strength: 0.40 }
 
   - framework: ORSA_ASOP_56_CAS
-    citation: "CAS §5 / ASOP 56 §3.7 — Third-party AI oversight"
+    citation: "CAS Sec. 5 / ASOP 56 Sec. 3.7 — Third-party AI oversight"
     title: Third-party AI oversight
     text: Use-case-specific vendor evaluation for third-party AI.
     sort_seq: 9
@@ -1164,7 +1164,7 @@ provisions:
   # CT MC-25 and NY DFS 2024-7 are out of scope for the seeded framework set.
 
   - framework: SR_11_7
-    citation: "§II.C — Drift monitoring with thresholds"
+    citation: "Sec. II.C — Drift monitoring with thresholds"
     title: Model drift monitoring with thresholds (SR 11-7)
     text: Drift monitoring with control-chart thresholds.
     sort_seq: 13
@@ -1172,7 +1172,7 @@ provisions:
       - { canonical: model_drift_monitoring_with_thresholds, match_strength: 1.00 }
 
   - framework: NAIC_AI_BULLETIN
-    citation: "§4 — Drift monitoring with thresholds"
+    citation: "Sec. 4 — Drift monitoring with thresholds"
     title: Model drift monitoring with thresholds (NAIC)
     text: Drift monitoring expectation in market conduct exams.
     sort_seq: 16
@@ -1180,7 +1180,7 @@ provisions:
       - { canonical: model_drift_monitoring_with_thresholds, match_strength: 1.00 }
 
   - framework: SR_11_7
-    citation: "§II.A — Data lineage & provenance"
+    citation: "Sec. II.A — Data lineage & provenance"
     title: Data lineage & provenance (SR 11-7)
     text: Full data lineage required.
     sort_seq: 14
@@ -1188,7 +1188,7 @@ provisions:
       - { canonical: data_lineage_provenance, match_strength: 1.00 }
 
   - framework: NAIC_AI_BULLETIN
-    citation: "§3.2 — Data lineage & provenance"
+    citation: "Sec. 3.2 — Data lineage & provenance"
     title: Data lineage & provenance (NAIC)
     text: Full data lineage required.
     sort_seq: 17
