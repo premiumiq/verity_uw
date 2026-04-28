@@ -29,6 +29,10 @@ dependencies = [
     "python-multipart>=0.0.9",
     "python-json-logger>=3.0,<4",
     "pyyaml>=6.0,<7",
+    # fastembed: ONNX-based local text embeddings for the compliance metamodel.
+    # Powers `verity compliance reembed` + `similarity-search`. Bundles the
+    # BGE-small-en-v1.5 model on first use; ~30 MB ONNX file. No torch deps.
+    "fastembed>=0.3,<1",
 ]
 
 [project.optional-dependencies]

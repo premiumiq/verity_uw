@@ -66,6 +66,32 @@ def main():
     )
     show_parser.add_argument("--database-url", required=True)
 
+    reembed_parser = compliance_sub.add_parser(
+        "reembed",
+        help="Generate vectors for compliance rows. Staleness-aware by default; use --force to re-embed everything.",
+    )
+    reembed_parser.add_argument("--database-url", required=True)
+    reembed_parser.add_argument(
+        "--force", action="store_true",
+        help="Re-embed every row (default: only rows missing or stale embeddings).",
+    )
+
+    sim_parser = compliance_sub.add_parser(
+        "similarity-search",
+        help="Embed a query string and return the top-k closest rows from one of the embedded tables.",
+    )
+    sim_parser.add_argument("--database-url", required=True)
+    sim_parser.add_argument("query", help="Natural-language query text to embed and match.")
+    sim_parser.add_argument(
+        "--top-k", type=int, default=5, help="Number of matches to return (default: 5).",
+    )
+    sim_parser.add_argument(
+        "--table",
+        choices=["canonical_requirement", "regulatory_provision", "feature"],
+        default="canonical_requirement",
+        help="Which embedded table to search (default: canonical_requirement).",
+    )
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -121,6 +147,22 @@ def main():
                 print(f"  {k:<28} {v}")
         elif args.compliance_action == "show":
             asyncio.run(seed_compliance.show(args.database_url))
+        elif args.compliance_action == "reembed":
+            counts = asyncio.run(
+                seed_compliance.reembed(args.database_url, force=args.force)
+            )
+            print("Embedding pass complete:")
+            for k, v in counts.items():
+                print(f"  {k:<46} {v} row(s)")
+        elif args.compliance_action == "similarity-search":
+            asyncio.run(
+                seed_compliance.similarity_search(
+                    args.database_url,
+                    args.query,
+                    top_k=args.top_k,
+                    table=args.table,
+                )
+            )
         else:
             compliance_parser.print_help()
             sys.exit(1)

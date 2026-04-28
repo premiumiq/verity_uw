@@ -503,6 +503,224 @@ async def _refresh_provision_canonical_links(
 
 
 # =============================================================================
+# Phase 1.5 — Embedding pipeline (fastembed + staleness-aware reembed)
+# =============================================================================
+# Embedded columns (per docs/architecture/compliance-stack.md):
+#   regulatory_provision.embedding   ← title + " " + text
+#   canonical_requirement.embedding  ← title + " " + description
+#   feature.embedding                ← name  + " " + description
+# Each embedded row carries embedding_model_id pointing at embedding_config so
+# the reembed CLI can detect stale rows when the model is upgraded and only
+# re-embed those (instead of all rows). See AD-CS-007.
+
+# Tables to embed: (table_qualname, [text_columns_in_priority_order])
+_EMBEDDABLE_TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("verity_compliance.regulatory_provision",  ("title", "text")),
+    ("verity_compliance.canonical_requirement", ("title", "description")),
+    ("verity_compliance.feature",               ("name",  "description")),
+)
+
+
+def _vector_literal(emb) -> str:
+    """Format a 1-D numeric iterable as a pgvector literal: '[v1,v2,...]'."""
+    return "[" + ",".join(f"{float(v):.6f}" for v in emb) + "]"
+
+
+def _row_text(row, n_cols: int) -> str:
+    """Combine the row's text columns (positions 1..n) into a single embedding
+    input string. None / empty cells are skipped. Returns '(empty)' as a
+    last-resort fallback so the embedder never sees a blank string.
+    """
+    parts: list[str] = []
+    for i in range(1, n_cols + 1):
+        val = row[i]
+        if val:
+            parts.append(str(val).strip())
+    combined = " ".join(parts)
+    return combined or "(empty)"
+
+
+async def reembed(database_url: str, force: bool = False) -> dict[str, int]:
+    """Generate vector embeddings for compliance rows.
+
+    Walks the three embedded tables and produces vectors for any row that
+    is stale — i.e. either has no embedding yet, or has an
+    embedding_model_id different from the current `embedding_config` row.
+    With `force=True`, every row is re-embedded regardless.
+
+    Returns a dict of {table_name: rows_embedded}.
+    """
+    # Lazy import — fastembed download (~30 MB ONNX model) only triggers
+    # when this CLI command is actually run.
+    from fastembed import TextEmbedding  # type: ignore
+
+    counts: dict[str, int] = {table: 0 for table, _ in _EMBEDDABLE_TABLES}
+
+    async with await psycopg.AsyncConnection.connect(
+        database_url, autocommit=False
+    ) as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT id, model_name, dim
+                FROM verity_compliance.embedding_config
+                WHERE is_current = true
+                """
+            )
+            cfg = await cur.fetchone()
+            if not cfg:
+                raise RuntimeError(
+                    "No current embedding_config row. "
+                    "Run `verity compliance seed-static` first."
+                )
+            current_id, model_name, dim = cfg
+
+            print(f"Loading embedding model {model_name} (dim={dim})…")
+            model = TextEmbedding(model_name)
+
+            for table, text_columns in _EMBEDDABLE_TABLES:
+                col_list = ", ".join(text_columns)
+
+                if force:
+                    await cur.execute(
+                        f"SELECT id, {col_list} FROM {table} ORDER BY id"
+                    )
+                else:
+                    await cur.execute(
+                        f"""
+                        SELECT id, {col_list} FROM {table}
+                        WHERE embedding IS NULL
+                           OR embedding_model_id IS NULL
+                           OR embedding_model_id != %s
+                        ORDER BY id
+                        """,
+                        (current_id,),
+                    )
+                rows = await cur.fetchall()
+                if not rows:
+                    print(f"  {table:<46} — already current")
+                    continue
+
+                texts = [_row_text(r, len(text_columns)) for r in rows]
+                print(f"  {table:<46} — embedding {len(rows)} row(s)…")
+                embeddings = list(model.embed(texts))
+
+                for r, emb in zip(rows, embeddings):
+                    if len(emb) != dim:
+                        raise RuntimeError(
+                            f"Model produced dim={len(emb)} but "
+                            f"embedding_config says dim={dim} for {model_name}."
+                        )
+                    await cur.execute(
+                        f"""
+                        UPDATE {table}
+                        SET embedding = %s::vector,
+                            embedding_model_id = %s,
+                            updated_at = now()
+                        WHERE id = %s
+                        """,
+                        (_vector_literal(emb), current_id, r[0]),
+                    )
+                counts[table] = len(rows)
+
+        await conn.commit()
+
+    return counts
+
+
+async def similarity_search(
+    database_url: str,
+    query_text: str,
+    top_k: int = 5,
+    table: str = "canonical_requirement",
+) -> list[dict]:
+    """Embed `query_text` and return the top-k closest rows by cosine
+    similarity from one of the three embedded tables.
+
+    `table` ∈ {'canonical_requirement', 'regulatory_provision', 'feature'}.
+    Returns a list of result dicts (also prints them to stdout).
+    """
+    from fastembed import TextEmbedding  # type: ignore
+
+    table_qualnames = {
+        "canonical_requirement": "verity_compliance.canonical_requirement",
+        "regulatory_provision":  "verity_compliance.regulatory_provision",
+        "feature":               "verity_compliance.feature",
+    }
+    if table not in table_qualnames:
+        raise ValueError(
+            f"Unknown table {table!r}. Choose: {list(table_qualnames)}"
+        )
+
+    async with await psycopg.AsyncConnection.connect(
+        database_url, autocommit=True
+    ) as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT model_name FROM verity_compliance.embedding_config "
+                "WHERE is_current = true"
+            )
+            r = await cur.fetchone()
+            if not r:
+                raise RuntimeError("No current embedding_config row.")
+            model_name = r[0]
+
+            model = TextEmbedding(model_name)
+            query_emb = next(iter(model.embed([query_text])))
+            qlit = _vector_literal(query_emb)
+
+            if table == "canonical_requirement":
+                sql = f"""
+                    SELECT cr.code, cr.title, t.code AS theme_code,
+                           1 - (cr.embedding <=> %s::vector) AS cosine_similarity
+                    FROM   {table_qualnames[table]} cr
+                    JOIN   verity_compliance.canonical_requirement_theme t
+                           ON t.id = cr.theme_id
+                    WHERE  cr.embedding IS NOT NULL
+                    ORDER BY cr.embedding <=> %s::vector
+                    LIMIT  %s
+                """
+            elif table == "regulatory_provision":
+                sql = f"""
+                    SELECT p.citation, p.title, f.code AS framework_code,
+                           1 - (p.embedding <=> %s::vector) AS cosine_similarity
+                    FROM   {table_qualnames[table]} p
+                    JOIN   verity_compliance.regulatory_framework f
+                           ON f.id = p.framework_id
+                    WHERE  p.embedding IS NOT NULL
+                    ORDER BY p.embedding <=> %s::vector
+                    LIMIT  %s
+                """
+            else:  # feature
+                sql = f"""
+                    SELECT feat.code, feat.name, p.code AS plane_code,
+                           1 - (feat.embedding <=> %s::vector) AS cosine_similarity
+                    FROM   {table_qualnames[table]} feat
+                    JOIN   verity_compliance.feature_capability c ON c.id = feat.capability_id
+                    JOIN   verity_compliance.feature_plane     p ON p.id = c.plane_id
+                    WHERE  feat.embedding IS NOT NULL
+                    ORDER BY feat.embedding <=> %s::vector
+                    LIMIT  %s
+                """
+
+            await cur.execute(sql, (qlit, qlit, top_k))
+            rows = await cur.fetchall()
+
+    print(f"\nQuery:  {query_text!r}")
+    print(f"Table:  {table}")
+    print(f"Top {top_k} matches by cosine similarity:\n")
+    results: list[dict] = []
+    for row in rows:
+        c1, c2, c3, sim = row
+        print(f"  {sim:.3f}  [{c1}]  {c2}  ({c3})")
+        results.append({"code_or_citation": c1, "title": c2, "context": c3, "similarity": float(sim)})
+    if not results:
+        print("  (no rows — did you run `verity compliance reembed`?)")
+    print()
+    return results
+
+
+# =============================================================================
 # Inspection — print what's in the DB as a tree (review affordance)
 # =============================================================================
 

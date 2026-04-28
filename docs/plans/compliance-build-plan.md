@@ -18,7 +18,7 @@ This doc is the working tracker. Each sub-step is a single reviewable commit. Ar
   - [x] 1.2.5 — `verity/src/verity/setup/compliance_seed_data.yaml` authored: 37 canonicals across 15 themes, 48 provisions across 5 frameworks, 126 feature links, 51 provision↔canonical bridges, 37 coverage rows.
   - [x] 1.3 — Seeder extended; `verity compliance seed-data` populates all of the above; `verity compliance show` renders coverage rollup (15 Full / 15 Substantial / 6 Partial / 1 Gap).
   - [x] 1.4 — Comprehensive Compliance UI: Overview matrix, Frameworks list + detail + provision drilldown, Canonicals list + detail, Features tree + detail (reverse drilldown), Bridges audit (two tabs). All routes under `/admin/compliance/*`. Read-only with prominent "edit via YAML" affordance.
-  - [ ] 1.5 — Embedding pipeline (fastembed, reembed CLI)
+  - [x] 1.5 — Embedding pipeline. `fastembed` (ONNX, BGE-small-en-v1.5, 384 dim) added to deps. `verity compliance reembed [--force]` is staleness-aware — only re-embeds rows whose `embedding_model_id` differs from the current `embedding_config`. `verity compliance similarity-search "<query>" [--table {canonical_requirement,regulatory_provision,feature}] [--top-k N]` returns top-k by cosine. 153 rows embedded (48 provisions + 37 canonicals + 68 features).
 - [ ] **Phase 2** — L2 compliance mart minimum slice
 - [ ] **Phase 3** — L4 semantic layer + report engine + Model Inventory
 - [ ] **Phase 4** — Three more reports as data
