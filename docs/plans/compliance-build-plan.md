@@ -13,7 +13,7 @@ This doc is the working tracker. Each sub-step is a single reviewable commit. Ar
 ## Phase status
 
 - [ ] **Phase 1** — L3 compliance metamodel + seed
-  - [ ] 1.1 — Schema only (this doc covers the design preview below)
+  - [x] 1.1 — Schema only (committed 9ae919b — 11 tables in `verity_compliance`, empty `verity_analytics` schema)
   - [ ] 1.2 — Static seeds (frameworks, themes, feature hierarchy)
   - [ ] 1.2.5 — Author `docs/plans/compliance-seed-data.yaml` (review checkpoint)
   - [ ] 1.3 — Provisions, canonical requirements, bridge, coverage seed
