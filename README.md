@@ -22,41 +22,7 @@ Accountability for AI decisions must be **engineered into the systems that suppo
 
 A metamodel-driven framework for deploying, testing, validating, and governing agentic AI in regulated environments. Verity is **not an AI application** — it is the substrate that AI applications run on.
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                     BUSINESS APPLICATIONS                         │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐            │
-│  │ Underwriting │  │  Claims      │  │  Renewal     │  ...       │
-│  │  Domain logic│  │  Domain logic│  │  Domain logic│            │
-│  │  UI/Workflow │  │  UI/Workflow │  │  UI/Workflow │            │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘            │
-└─────────┼──────────────────┼──────────────────┼──────────────────┘
-          │ register & invoke│                  │
-          ▼                  ▼                  ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                  VERITY GOVERNANCE PLATFORM     (port 8000)       │
-│                                                                   │
-│  ── shipped ────────────────────────────────────────────────      │
-│  Asset Registry · Lifecycle · Testing & Validation · Decision     │
-│  Logging · Execution Engine · Model Mgmt · Quotas · Compliance    │
-│         Admin UI  ·  REST API  ·  Python SDK  ·  Worker           │
-│                                                                   │
-│  ── future ─────────────────────────────────────────────────      │
-│   Verity Agents (drift detection · lifecycle init · HITL valid.)  │
-│   Verity Studio (Compose AI · Lifecycle · Ground Truth · Tests UI)│
-└─────────┬──────────────────────────────────────┬─────────────────┘
-          │ governed tool calls                  │
-          ▼                                      ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                       SHARED SERVICES                             │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐            │
-│  │   [Vault]    │  │  MDM         │  │  Enrichment  │            │
-│  │   (port 8002)│  │  (future)    │  │  (future)    │            │
-│  │  Documents   │  │  Entity      │  │  LexisNexis, │            │
-│  │  + lineage   │  │  resolution  │  │  D&B, etc.   │            │
-│  └──────────────┘  └──────────────┘  └──────────────┘            │
-└──────────────────────────────────────────────────────────────────┘
-```
+![Verity architecture overview — business apps on top of the governance platform](docs/images/architecture-overview.png)
 
 **Business apps own** the domain — what a D&O submission looks like, what tools an underwriter needs, the workflow shape. They register their agents, tasks, and prompts with Verity, then call Verity to execute them.
 
@@ -64,11 +30,15 @@ A metamodel-driven framework for deploying, testing, validating, and governing a
 
 **Shared services are independent** — [Vault][vault] stores documents. MDM (future) resolves entities. Enrichment (future) provides external data. Verity governs the tool calls that reach these services but never connects to them directly.
 
+![Detailed architecture — apps, governance platform sub-blocks, and shared services](docs/images/architecture-detailed.png)
+
 ---
 
 ## The Four Planes
 
 Verity is organized into four logical planes. Two are shipped today; two are on the roadmap.
+
+![The four planes — Runtime, Studio, Agents, Analytics over the Governance metamodel](docs/images/four-planes.png)
 
 ### 1. Verity Governance — *shipped*
 
@@ -126,9 +96,7 @@ Verity's substrate is a relational metamodel — every governed thing is a versi
 
 The conceptual model:
 
-![Verity DB conceptual model](docs/diagrams/verity_db_conceptual_model.svg)
-
-For depth see [docs/architecture/technical-design.md](docs/architecture/technical-design.md) and the [conceptual diagram source](docs/diagrams/verity_db_conceptual_model.d2).
+![Conceptual metamodel — Application Registry, Asset Registry, Lifecycle, Execution, Validation, Compliance, Policies](docs/images/metamodel-conceptual.png)
 
 ---
 
