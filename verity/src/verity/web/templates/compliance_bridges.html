@@ -1,0 +1,236 @@
+{# BRIDGES audit — two tabs: provision↔canonical and canonical↔feature. #}
+{% extends "base.html" %}
+
+{% block title %}Compliance Bridges — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/compliance/">Compliance</a>
+    <span class="separator">›</span>
+    <a href="/admin/compliance/bridges">Bridges</a>
+{% endblock %}
+
+{% block page_title %}Compliance Bridges{% endblock %}
+
+{% block content %}
+
+{% include "partials/_compliance_subnav.html" %}
+
+<p style="font-size: 0.85rem; color: var(--verity-text-light); margin-bottom: 16px;">
+  The two M:N bridges that hold the metamodel together. Audit, filter, and spot-check
+  individual mappings here. Use this view to validate rationalization decisions —
+  e.g. find low <code>match_strength</code> bridges, or canonicals with sparse feature support.
+</p>
+
+{# ── BRIDGE TYPE TABS ──────────────────────────────────────── #}
+<div style="display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--verity-border);">
+  {% set tabs = [
+      ('provision_canonical', 'Provision ↔ Canonical', '/admin/compliance/bridges?tab=provision_canonical'),
+      ('canonical_feature',   'Canonical ↔ Feature',   '/admin/compliance/bridges?tab=canonical_feature'),
+  ] %}
+  {% for code, label, url in tabs %}
+    {% if active_tab == code %}
+      <a href="{{ url }}"
+         style="padding: 8px 16px; border-bottom: 2px solid var(--verity-blue-deep);
+                color: var(--verity-blue-deep); font-weight: 600; text-decoration: none;
+                font-size: 0.85rem; margin-bottom: -1px;">{{ label }}</a>
+    {% else %}
+      <a href="{{ url }}"
+         style="padding: 8px 16px; border-bottom: 2px solid transparent;
+                color: var(--verity-text-light); text-decoration: none;
+                font-size: 0.85rem; margin-bottom: -1px;">{{ label }}</a>
+    {% endif %}
+  {% endfor %}
+</div>
+
+{# =====================================================================
+   TAB A — PROVISION ↔ CANONICAL
+   ===================================================================== #}
+{% if active_tab == 'provision_canonical' %}
+
+<form method="get" action="/admin/compliance/bridges"
+      style="display: flex; gap: 12px; margin-bottom: 16px; align-items: center; flex-wrap: wrap;">
+  <input type="hidden" name="tab" value="provision_canonical">
+
+  <label style="font-size: 0.85rem; color: var(--verity-text-light);">
+    Framework
+    <select name="framework" onchange="this.form.submit()"
+            style="margin-left: 6px; padding: 4px 8px; border: 1px solid var(--verity-border); border-radius: 4px; font-size: 0.85rem;">
+      <option value="">all</option>
+      {% for f in frameworks %}
+      <option value="{{ f.code }}" {% if filter_framework == f.code %}selected{% endif %}>{{ f.code }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label style="font-size: 0.85rem; color: var(--verity-text-light);">
+    Mapping source
+    <select name="mapping_source" onchange="this.form.submit()"
+            style="margin-left: 6px; padding: 4px 8px; border: 1px solid var(--verity-border); border-radius: 4px; font-size: 0.85rem;">
+      <option value="">all</option>
+      <option value="manual"               {% if filter_mapping_source == 'manual'               %}selected{% endif %}>manual</option>
+      <option value="semantic_recommended" {% if filter_mapping_source == 'semantic_recommended' %}selected{% endif %}>semantic_recommended</option>
+      <option value="human_validated"      {% if filter_mapping_source == 'human_validated'      %}selected{% endif %}>human_validated</option>
+    </select>
+  </label>
+
+  <label style="font-size: 0.85rem; color: var(--verity-text-light);">
+    Min match
+    <select name="min_match" onchange="this.form.submit()"
+            style="margin-left: 6px; padding: 4px 8px; border: 1px solid var(--verity-border); border-radius: 4px; font-size: 0.85rem;">
+      <option value=""    {% if not filter_min_match %}selected{% endif %}>any</option>
+      <option value="0.5" {% if filter_min_match == '0.5' %}selected{% endif %}>≥ 0.50</option>
+      <option value="0.8" {% if filter_min_match == '0.8' %}selected{% endif %}>≥ 0.80</option>
+      <option value="0.95" {% if filter_min_match == '0.95' %}selected{% endif %}>≥ 0.95</option>
+    </select>
+  </label>
+
+  {% if filter_framework or filter_mapping_source or filter_min_match %}
+  <a href="/admin/compliance/bridges?tab=provision_canonical" class="verity-btn verity-btn-secondary verity-btn-sm">Clear</a>
+  {% endif %}
+
+  <span style="margin-left: auto; font-size: 0.8rem; color: var(--verity-text-light);">
+    {{ pc_bridges|length }} bridge{{ '' if pc_bridges|length == 1 else 's' }}
+  </span>
+</form>
+
+<div class="verity-card" style="padding: 0;">
+  <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+    <thead>
+      <tr style="background: var(--verity-gray-pale); border-bottom: 2px solid var(--verity-border);">
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600; width: 130px;">Framework</th>
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600;">Provision</th>
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600;">Canonical</th>
+        <th style="text-align: center; padding: 8px 12px; font-weight: 600; width: 90px;">Match</th>
+        <th style="text-align: center; padding: 8px 12px; font-weight: 600; width: 130px;">Source</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for b in pc_bridges %}
+      <tr style="border-bottom: 1px solid var(--verity-border);">
+        <td style="padding: 8px 12px;">
+          <a href="/admin/compliance/frameworks/{{ b.framework_code }}"
+             style="color: var(--verity-blue-deep); text-decoration: none;">{{ b.framework_code }}</a>
+        </td>
+        <td style="padding: 8px 12px;">
+          <a href="/admin/compliance/provisions/{{ b.provision_id }}"
+             style="color: var(--verity-text); text-decoration: none; font-weight: 500;">
+            {{ b.citation }}
+          </a>
+          <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 1px;">{{ b.provision_title }}</div>
+        </td>
+        <td style="padding: 8px 12px;">
+          <a href="/admin/compliance/canonicals/{{ b.canonical_code }}"
+             style="color: var(--verity-text); text-decoration: none;">{{ b.canonical_title }}</a>
+          <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 1px;"><code>{{ b.canonical_code }}</code> · {{ b.theme_code }}</div>
+        </td>
+        <td style="text-align: center; padding: 8px 12px;">
+          {% set ms = b.match_strength|float %}
+          {% set color = '#3E6044' if ms >= 0.95 else ('#816014' if ms >= 0.5 else '#A23838') %}
+          {% set bg    = '#D8EBDC' if ms >= 0.95 else ('#FAEED1' if ms >= 0.5 else '#F5DCDC') %}
+          <span class="verity-badge" style="background: {{ bg }}; color: {{ color }};">{{ '%.2f'|format(ms) }}</span>
+        </td>
+        <td style="text-align: center; padding: 8px 12px; font-size: 0.78rem; color: var(--verity-text-light);">
+          {{ b.mapping_source }}
+        </td>
+      </tr>
+      {% endfor %}
+      {% if not pc_bridges %}
+      <tr><td colspan="5" style="padding: 16px; text-align: center; color: var(--verity-text-light);">No bridges match.</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{# =====================================================================
+   TAB B — CANONICAL ↔ FEATURE
+   ===================================================================== #}
+{% else %}
+
+<form method="get" action="/admin/compliance/bridges"
+      style="display: flex; gap: 12px; margin-bottom: 16px; align-items: center; flex-wrap: wrap;">
+  <input type="hidden" name="tab" value="canonical_feature">
+
+  <label style="font-size: 0.85rem; color: var(--verity-text-light);">
+    Plane
+    <select name="plane" onchange="this.form.submit()"
+            style="margin-left: 6px; padding: 4px 8px; border: 1px solid var(--verity-border); border-radius: 4px; font-size: 0.85rem;">
+      <option value="">all</option>
+      {% for p in planes %}
+      <option value="{{ p.code }}" {% if filter_plane == p.code %}selected{% endif %}>{{ p.code }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label style="font-size: 0.85rem; color: var(--verity-text-light);">
+    Role
+    <select name="role" onchange="this.form.submit()"
+            style="margin-left: 6px; padding: 4px 8px; border: 1px solid var(--verity-border); border-radius: 4px; font-size: 0.85rem;">
+      <option value="">all</option>
+      <option value="primary"    {% if filter_role == 'primary'    %}selected{% endif %}>primary</option>
+      <option value="supporting" {% if filter_role == 'supporting' %}selected{% endif %}>supporting</option>
+    </select>
+  </label>
+
+  {% if filter_plane or filter_role %}
+  <a href="/admin/compliance/bridges?tab=canonical_feature" class="verity-btn verity-btn-secondary verity-btn-sm">Clear</a>
+  {% endif %}
+
+  <span style="margin-left: auto; font-size: 0.8rem; color: var(--verity-text-light);">
+    {{ cf_bridges|length }} link{{ '' if cf_bridges|length == 1 else 's' }}
+  </span>
+</form>
+
+<div class="verity-card" style="padding: 0;">
+  <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+    <thead>
+      <tr style="background: var(--verity-gray-pale); border-bottom: 2px solid var(--verity-border);">
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600;">Canonical Requirement</th>
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600; width: 100px;">Plane</th>
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600;">Feature</th>
+        <th style="text-align: center; padding: 8px 12px; font-weight: 600; width: 100px;">Role</th>
+        <th style="text-align: center; padding: 8px 12px; font-weight: 600; width: 100px;">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for b in cf_bridges %}
+      <tr style="border-bottom: 1px solid var(--verity-border);">
+        <td style="padding: 8px 12px;">
+          <a href="/admin/compliance/canonicals/{{ b.canonical_code }}"
+             style="color: var(--verity-text); text-decoration: none; font-weight: 500;">
+            {{ b.canonical_title }}
+          </a>
+          <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 1px;"><code>{{ b.canonical_code }}</code> · {{ b.theme_code }}</div>
+        </td>
+        <td style="padding: 8px 12px; font-size: 0.78rem; color: var(--verity-text-light); text-transform: uppercase; letter-spacing: 0.04em;">{{ b.plane_code }}</td>
+        <td style="padding: 8px 12px;">
+          <a href="/admin/compliance/features/{{ b.feature_code }}"
+             style="color: var(--verity-text); text-decoration: none;">{{ b.feature_name }}</a>
+          <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 1px;"><code>{{ b.feature_code }}</code></div>
+        </td>
+        <td style="text-align: center; padding: 8px 12px;">
+          {% if b.role == 'primary' %}
+          <span style="font-size: 0.78rem; color: var(--verity-blue-deep); font-weight: 500;">primary</span>
+          {% else %}
+          <span style="font-size: 0.78rem; color: var(--verity-text-light);">{{ b.role }}</span>
+          {% endif %}
+        </td>
+        <td style="text-align: center; padding: 8px 12px;">
+          {% if b.status == 'shipped' %}<span class="verity-badge" style="background: #D8EBDC; color: #3E6044;">shipped</span>
+          {% elif b.status == 'planned' %}<span class="verity-badge" style="background: #DDE8F8; color: var(--verity-blue-dark);">planned</span>
+          {% elif b.status == 'partial' %}<span class="verity-badge" style="background: #FAEED1; color: #816014;">partial</span>
+          {% else %}<span style="color: var(--verity-text-light); font-size: 0.78rem;">{{ b.status }}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      {% if not cf_bridges %}
+      <tr><td colspan="5" style="padding: 16px; text-align: center; color: var(--verity-text-light);">No links match.</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{% endif %}
+
+{% endblock %}

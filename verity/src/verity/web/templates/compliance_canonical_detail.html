@@ -1,0 +1,172 @@
+{# Single canonical drilldown — description + coverage + features + provisions. #}
+{% extends "base.html" %}
+
+{% block title %}{{ canonical.code }} — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/compliance/">Compliance</a>
+    <span class="separator">›</span>
+    <a href="/admin/compliance/canonicals">Canonical Reqs</a>
+    <span class="separator">›</span>
+    <span>{{ canonical.code }}</span>
+{% endblock %}
+
+{% block page_title %}{{ canonical.title }}{% endblock %}
+
+{% block content %}
+
+{% include "partials/_compliance_subnav.html" %}
+
+{# ── HEADER METADATA ───────────────────────────────────────── #}
+<div class="verity-card" style="margin-bottom: 16px;">
+  <div class="verity-detail-grid">
+    <div class="verity-detail-label">Code</div>
+    <div class="verity-detail-value"><code>{{ canonical.code }}</code></div>
+
+    <div class="verity-detail-label">Theme</div>
+    <div class="verity-detail-value">{{ canonical.theme_name }}<span style="color: var(--verity-text-light);"> · <code>{{ canonical.theme_code }}</code></span></div>
+
+    <div class="verity-detail-label">Coverage</div>
+    <div class="verity-detail-value">
+      {% if canonical.coverage_level == 'full' %}<span class="verity-badge" style="background: #D8EBDC; color: #3E6044;">✓ Full</span>
+      {% elif canonical.coverage_level == 'substantial' %}<span class="verity-badge" style="background: #DDE8F8; color: var(--verity-blue-dark);">◐ Substantial</span>
+      {% elif canonical.coverage_level == 'partial' %}<span class="verity-badge" style="background: #FAEED1; color: #816014;">◑ Partial</span>
+      {% elif canonical.coverage_level == 'gap' %}<span class="verity-badge" style="background: #F5DCDC; color: #A23838;">✗ Gap</span>
+      {% else %}<span style="color: var(--verity-text-light);">—</span>
+      {% endif %}
+    </div>
+
+    {% if canonical.description %}
+    <div class="verity-detail-label">Description</div>
+    <div class="verity-detail-value" style="white-space: pre-line; line-height: 1.5;">{{ canonical.description }}</div>
+    {% endif %}
+
+    {% if canonical.rationale %}
+    <div class="verity-detail-label">Coverage rationale</div>
+    <div class="verity-detail-value" style="white-space: pre-line; line-height: 1.5;">{{ canonical.rationale }}</div>
+    {% endif %}
+
+    {% if canonical.customer_actions %}
+    <div class="verity-detail-label">Customer actions</div>
+    <div class="verity-detail-value" style="white-space: pre-line; line-height: 1.5; padding: 8px; background: #FAEED1; border-radius: 4px;">{{ canonical.customer_actions }}</div>
+    {% endif %}
+  </div>
+</div>
+
+{# ── PROVISIONS (regulatory side) ──────────────────────────── #}
+<div class="verity-card" style="margin-bottom: 16px; padding: 0;">
+  <div class="verity-card-header" style="padding: 12px 16px; border-bottom: 1px solid var(--verity-border);">
+    Regulatory Provisions ({{ provisions|length }})
+    <span style="font-weight: 400; font-size: 0.78rem; color: var(--verity-text-light); margin-left: 8px;">
+      — which framework citations express this requirement
+    </span>
+  </div>
+
+  <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+    <thead>
+      <tr style="background: var(--verity-gray-pale); border-bottom: 1px solid var(--verity-border);">
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600; width: 130px;">Framework</th>
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600;">Citation</th>
+        <th style="text-align: center; padding: 8px 12px; font-weight: 600; width: 100px;">Match</th>
+        <th style="text-align: center; padding: 8px 12px; font-weight: 600; width: 130px;">Mapping</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in provisions %}
+      <tr style="border-bottom: 1px solid var(--verity-border);">
+        <td style="padding: 8px 12px;">
+          <a href="/admin/compliance/frameworks/{{ p.framework_code }}"
+             style="color: var(--verity-blue-deep); text-decoration: none;">
+            {{ p.framework_code }}
+          </a>
+        </td>
+        <td style="padding: 8px 12px;">
+          <a href="/admin/compliance/provisions/{{ p.provision_id }}"
+             style="color: var(--verity-text); text-decoration: none; font-weight: 500;">
+            {{ p.citation }}
+          </a>
+          <div style="font-size: 0.75rem; color: var(--verity-text-light); margin-top: 2px;">
+            {{ p.provision_title }}
+          </div>
+        </td>
+        <td style="text-align: center; padding: 8px 12px;">
+          {% set ms = p.match_strength|float %}
+          {% set color = '#3E6044' if ms >= 0.95 else ('#816014' if ms >= 0.5 else '#A23838') %}
+          {% set bg    = '#D8EBDC' if ms >= 0.95 else ('#FAEED1' if ms >= 0.5 else '#F5DCDC') %}
+          <span class="verity-badge" style="background: {{ bg }}; color: {{ color }};">
+            {{ '%.2f'|format(ms) }}
+          </span>
+        </td>
+        <td style="text-align: center; padding: 8px 12px; font-size: 0.78rem; color: var(--verity-text-light);">
+          {{ p.mapping_source }}
+        </td>
+      </tr>
+      {% endfor %}
+      {% if not provisions %}
+      <tr><td colspan="4" style="padding: 16px; text-align: center; color: var(--verity-text-light);">No provisions bridge to this canonical.</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{# ── FEATURES (engineering side) ──────────────────────────── #}
+<div class="verity-card" style="padding: 0;">
+  <div class="verity-card-header" style="padding: 12px 16px; border-bottom: 1px solid var(--verity-border);">
+    Verity Features ({{ features|length }})
+    <span style="font-weight: 400; font-size: 0.78rem; color: var(--verity-text-light); margin-left: 8px;">
+      — which Verity capabilities satisfy this canonical
+    </span>
+  </div>
+
+  <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+    <thead>
+      <tr style="background: var(--verity-gray-pale); border-bottom: 1px solid var(--verity-border);">
+        <th style="text-align: left; padding: 8px 12px; font-weight: 600; width: 110px;">Plane</th>
+        <th style="text-align: left; padding: 8px 12px; font-weight: 600; width: 180px;">Capability</th>
+        <th style="text-align: left; padding: 8px 12px; font-weight: 600;">Feature</th>
+        <th style="text-align: center; padding: 8px 12px; font-weight: 600; width: 100px;">Status</th>
+        <th style="text-align: center; padding: 8px 12px; font-weight: 600; width: 100px;">Role</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ft in features %}
+      <tr style="border-bottom: 1px solid var(--verity-border);">
+        <td style="padding: 8px 12px; font-size: 0.78rem; color: var(--verity-text-light); text-transform: uppercase; letter-spacing: 0.04em;">{{ ft.plane_code }}</td>
+        <td style="padding: 8px 12px; color: var(--verity-text-light); font-size: 0.82rem;">{{ ft.capability_name }}</td>
+        <td style="padding: 8px 12px;">
+          <a href="/admin/compliance/features/{{ ft.feature_code }}"
+             style="color: var(--verity-text); text-decoration: none; font-weight: 500;">
+            {{ ft.feature_name }}
+          </a>
+          {% if ft.feature_description %}
+          <div style="font-size: 0.75rem; color: var(--verity-text-light); margin-top: 2px; line-height: 1.4;">
+            {{ ft.feature_description }}
+          </div>
+          {% endif %}
+        </td>
+        <td style="text-align: center; padding: 8px 12px;">
+          {% if ft.status == 'shipped' %}<span class="verity-badge" style="background: #D8EBDC; color: #3E6044;">shipped</span>
+          {% elif ft.status == 'planned' %}<span class="verity-badge" style="background: #DDE8F8; color: var(--verity-blue-dark);">planned</span>
+          {% elif ft.status == 'partial' %}<span class="verity-badge" style="background: #FAEED1; color: #816014;">partial</span>
+          {% elif ft.status == 'deprecated' %}<span class="verity-badge" style="background: var(--verity-gray-dark); color: var(--verity-text-light);">deprecated</span>
+          {% else %}<span style="color: var(--verity-text-light);">{{ ft.status }}</span>
+          {% endif %}
+        </td>
+        <td style="text-align: center; padding: 8px 12px;">
+          {% if ft.role == 'primary' %}
+          <span style="font-size: 0.78rem; color: var(--verity-blue-deep); font-weight: 500;">primary</span>
+          {% else %}
+          <span style="font-size: 0.78rem; color: var(--verity-text-light);">{{ ft.role }}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      {% if not features %}
+      <tr><td colspan="5" style="padding: 16px; text-align: center; color: var(--verity-text-light);">No features linked to this canonical yet.</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

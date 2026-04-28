@@ -1,0 +1,123 @@
+{# RATIONALIZED TRUTH — list of canonical requirements grouped by theme. #}
+{% extends "base.html" %}
+
+{% block title %}Canonical Requirements — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/compliance/">Compliance</a>
+    <span class="separator">›</span>
+    <a href="/admin/compliance/canonicals">Canonical Reqs</a>
+{% endblock %}
+
+{% block page_title %}Canonical Requirements{% endblock %}
+
+{% block content %}
+
+{% include "partials/_compliance_subnav.html" %}
+
+<p style="font-size: 0.85rem; color: var(--verity-text-light); margin-bottom: 16px;">
+  The "center axis" — the rationalized vocabulary. Each canonical requirement is one
+  underlying obligation, independent of which framework expresses it. Coverage is asserted
+  per canonical (Full / Substantial / Partial / Gap), and bridges fan out to provisions on
+  the regulatory side and features on the engineering side.
+</p>
+
+{# ── FILTER BAR ────────────────────────────────────────────── #}
+<form method="get" action="/admin/compliance/canonicals"
+      style="display: flex; gap: 12px; margin-bottom: 16px; align-items: center; flex-wrap: wrap;">
+
+  <label style="font-size: 0.85rem; color: var(--verity-text-light);">
+    Theme
+    <select name="theme" onchange="this.form.submit()"
+            style="margin-left: 6px; padding: 4px 8px; border: 1px solid var(--verity-border); border-radius: 4px; font-size: 0.85rem;">
+      <option value="">all</option>
+      {% for t in themes %}
+      <option value="{{ t.code }}" {% if filter_theme == t.code %}selected{% endif %}>{{ t.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label style="font-size: 0.85rem; color: var(--verity-text-light);">
+    Coverage
+    <select name="coverage" onchange="this.form.submit()"
+            style="margin-left: 6px; padding: 4px 8px; border: 1px solid var(--verity-border); border-radius: 4px; font-size: 0.85rem;">
+      <option value="">all</option>
+      <option value="full"        {% if filter_coverage == 'full'        %}selected{% endif %}>Full</option>
+      <option value="substantial" {% if filter_coverage == 'substantial' %}selected{% endif %}>Substantial</option>
+      <option value="partial"     {% if filter_coverage == 'partial'     %}selected{% endif %}>Partial</option>
+      <option value="gap"         {% if filter_coverage == 'gap'         %}selected{% endif %}>Gap</option>
+    </select>
+  </label>
+
+  {% if filter_theme or filter_coverage %}
+  <a href="/admin/compliance/canonicals" class="verity-btn verity-btn-secondary verity-btn-sm">Clear filters</a>
+  {% endif %}
+
+  <span style="margin-left: auto; font-size: 0.8rem; color: var(--verity-text-light);">
+    {{ canonicals|length }} canonical{{ '' if canonicals|length == 1 else 's' }}
+  </span>
+</form>
+
+<div class="verity-card" style="padding: 0;">
+  <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+    <thead>
+      <tr style="background: var(--verity-gray-pale); border-bottom: 2px solid var(--verity-border);">
+        <th style="text-align: left;   padding: 10px 12px; font-weight: 600;">Canonical Requirement</th>
+        <th style="text-align: center; padding: 10px 12px; font-weight: 600; width: 110px;">Coverage</th>
+        <th style="text-align: center; padding: 10px 12px; font-weight: 600; width: 100px;">Provisions</th>
+        <th style="text-align: center; padding: 10px 12px; font-weight: 600; width: 100px;">Features</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for theme_group in groups %}
+      <tr style="background: var(--verity-blue-pale);">
+        <td colspan="4" style="padding: 6px 12px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--verity-blue-deep);">
+          ▸ {{ theme_group.theme_name }}
+          <span style="opacity: 0.55; margin-left: 6px; font-weight: 400; text-transform: none; letter-spacing: 0;">
+            ({{ theme_group.rows|length }})
+          </span>
+        </td>
+      </tr>
+      {% for row in theme_group.rows %}
+      <tr style="border-bottom: 1px solid var(--verity-border);">
+        <td style="padding: 8px 12px;">
+          <a href="/admin/compliance/canonicals/{{ row.code }}"
+             style="color: var(--verity-text); text-decoration: none; font-weight: 500;">
+            {{ row.title }}
+          </a>
+          <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 2px;">
+            <code>{{ row.code }}</code>
+          </div>
+          {% if row.description %}
+          <div style="font-size: 0.78rem; color: var(--verity-text-light); margin-top: 4px; line-height: 1.4;">
+            {{ row.description.split('\n')[0] }}
+          </div>
+          {% endif %}
+        </td>
+        <td style="text-align: center; padding: 8px 12px;">
+          {% if row.coverage_level == 'full' %}<span class="verity-badge" style="background: #D8EBDC; color: #3E6044;">✓ Full</span>
+          {% elif row.coverage_level == 'substantial' %}<span class="verity-badge" style="background: #DDE8F8; color: var(--verity-blue-dark);">◐ Subst.</span>
+          {% elif row.coverage_level == 'partial' %}<span class="verity-badge" style="background: #FAEED1; color: #816014;">◑ Partial</span>
+          {% elif row.coverage_level == 'gap' %}<span class="verity-badge" style="background: #F5DCDC; color: #A23838;">✗ Gap</span>
+          {% else %}<span style="color: var(--verity-text-light); font-size: 0.75rem;">—</span>
+          {% endif %}
+        </td>
+        <td style="text-align: center; padding: 8px 12px; font-size: 0.85rem;">{{ row.provision_count }}</td>
+        <td style="text-align: center; padding: 8px 12px; font-size: 0.85rem;">{{ row.feature_count }}</td>
+      </tr>
+      {% endfor %}
+      {% endfor %}
+
+      {% if not groups %}
+      <tr>
+        <td colspan="4" style="padding: 24px; text-align: center; color: var(--verity-text-light);">
+          No canonical requirements match the current filters.
+        </td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

@@ -1245,4 +1245,329 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             saved=True,
         )
 
+    # ── COMPLIANCE ────────────────────────────────────────────
+    # L3 metamodel review pages. Read-only; YAML is source of truth.
+    # See docs/architecture/compliance-stack.md.
+
+    def _matrix_groups(rows, frameworks):
+        """Convert flat rows from list_canonical_requirements_with_bridges
+        into [{theme_code, theme_name, rows: [...]}] grouped by theme,
+        with each canonical row's bridges indexed by framework_code for
+        easy O(1) lookup in the template.
+        """
+        fw_codes = {f["code"] for f in frameworks}
+        groups = []
+        cur = None
+        for r in rows:
+            bridges_by_fw = {}
+            for b in (r.get("bridges") or []):
+                if b["framework_code"] in fw_codes:
+                    bridges_by_fw[b["framework_code"]] = b
+            r = dict(r)
+            r["bridges_by_framework"] = bridges_by_fw
+            if cur is None or cur["theme_code"] != r["theme_code"]:
+                cur = {
+                    "theme_code": r["theme_code"],
+                    "theme_name": r["theme_name"],
+                    "rows": [],
+                }
+                groups.append(cur)
+            cur["rows"].append(r)
+        return groups
+
+    @router.get("/compliance/", response_class=HTMLResponse)
+    async def compliance_overview(
+        request: Request,
+        framework: Optional[str] = Query(None),
+        theme: Optional[str] = Query(None),
+        coverage: Optional[str] = Query(None),
+    ):
+        await verity.ensure_connected()
+
+        all_frameworks = await verity.db.fetch_all("list_compliance_frameworks_for_matrix")
+        themes = await verity.db.fetch_all("list_compliance_themes")
+        rows = await verity.db.fetch_all("list_canonical_requirements_with_bridges")
+        rollup = await verity.db.fetch_all("compliance_coverage_rollup")
+        overall = await verity.db.fetch_one("compliance_overall_counts") or {}
+
+        coverage_counts = {r["coverage_level"]: r["canonical_count"] for r in rollup if r["coverage_level"]}
+
+        # Filter rows.
+        filtered = []
+        for r in rows:
+            if theme and r["theme_code"] != theme:
+                continue
+            if coverage and r["coverage_level"] != coverage:
+                continue
+            if framework:
+                bridge_codes = {b["framework_code"] for b in (r.get("bridges") or [])}
+                if framework not in bridge_codes:
+                    continue
+            filtered.append(r)
+
+        # If filtering by framework, only show that column. Otherwise show all.
+        if framework:
+            display_frameworks = [f for f in all_frameworks if f["code"] == framework]
+        else:
+            display_frameworks = list(all_frameworks)
+
+        return _render(
+            templates, request, "compliance_overview.html",
+            active_page="compliance",
+            subnav_active="overview",
+            frameworks=display_frameworks,
+            themes=themes,
+            matrix_groups=_matrix_groups(filtered, display_frameworks),
+            visible_canonical_count=len(filtered),
+            coverage_counts=coverage_counts,
+            overall=overall,
+            filter_framework=framework or "",
+            filter_theme=theme or "",
+            filter_coverage=coverage or "",
+        )
+
+    @router.get("/compliance/frameworks", response_class=HTMLResponse)
+    async def compliance_frameworks(request: Request):
+        await verity.ensure_connected()
+        frameworks = await verity.db.fetch_all("list_frameworks_with_stats")
+        return _render(
+            templates, request, "compliance_frameworks.html",
+            active_page="compliance",
+            subnav_active="frameworks",
+            frameworks=frameworks,
+        )
+
+    @router.get("/compliance/frameworks/{framework_code}", response_class=HTMLResponse)
+    async def compliance_framework_detail(request: Request, framework_code: str):
+        await verity.ensure_connected()
+        framework = await verity.db.fetch_one(
+            "get_framework_by_code", {"framework_code": framework_code}
+        )
+        if not framework:
+            raise HTTPException(status_code=404, detail="Framework not found")
+        provisions = await verity.db.fetch_all(
+            "list_provisions_for_framework", {"framework_code": framework_code}
+        )
+        return _render(
+            templates, request, "compliance_framework_detail.html",
+            active_page="compliance",
+            subnav_active="frameworks",
+            framework=framework,
+            provisions=provisions,
+        )
+
+    @router.get("/compliance/provisions/{provision_id}", response_class=HTMLResponse)
+    async def compliance_provision_detail(request: Request, provision_id: UUID):
+        await verity.ensure_connected()
+        provision = await verity.db.fetch_one(
+            "get_provision_by_id", {"provision_id": str(provision_id)}
+        )
+        if not provision:
+            raise HTTPException(status_code=404, detail="Provision not found")
+        canonical_links = await verity.db.fetch_all(
+            "list_canonicals_for_provision", {"provision_id": str(provision_id)}
+        )
+        return _render(
+            templates, request, "compliance_provision_detail.html",
+            active_page="compliance",
+            subnav_active="frameworks",
+            provision=provision,
+            canonical_links=canonical_links,
+        )
+
+    @router.get("/compliance/canonicals", response_class=HTMLResponse)
+    async def compliance_canonicals(
+        request: Request,
+        theme: Optional[str] = Query(None),
+        coverage: Optional[str] = Query(None),
+    ):
+        await verity.ensure_connected()
+        themes = await verity.db.fetch_all("list_compliance_themes")
+        rows = await verity.db.fetch_all("list_canonicals_grouped")
+
+        filtered = []
+        for r in rows:
+            if theme and r["theme_code"] != theme:
+                continue
+            if coverage and r["coverage_level"] != coverage:
+                continue
+            filtered.append(r)
+
+        groups: list[dict] = []
+        cur = None
+        for r in filtered:
+            if cur is None or cur["theme_code"] != r["theme_code"]:
+                cur = {"theme_code": r["theme_code"], "theme_name": r["theme_name"], "rows": []}
+                groups.append(cur)
+            cur["rows"].append(r)
+
+        return _render(
+            templates, request, "compliance_canonicals.html",
+            active_page="compliance",
+            subnav_active="canonicals",
+            themes=themes,
+            canonicals=filtered,
+            groups=groups,
+            filter_theme=theme or "",
+            filter_coverage=coverage or "",
+        )
+
+    @router.get("/compliance/canonicals/{canonical_code}", response_class=HTMLResponse)
+    async def compliance_canonical_detail(request: Request, canonical_code: str):
+        await verity.ensure_connected()
+        canonical = await verity.db.fetch_one(
+            "get_canonical_requirement_by_code", {"canonical_code": canonical_code}
+        )
+        if not canonical:
+            raise HTTPException(status_code=404, detail="Canonical requirement not found")
+        provisions = await verity.db.fetch_all(
+            "list_provisions_for_canonical", {"canonical_code": canonical_code}
+        )
+        features = await verity.db.fetch_all(
+            "list_features_for_canonical", {"canonical_code": canonical_code}
+        )
+        return _render(
+            templates, request, "compliance_canonical_detail.html",
+            active_page="compliance",
+            subnav_active="canonicals",
+            canonical=canonical,
+            provisions=provisions,
+            features=features,
+        )
+
+    @router.get("/compliance/features", response_class=HTMLResponse)
+    async def compliance_features(request: Request):
+        await verity.ensure_connected()
+        rows = await verity.db.fetch_all("list_features_grouped")
+
+        # Pivot flat rows into plane → capability → feature tree.
+        planes_by_code: dict[str, dict] = {}
+        for r in rows:
+            p_code = r["plane_code"]
+            plane = planes_by_code.get(p_code)
+            if plane is None:
+                plane = {
+                    "code": p_code, "name": r["plane_name"],
+                    "sort": r["plane_sort"],
+                    "capabilities": [],
+                    "_caps_by_code": {},
+                    "feature_total": 0,
+                }
+                planes_by_code[p_code] = plane
+
+            c_code = r["capability_code"]
+            cap = plane["_caps_by_code"].get(c_code)
+            if cap is None:
+                cap = {
+                    "code": c_code, "name": r["capability_name"],
+                    "sort": r["capability_sort"],
+                    "features": [],
+                }
+                plane["capabilities"].append(cap)
+                plane["_caps_by_code"][c_code] = cap
+
+            cap["features"].append({
+                "feature_code": r["feature_code"],
+                "feature_name": r["feature_name"],
+                "feature_description": r["feature_description"],
+                "status": r["status"],
+                "canonical_link_count": r["canonical_link_count"],
+            })
+            plane["feature_total"] += 1
+
+        planes = sorted(planes_by_code.values(), key=lambda x: x["sort"])
+        for p in planes:
+            p["capabilities"].sort(key=lambda c: c["sort"])
+            p.pop("_caps_by_code", None)
+
+        return _render(
+            templates, request, "compliance_features.html",
+            active_page="compliance",
+            subnav_active="features",
+            planes=planes,
+        )
+
+    @router.get("/compliance/features/{feature_code}", response_class=HTMLResponse)
+    async def compliance_feature_detail(request: Request, feature_code: str):
+        await verity.ensure_connected()
+        feature = await verity.db.fetch_one(
+            "get_feature_by_code", {"feature_code": feature_code}
+        )
+        if not feature:
+            raise HTTPException(status_code=404, detail="Feature not found")
+        canonicals = await verity.db.fetch_all(
+            "list_canonicals_for_feature", {"feature_code": feature_code}
+        )
+        return _render(
+            templates, request, "compliance_feature_detail.html",
+            active_page="compliance",
+            subnav_active="features",
+            feature=feature,
+            canonicals=canonicals,
+        )
+
+    @router.get("/compliance/bridges", response_class=HTMLResponse)
+    async def compliance_bridges(
+        request: Request,
+        tab: str = Query("provision_canonical"),
+        framework: Optional[str] = Query(None),
+        canonical: Optional[str] = Query(None),
+        mapping_source: Optional[str] = Query(None),
+        min_match: Optional[str] = Query(None),
+        plane: Optional[str] = Query(None),
+        feature: Optional[str] = Query(None),
+        role: Optional[str] = Query(None),
+    ):
+        await verity.ensure_connected()
+        active_tab = tab if tab in ("provision_canonical", "canonical_feature") else "provision_canonical"
+
+        frameworks = await verity.db.fetch_all("list_compliance_frameworks_for_matrix")
+        planes_rows = await verity.db.fetch_all_raw(
+            "SELECT code, name FROM verity_compliance.feature_plane ORDER BY sort_seq, code"
+        )
+
+        pc_bridges: list[dict] = []
+        cf_bridges: list[dict] = []
+
+        if active_tab == "provision_canonical":
+            try:
+                min_match_val = float(min_match) if min_match else None
+            except ValueError:
+                min_match_val = None
+            pc_bridges = await verity.db.fetch_all(
+                "list_provision_canonical_bridges",
+                {
+                    "framework_code": framework or None,
+                    "canonical_code": canonical or None,
+                    "mapping_source": mapping_source or None,
+                    "min_match_strength": min_match_val,
+                },
+            )
+        else:
+            cf_bridges = await verity.db.fetch_all(
+                "list_canonical_feature_bridges",
+                {
+                    "canonical_code": canonical or None,
+                    "feature_code": feature or None,
+                    "plane_code": plane or None,
+                    "role": role or None,
+                },
+            )
+
+        return _render(
+            templates, request, "compliance_bridges.html",
+            active_page="compliance",
+            subnav_active="bridges",
+            active_tab=active_tab,
+            frameworks=frameworks,
+            planes=planes_rows,
+            pc_bridges=pc_bridges,
+            cf_bridges=cf_bridges,
+            filter_framework=framework or "",
+            filter_mapping_source=mapping_source or "",
+            filter_min_match=min_match or "",
+            filter_plane=plane or "",
+            filter_role=role or "",
+        )
+
     return router

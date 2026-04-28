@@ -17,7 +17,7 @@ This doc is the working tracker. Each sub-step is a single reviewable commit. Ar
   - [x] 1.2 — Static seeds — 5 frameworks, 15 themes, 4 planes, 13 capabilities, 68 features. Reviewable via `verity compliance show` (tree print) or directly in `verity/src/verity/setup/compliance_seed_static.yaml`.
   - [x] 1.2.5 — `verity/src/verity/setup/compliance_seed_data.yaml` authored: 37 canonicals across 15 themes, 48 provisions across 5 frameworks, 126 feature links, 51 provision↔canonical bridges, 37 coverage rows.
   - [x] 1.3 — Seeder extended; `verity compliance seed-data` populates all of the above; `verity compliance show` renders coverage rollup (15 Full / 15 Substantial / 6 Partial / 1 Gap).
-  - [ ] 1.4 — Coverage Matrix UI page
+  - [x] 1.4 — Comprehensive Compliance UI: Overview matrix, Frameworks list + detail + provision drilldown, Canonicals list + detail, Features tree + detail (reverse drilldown), Bridges audit (two tabs). All routes under `/admin/compliance/*`. Read-only with prominent "edit via YAML" affordance.
   - [ ] 1.5 — Embedding pipeline (fastembed, reembed CLI)
 - [ ] **Phase 2** — L2 compliance mart minimum slice
 - [ ] **Phase 3** — L4 semantic layer + report engine + Model Inventory

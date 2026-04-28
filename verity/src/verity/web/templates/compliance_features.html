@@ -1,0 +1,87 @@
+{# ENGINEERING TRUTH — plane → capability → feature tree. #}
+{% extends "base.html" %}
+
+{% block title %}Verity Features — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/compliance/">Compliance</a>
+    <span class="separator">›</span>
+    <a href="/admin/compliance/features">Engineering</a>
+{% endblock %}
+
+{% block page_title %}Verity Features (Engineering Truth){% endblock %}
+
+{% block content %}
+
+{% include "partials/_compliance_subnav.html" %}
+
+<p style="font-size: 0.85rem; color: var(--verity-text-light); margin-bottom: 16px;">
+  The "right axis" — what Verity ships. Each feature is a leaf under
+  Plane → Capability → Feature. Click a feature to see which canonical requirements it
+  helps satisfy (reverse drilldown).
+</p>
+
+{% for plane in planes %}
+<div class="verity-card" style="margin-bottom: 16px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+    <div>
+      <span style="font-size: 0.7rem; color: var(--verity-text-light); text-transform: uppercase; letter-spacing: 0.06em;">Plane</span>
+      <span style="font-size: 1.1rem; font-weight: 600; margin-left: 8px;">{{ plane.name }}</span>
+      <span style="margin-left: 6px; font-size: 0.75rem; color: var(--verity-text-light);"><code>{{ plane.code }}</code></span>
+    </div>
+    <span style="font-size: 0.78rem; color: var(--verity-text-light);">
+      {{ plane.feature_total }} feature{{ '' if plane.feature_total == 1 else 's' }}
+    </span>
+  </div>
+
+  {% for cap in plane.capabilities %}
+  <div style="margin-top: 10px; border-top: 1px solid var(--verity-border); padding-top: 10px;">
+    <div style="font-size: 0.85rem; font-weight: 600; color: var(--verity-text); margin-bottom: 6px;">
+      {{ cap.name }}
+      <span style="margin-left: 6px; font-size: 0.7rem; color: var(--verity-text-light); font-weight: 400;">
+        <code>{{ cap.code }}</code> · {{ cap.features|length }} features
+      </span>
+    </div>
+
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 4px;">
+      <tbody>
+      {% for f in cap.features %}
+      <tr style="border-top: 1px solid var(--verity-border);">
+        <td style="padding: 6px 8px; width: 32%;">
+          <a href="/admin/compliance/features/{{ f.feature_code }}"
+             style="color: var(--verity-text); text-decoration: none; font-weight: 500;">
+            {{ f.feature_name }}
+          </a>
+          <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 1px;"><code>{{ f.feature_code }}</code></div>
+        </td>
+        <td style="padding: 6px 8px; color: var(--verity-text-light); font-size: 0.8rem; line-height: 1.4;">
+          {{ f.feature_description or '—' }}
+        </td>
+        <td style="padding: 6px 8px; text-align: center; width: 90px;">
+          {% if f.status == 'shipped' %}<span class="verity-badge" style="background: #D8EBDC; color: #3E6044;">shipped</span>
+          {% elif f.status == 'planned' %}<span class="verity-badge" style="background: #DDE8F8; color: var(--verity-blue-dark);">planned</span>
+          {% elif f.status == 'partial' %}<span class="verity-badge" style="background: #FAEED1; color: #816014;">partial</span>
+          {% elif f.status == 'deprecated' %}<span class="verity-badge" style="background: var(--verity-gray-dark); color: var(--verity-text-light);">deprecated</span>
+          {% else %}<span style="color: var(--verity-text-light);">{{ f.status }}</span>
+          {% endif %}
+        </td>
+        <td style="padding: 6px 8px; text-align: center; width: 110px; font-size: 0.78rem; color: var(--verity-text-light);">
+          {% if f.canonical_link_count %}
+          <span class="verity-badge" style="background: var(--verity-blue-pale); color: var(--verity-blue-deep);">
+            {{ f.canonical_link_count }} canonical{{ '' if f.canonical_link_count == 1 else 's' }}
+          </span>
+          {% else %}
+          <span style="opacity: 0.5;">unlinked</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
+</div>
+{% endfor %}
+
+{% endblock %}
