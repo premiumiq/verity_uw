@@ -142,8 +142,8 @@ async def _dispatch_run(verity: Verity, run: dict[str, Any], worker_id: str) -> 
 
     try:
         # Build the optional MockContext when the run was submitted in
-        # mock mode. Phase C uses the simplest interpretation: all
-        # registered tools fall back to their DB-stored mock_responses.
+        # mock mode. 
+        # Registered tools fall back to their DB-stored mock_responses.
         mock_ctx: Optional[MockContext] = None
         if run.get("mock_mode"):
             mock_ctx = MockContext(mock_all_tools=True)

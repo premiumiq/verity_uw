@@ -172,11 +172,7 @@
     {# ──────────────────────────────────────────────────────────
        Per-tool-call card. Shows which transport the call took
        (in-process Python, MCP, or Verity built-in) so the audit
-       trail makes the governance story visible at a glance. Fields
-       transport, mcp_server_name, mcp_tool_name were added in
-       Phase 4c/FC-14; verity_builtin transport + sub_decision_log_id
-       were added in FC-1b for sub-agent delegation. Older decisions
-       missing transport fall through to "in-process".
+       trail makes the governance story visible at a glance. 
     ── ────────────────────────────────────────────────────────── #}
     {% set tc_transport = tc.get('transport', 'python_inprocess') %}
     {% set tc_is_mcp = tc_transport.startswith('mcp_') %}

@@ -13,9 +13,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Install Verity package in editable mode WITH runtime extras so the
 # Anthropic SDK, MCP client library, and ddgs (used by the DuckDuckGo
-# MCP server) are available in the container. These moved into
-# [project.optional-dependencies].runtime in Phase 2f / Phase 4b / 4d-1;
-# the governance-only base install intentionally doesn't include them.
+# MCP server) are available in the container. 
+# The governance-only base install intentionally doesn't include them.
 COPY verity/ /app/verity/
 RUN pip install --no-cache-dir -e /app/verity/[runtime]
 
