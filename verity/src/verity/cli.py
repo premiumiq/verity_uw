@@ -41,6 +41,25 @@ def main():
     setup_parser.add_argument("--target", choices=["docker", "k8s"], required=True)
     setup_parser.add_argument("--output", default=".", help="Output directory")
 
+    # verity compliance ...
+    compliance_parser = subparsers.add_parser(
+        "compliance", help="Compliance metamodel operations (seed, show)"
+    )
+    compliance_sub = compliance_parser.add_subparsers(
+        dest="compliance_action", help="Compliance action"
+    )
+
+    seed_static_parser = compliance_sub.add_parser(
+        "seed-static",
+        help="Seed frameworks, themes, and feature hierarchy from compliance_seed_static.yaml",
+    )
+    seed_static_parser.add_argument("--database-url", required=True)
+
+    show_parser = compliance_sub.add_parser(
+        "show", help="Print seeded compliance data (frameworks, themes, features) as a tree"
+    )
+    show_parser.add_argument("--database-url", required=True)
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -80,6 +99,20 @@ def main():
         elif args.target == "k8s":
             from verity.setup.k8s import generate_k8s_manifests
             generate_k8s_manifests(args.output)
+
+    elif args.command == "compliance":
+        from verity.setup import seed_compliance
+
+        if args.compliance_action == "seed-static":
+            counts = asyncio.run(seed_compliance.seed_static(args.database_url))
+            print("Static compliance seed complete:")
+            for k, v in counts.items():
+                print(f"  {k:<22} {v}")
+        elif args.compliance_action == "show":
+            asyncio.run(seed_compliance.show(args.database_url))
+        else:
+            compliance_parser.print_help()
+            sys.exit(1)
 
 
 if __name__ == "__main__":

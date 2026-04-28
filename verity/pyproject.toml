@@ -28,6 +28,7 @@ dependencies = [
     "minio>=7.2,<8",
     "python-multipart>=0.0.9",
     "python-json-logger>=3.0,<4",
+    "pyyaml>=6.0,<7",
 ]
 
 [project.optional-dependencies]

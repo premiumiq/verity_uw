@@ -1,0 +1,614 @@
+# =============================================================================
+# Verity Compliance Static Seed (Phase 1.2)
+# =============================================================================
+# Source of truth for: regulatory_framework, canonical_requirement_theme,
+# feature_plane, feature_capability, feature.
+#
+# Provisions, canonical requirements, the bridges, and coverage are NOT here —
+# those live in compliance_seed_data.yaml (Phase 1.2.5 review checkpoint).
+#
+# Edit this file freely — re-running `verity compliance seed-static` UPSERTs
+# by natural code, so additions and edits are non-destructive.
+#
+# Architecture: docs/architecture/compliance-stack.md
+# Source: Verity_Complete_Regulatory_Matrix_v2.md (Parts 1, 3)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Embedding model identity (Phase 1.5 will populate vectors).
+# -----------------------------------------------------------------------------
+embedding_config:
+  model_name: BAAI/bge-small-en-v1.5
+  model_version: v1.5
+  dim: 384
+  runtime: fastembed
+
+# -----------------------------------------------------------------------------
+# Regulatory frameworks — the shelf.
+# -----------------------------------------------------------------------------
+frameworks:
+  - code: SR_11_7
+    name: SR 11-7 — Federal Reserve / OCC Model Risk Management Guidance
+    jurisdiction: US-FED
+    version: "2011-04"
+    effective_date: 2011-04-04
+    source_url: https://www.federalreserve.gov/supervisionreg/srletters/sr1107.htm
+    description: |
+      The de facto gold standard for model governance across financial services.
+      State insurance regulators increasingly reference it in AI examinations
+      and expect equivalent rigor.
+    sort_seq: 10
+
+  - code: NAIC_AI_BULLETIN
+    name: NAIC AI Model Bulletin
+    jurisdiction: US-NAIC
+    version: "2023-12"
+    effective_date: 2023-12-04
+    source_url: https://content.naic.org/sites/default/files/inline-files/2023-12-4%20Model%20Bulletin_Adopted_0.pdf
+    description: |
+      Primary insurance-specific AI regulatory guidance. Adopted by 24+ states
+      as of April 2025. Establishes the AIS Program requirement and examination
+      expectations.
+    sort_seq: 20
+
+  - code: NAIC_EVAL_TOOL
+    name: NAIC AI Systems Evaluation Tool
+    jurisdiction: US-NAIC
+    version: "2026-03"
+    effective_date: 2026-03-01
+    description: |
+      4-exhibit examination tool — pilot launched March 2026 in 12 states.
+      Drives what state insurance examiners actually request during AI exams.
+    sort_seq: 30
+
+  - code: CO_SB21_169
+    name: Colorado SB21-169 — Restrict Insurers' Use of External Consumer Data
+    jurisdiction: US-CO
+    version: "2021"
+    effective_date: 2026-06-30   # original delayed enforcement; subject to revision
+    source_url: https://leg.colorado.gov/sites/default/files/2021a_169_signed.pdf
+    description: |
+      First state law targeting algorithmic bias in insurance. Most directly
+      applicable state law for P&C insurers using AI in underwriting.
+      Similar legislation active in CT, CA, NY, and others.
+    sort_seq: 40
+
+  - code: ORSA_ASOP_56_CAS
+    name: ORSA / ASOP No. 56 / CAS Principles
+    jurisdiction: INDUSTRY
+    version: "consolidated"
+    description: |
+      Three complementary industry self-governance standards:
+      ORSA (enterprise risk management), ASOP 56 (actuarial modeling),
+      CAS Principles (fairness in insurance algorithms).
+    sort_seq: 50
+
+# -----------------------------------------------------------------------------
+# Canonical requirement themes — taxonomy for grouping requirements in UI/reports.
+# -----------------------------------------------------------------------------
+themes:
+  - code: governance_program
+    name: Governance Program
+    description: |
+      Overall AI governance program — model inventory, ownership,
+      accountability chain, written AIS Program.
+    sort_seq: 10
+
+  - code: conceptual_soundness
+    name: Conceptual Soundness & Documentation
+    description: |
+      Model design rationale, documented assumptions and logic,
+      limitations disclosure.
+    sort_seq: 20
+
+  - code: data_inputs_governance
+    name: Data Inputs Governance
+    description: |
+      Input data quality, classification, proxy screening,
+      external data source registry.
+    sort_seq: 30
+
+  - code: testing_validation
+    name: Testing & Validation
+    description: |
+      Pre-deployment testing, ground truth validation, robustness,
+      independent review.
+    sort_seq: 40
+
+  - code: fairness
+    name: Fairness & Non-Discrimination
+    description: |
+      Pre-deployment fairness testing, production fairness monitoring,
+      bias methodology, output disparate-impact prevention.
+    sort_seq: 50
+
+  - code: monitoring_drift
+    name: Ongoing Monitoring & Drift Detection
+    description: |
+      Performance monitoring, drift detection with thresholds,
+      back-testing against realized outcomes.
+    sort_seq: 60
+
+  - code: change_management
+    name: Change Management
+    description: |
+      Versioning, frozen composition at promotion, approval-gated changes.
+    sort_seq: 70
+
+  - code: use_user_controls
+    name: Use & User Controls
+    description: |
+      Authority thresholds, materiality tiers, HITL gates, intended-use
+      enforcement, oversight & intervention.
+    sort_seq: 80
+
+  - code: transparency_explainability
+    name: Transparency & Explainability
+    description: |
+      Plain-language descriptions of AI use, decision-level explainability,
+      adverse action explanations.
+    sort_seq: 90
+
+  - code: privacy_security
+    name: Privacy & Data Security
+    description: |
+      Data privacy compliance, PII handling, data classification enforcement.
+    sort_seq: 100
+
+  - code: third_party_oversight
+    name: Third-Party Vendor Oversight
+    description: |
+      Vendor risk assessment, MCP / external tool trust registry,
+      contractual governance.
+    sort_seq: 110
+
+  - code: consumer_protection
+    name: Consumer Protection
+    description: |
+      Consumer notification of AI use, UTPA compliance, adverse action
+      explainability for consumers.
+    sort_seq: 120
+
+  - code: examination_readiness
+    name: Regulatory Examination Readiness
+    description: |
+      Annual certification workflows, evidence package generation,
+      market conduct examination preparedness.
+    sort_seq: 130
+
+  - code: data_lineage_provenance
+    name: Data Lineage & Provenance
+    description: |
+      Full audit trail from input source through decision through write
+      target, source-resolution provenance, document lineage.
+    sort_seq: 140
+
+  - code: board_reporting
+    name: Board & Senior Management Reporting
+    description: |
+      Model risk reporting cadence, dashboards, AI risk reporting to
+      executive committees.
+    sort_seq: 150
+
+# -----------------------------------------------------------------------------
+# Feature hierarchy — Plane → Capability → Feature.
+# Mirrors Verity_Complete_Regulatory_Matrix_v2.md Part 3.
+# Legacy "G1, R5" labels become derived display strings; structural keys
+# are surrogate UUIDs.
+# -----------------------------------------------------------------------------
+feature_planes:
+  - code: governance
+    name: Verity Governance
+    description: Authoritative store and decision-making surface (shipped).
+    sort_seq: 10
+    capabilities:
+      - code: asset_registry
+        name: Asset Registry
+        sort_seq: 10
+        features:
+          - code: task_version_registration
+            name: Task version registration
+            description: Versioned records with name, input/output schema, owner, materiality, lifecycle_state.
+            status: shipped
+            sort_seq: 1
+          - code: agent_version_registration
+            name: Agent version registration
+            description: Versioned records with tool allowlist, delegation table, optional output schema.
+            status: shipped
+            sort_seq: 2
+          - code: prompt_template_versioning
+            name: Prompt template versioning
+            description: Independent versions, template variables, referenced by entity versions.
+            status: shipped
+            sort_seq: 3
+          - code: tool_registration
+            name: Tool registration
+            description: Records with transport type, is_write_operation flag.
+            status: shipped
+            sort_seq: 4
+          - code: connector_registration
+            name: Data connector registration
+            description: Data connector records with provider capabilities, method signatures.
+            status: shipped
+            sort_seq: 5
+          - code: mcp_server_trust_registry
+            name: MCP server trust registry
+            description: External tool servers with trust level, allowed tools, last assessment, data classification.
+            status: shipped
+            sort_seq: 6
+          - code: application_registration
+            name: Application registration
+            description: Named applications (UW, Claims, Renewal) that own entity versions.
+            status: shipped
+            sort_seq: 7
+          - code: materiality_tier_classification
+            name: Materiality tier classification
+            description: High/Medium/Low per version, controls gate requirements.
+            status: shipped
+            sort_seq: 8
+          - code: description_similarity_check
+            name: Description similarity check
+            description: Quality check at Candidate → Staging.
+            status: shipped
+            sort_seq: 9
+          - code: frozen_composition_at_promotion
+            name: Frozen composition at promotion
+            description: prompt_version_ids, inference_config, source_bindings, write_targets locked.
+            status: shipped
+            sort_seq: 10
+          - code: admit_time_wiring_validation
+            name: Admit-time wiring validation
+            description: All bindings/targets validated at registration. If it registers, it runs.
+            status: shipped
+            sort_seq: 11
+      - code: lifecycle_engine
+        name: Lifecycle Engine
+        sort_seq: 20
+        features:
+          - code: seven_state_lifecycle
+            name: 7-state lifecycle
+            description: Draft → Candidate → Staging → Shadow → Challenger → Champion → Deprecated.
+            status: shipped
+            sort_seq: 12
+          - code: configurable_gates_per_materiality
+            name: Configurable gates per materiality
+            description: "High: 3 HITL gates. Medium: 1. Low: version tracking only."
+            status: shipped
+            sort_seq: 13
+          - code: hitl_approval_records
+            name: HITL approval records
+            description: Named approver, timestamp, evidence per promotion.
+            status: shipped
+            sort_seq: 14
+          - code: developer_validator_separation
+            name: Developer ≠ validator enforcement
+            description: High-materiality — developer and validator cannot be same user.
+            status: shipped
+            sort_seq: 15
+          - code: fast_track_for_demo_seeding
+            name: Fast-track for demo seeding
+            description: Candidate → Champion for non-production.
+            status: shipped
+            sort_seq: 16
+          - code: lifecycle_event_audit
+            name: Lifecycle event audit
+            description: from_state, to_state, approved_by, evidence, timestamp — append-only.
+            status: shipped
+            sort_seq: 17
+          - code: champion_resolution_at_runtime
+            name: Champion resolution at runtime
+            description: Lookup active champion per entity + application.
+            status: shipped
+            sort_seq: 18
+      - code: testing_validation
+        name: Testing & Validation
+        sort_seq: 30
+        features:
+          - code: mock_mode_testing
+            name: Mock mode testing
+            description: No LLM, no side effects. step_responses strict — missing fixture = MockMissingError.
+            status: shipped
+            sort_seq: 19
+          - code: staging_pytest_suite
+            name: Staging pytest suite
+            description: Real LLM, controlled data, full pytest integration.
+            status: shipped
+            sort_seq: 20
+          - code: ground_truth_validation
+            name: Ground truth validation
+            description: F1, precision, recall, kappa against labeled datasets. Includes fairness metrics.
+            status: shipped
+            sort_seq: 21
+          - code: shadow_deployment
+            name: Shadow deployment
+            description: Real traffic, logged-only, no production writes. Channel-gated.
+            status: shipped
+            sort_seq: 22
+          - code: test_execution_log
+            name: Test execution log
+            description: Results stored linked to entity version. Detail_level forced to full for validation.
+            status: shipped
+            sort_seq: 23
+          - code: mock_context_three_concerns
+            name: MockContext (3 concerns)
+            description: step_responses (strict), tool_responses (partial), source_responses. Compose independently.
+            status: shipped
+            sort_seq: 24
+      - code: decision_logging
+        name: Decision Logging
+        sort_seq: 40
+        features:
+          - code: immutable_decision_log
+            name: Immutable decision_log
+            description: Append-only, never updated. Full Governance Contract per invocation.
+            status: shipped
+            sort_seq: 25
+          - code: model_invocation_log
+            name: Model invocation log
+            description: "Per-turn record: model, tokens, duration, stop_reason, message_history (at full level)."
+            status: shipped
+            sort_seq: 26
+          - code: source_resolutions_audit
+            name: Source resolutions audit
+            description: "Per-binding: binding_kind, status, fetch_id, payload_bytes, duration_ms, connector, method."
+            status: shipped
+            sort_seq: 27
+          - code: target_writes_audit
+            name: Target writes audit
+            description: "Per-target: mode, mode_reason, status, handle, connector, write_method."
+            status: shipped
+            sort_seq: 28
+          - code: tool_calls_audit
+            name: Tool calls audit
+            description: "Per-call: name, input, output, duration, is_write_operation, transport, turn_number."
+            status: shipped
+            sort_seq: 29
+          - code: detail_level_control
+            name: Detail level control
+            description: full / standard / minimal / redacted per entity version. Redaction pipeline scrubs PII before storage.
+            status: shipped
+            sort_seq: 30
+          - code: execution_context_threading
+            name: Execution context threading
+            description: execution_context_id + workflow_run_id + parent_decision_id + decision_depth.
+            status: shipped
+            sort_seq: 31
+      - code: model_management
+        name: Model Management
+        sort_seq: 50
+        features:
+          - code: inference_config_governance
+            name: Inference config governance
+            description: "Frozen JSONB: model, temperature, max_tokens per version."
+            status: shipped
+            sort_seq: 32
+          - code: model_swappability
+            name: Model swappability
+            description: Change model → new version → same lifecycle gates.
+            status: shipped
+            sort_seq: 33
+      - code: compliance_reporting
+        name: Compliance & Reporting
+        sort_seq: 60
+        features:
+          - code: model_inventory_report
+            name: Model Inventory Report
+            description: Auto-generated from trust DB across all applications.
+            status: shipped
+            sort_seq: 34
+          - code: validation_report_storage
+            name: Validation report storage
+            description: Stored documents in Vault linked to entity version.
+            status: shipped
+            sort_seq: 35
+          - code: regulatory_evidence_package
+            name: Regulatory evidence package
+            description: "Exportable: inventory, validation, fairness, data sources, test results."
+            status: partial
+            sort_seq: 36
+      - code: quotas_incidents
+        name: Quotas & Incidents
+        sort_seq: 70
+        features:
+          - code: rate_limiting
+            name: Rate limiting
+            description: Per-entity, per-application, per-channel quotas.
+            status: shipped
+            sort_seq: 37
+          - code: incident_log
+            name: Incident log
+            description: Severity, status, linked_entity_version_id.
+            status: shipped
+            sort_seq: 38
+
+  - code: runtime
+    name: Verity Runtime
+    description: Execution surface (shipped). Tasks and Agents.
+    sort_seq: 20
+    capabilities:
+      - code: task_executor
+        name: Task Executor
+        sort_seq: 10
+        features:
+          - code: single_call_task_execution
+            name: Single-call task execution
+            description: Source resolve → prompt assemble → 1 Claude call → output validate → write targets.
+            status: shipped
+            sort_seq: 1
+          - code: structured_output_enforcement
+            name: Structured output enforcement
+            description: tool_choice on synthetic structured_output tool. Schema violation = hard fail.
+            status: shipped
+            sort_seq: 2
+          - code: source_binding_resolution
+            name: Source binding resolution
+            description: text (template vars) and content_blocks (vision) modalities.
+            status: shipped
+            sort_seq: 3
+          - code: write_target_dispatch
+            name: Write target dispatch
+            description: Channel-gated, payload assembly from input.* / output.* references.
+            status: shipped
+            sort_seq: 4
+          - code: write_mode_resolver
+            name: Write mode resolver
+            description: "MockContext > caller override > auto (channel-gated). Precedence documented."
+            status: shipped
+            sort_seq: 5
+      - code: agent_loop
+        name: Agent Loop
+        sort_seq: 20
+        features:
+          - code: multi_turn_tool_use_loop
+            name: Multi-turn tool-use loop
+            description: Claude → tool_use → dispatch → result → repeat until terminal.
+            status: shipped
+            sort_seq: 6
+          - code: tool_authorization_checking
+            name: Tool authorization checking
+            description: Per-version allowlist. Unauthorized → rejected + Claude informed.
+            status: shipped
+            sort_seq: 7
+          - code: tool_dispatch_three_transports
+            name: Tool dispatch (3 transports)
+            description: python_inprocess, mcp_*, delegate_to_agent.
+            status: shipped
+            sort_seq: 8
+          - code: sub_agent_delegation
+            name: Sub-agent delegation
+            description: delegate_to_agent meta-tool. parent_decision_id + decision_depth threading.
+            status: shipped
+            sort_seq: 9
+          - code: agent_output_enforcement
+            name: Agent output enforcement (opt-in)
+            description: submit_output tool + tool_choice on terminal turn.
+            status: shipped
+            sort_seq: 10
+          - code: write_authority_per_tool
+            name: Write authority per tool
+            description: is_write_operation flag. Write tools blocked on non-production channels.
+            status: shipped
+            sort_seq: 11
+          - code: max_turns_bounding
+            name: Max turns bounding
+            description: Safety limit per inference_config.
+            status: shipped
+            sort_seq: 12
+      - code: async_execution
+        name: Async Execution
+        sort_seq: 30
+        features:
+          - code: async_run_submission
+            name: Async run submission
+            description: POST /api/v1/runs → returns run_id immediately.
+            status: shipped
+            sort_seq: 13
+          - code: event_sourced_run_tracking
+            name: Event-sourced run tracking
+            description: 4 append-only tables + execution_run_current VIEW. No mutable rows.
+            status: shipped
+            sort_seq: 14
+          - code: worker_pool
+            name: Worker pool
+            description: Stateless Docker service. SELECT FOR UPDATE SKIP LOCKED. Horizontally scalable.
+            status: shipped
+            sort_seq: 15
+          - code: poll_wait_sync_sugar
+            name: Poll / wait / sync sugar
+            description: get_run, get_run_result, wait_for_run, run_task / run_agent.
+            status: shipped
+            sort_seq: 16
+          - code: run_cancellation
+            name: Run cancellation
+            description: Cooperative cancel between engine steps.
+            status: shipped
+            sort_seq: 17
+          - code: stuck_run_recovery
+            name: Stuck run recovery
+            description: Janitor detects missing heartbeats, releases for re-claim.
+            status: shipped
+            sort_seq: 18
+          - code: canonical_envelope
+            name: Canonical envelope
+            description: "Uniform shape: status, output / error, telemetry, provenance."
+            status: shipped
+            sort_seq: 19
+      - code: connectors
+        name: Connectors
+        sort_seq: 40
+        features:
+          - code: edms_vault_connector
+            name: EDMS / Vault connector
+            description: "Document storage with lineage. Storage abstraction: MinIO → S3 / Blob swappable."
+            status: shipped
+            sort_seq: 20
+          - code: content_block_generation
+            name: Content block generation
+            description: PDF→document, image→image, text→text for Claude vision.
+            status: shipped
+            sort_seq: 21
+          - code: derived_document_creation
+            name: Derived document creation
+            description: create_derived_json with lineage linking.
+            status: shipped
+            sort_seq: 22
+          - code: mcp_client
+            name: MCP client
+            description: Connect to registered MCP servers for external tools.
+            status: shipped
+            sort_seq: 23
+
+  - code: agents
+    name: Verity Agents
+    description: Governance-plane agents that automate drift detection, lifecycle initiation, validation. Planned.
+    sort_seq: 30
+    capabilities:
+      - code: governance_automation_agents
+        name: Governance Automation Agents
+        sort_seq: 10
+        features:
+          - code: drift_detection_agents
+            name: Drift detection agents
+            description: Monitor champion performance, flag drift.
+            status: planned
+            sort_seq: 1
+          - code: lifecycle_initiation_agents
+            name: Lifecycle initiation agents
+            description: Auto-initiate lifecycle from monitoring triggers.
+            status: planned
+            sort_seq: 2
+          - code: validation_with_hitl_agents
+            name: Validation with HITL agents
+            description: Governance agents validating with human gates.
+            status: planned
+            sort_seq: 3
+
+  - code: studio
+    name: Verity Studio
+    description: UI-driven authoring surface for non-developer users. Planned.
+    sort_seq: 40
+    capabilities:
+      - code: authoring_surfaces
+        name: Authoring Surfaces
+        sort_seq: 10
+        features:
+          - code: compose_ai
+            name: Compose AI (UI)
+            description: Visual authoring for non-developers.
+            status: planned
+            sort_seq: 1
+          - code: lifecycle_management_ui
+            name: Lifecycle UI
+            description: UI-driven lifecycle management.
+            status: planned
+            sort_seq: 2
+          - code: ground_truth_management_ui
+            name: Ground truth management UI
+            description: Upload, manage, version labeled datasets.
+            status: planned
+            sort_seq: 3
+          - code: test_management_ui
+            name: Test management UI
+            description: Configure and run test suites from UI.
+            status: planned
+            sort_seq: 4
