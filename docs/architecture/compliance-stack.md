@@ -49,6 +49,104 @@ The metamodel rejects two anti-patterns: (a) flat tables with framework-as-colum
 
 **All primary keys are surrogate UUIDs.** Identifiers like `G1`, `SR11-7.II.A`, `feature.code` are natural attributes — sortable, displayable, never structural.
 
+### Conceptual model
+
+```
+   ┌────────────────────┐    ┌──────────────────────────┐    ┌──────────────────────┐
+   │ WHAT REGULATORS    │    │ WHAT'S BEING REQUIRED    │    │ WHAT VERITY OFFERS   │
+   │ ACTUALLY WROTE     │    │ (rationalized)           │    │ (the product)        │
+   │                    │    │                          │    │                      │
+   │  regulatory_       │    │  canonical_              │    │  feature_plane       │
+   │   framework        │    │   requirement_theme      │    │      │               │
+   │      │             │    │      │                   │    │      │               │
+   │      │ 1:N         │    │      │ 1:N               │    │      │ 1:N           │
+   │      ▼             │    │      ▼                   │    │      ▼               │
+   │  regulatory_       │    │  canonical_              │    │  feature_capability  │
+   │   provision        │◄──►│   requirement            │◄──►│      │               │
+   │   (the literal     │M:N │   (the rationalized      │M:N │      │ 1:N           │
+   │    citation +text) │    │    "thing required")     │    │      ▼               │
+   │                    │    │      │                   │    │  feature             │
+   │                    │    │      │ 1:1               │    │   (the leaf — what's │
+   │                    │    │      ▼                   │    │    labeled G1, R5)   │
+   │                    │    │  requirement_coverage    │    │                      │
+   │                    │    │   (Verity's stance:      │    │                      │
+   │                    │    │    Full/Substantial/     │    │                      │
+   │                    │    │    Partial/Gap)          │    │                      │
+   └────────────────────┘    └──────────────────────────┘    └──────────────────────┘
+       LEFT AXIS                   CENTER AXIS                     RIGHT AXIS
+   (regulatory truth)           (rationalized truth)         (engineering truth)
+
+
+   The two bridges (M:N) connect the three axes:
+
+       provision_requirement_map        regulatory_provision  ↔  canonical_requirement
+       (semantic alignment, weighted)   "this paragraph from SR 11-7 means this requirement"
+
+       requirement_feature_link         canonical_requirement  ↔  feature
+       (proof of coverage)              "this requirement is satisfied by these features"
+
+
+   ┌──────────────────────┐
+   │ ASIDE — VECTOR MODEL │   embedding_config
+   │  IDENTITY            │      (one current row, history kept)
+   │                      │      Every embedded row points back here
+   │                      │      via embedding_model_id FK so we know
+   │                      │      which model produced which vector.
+   └──────────────────────┘
+```
+
+Three vertical axes plus two bridges. That is the entire metamodel.
+
+### Why three axes (and not one big table)
+
+A flat table with `framework`, `requirement`, `verity_feature`, `coverage` columns — which is essentially how the v2 matrix is shaped today — has three problems:
+
+1. **Cross-framework requirements duplicate.** "Model inventory" appears in SR 11-7, NAIC, and the Eval Tool. Three rows, same idea, no rationalization.
+2. **Adding a feature touches every row.** A new feature ships → update many rows.
+3. **Adding a framework touches every row.** A new state law arrives → bulk inserts of near-duplicates.
+
+Splitting into three axes connected by bridges means each axis grows independently. New regulation? INSERT on the left axis only. New Verity feature? INSERT on the right axis only. The middle axis (canonical requirements) is the stable rationalized vocabulary that both sides reference.
+
+### Table-by-table — what each one accomplishes
+
+**Left axis — what the regulators wrote**
+
+- **`regulatory_framework`** — The shelf. Each row is one regulatory document or program: SR 11-7, NAIC AI Model Bulletin, CO SB21-169, ORSA/ASOP/CAS, NAIC Eval Tool. Carries `jurisdiction` (US-FED, US-CO, INDUSTRY) and `effective_date`, plus `valid_from`/`valid_to` so when a regulation gets revised in 2027 we retire the old version and add the new without losing history.
+- **`regulatory_provision`** — A single citation within a framework. SR 11-7 §II.A is one row; NAIC §3.1 is another. Carries the literal text where we have it. Embeddings on this row power the future similarity recommender — paste a new state's bill text, find the closest existing provisions. Also temporally bounded.
+
+**Center axis — rationalized requirements**
+
+- **`canonical_requirement_theme`** — Top-level taxonomy: governance, fairness, privacy_security, monitoring_drift, etc. Lets the UI group requirements meaningfully and lets reports cluster by theme. Roughly a dozen themes.
+- **`canonical_requirement`** — The most important table in the metamodel. Each row is a rationalized "thing being required" — for example, "Model inventory & registration" — independent of which framework expresses it. Multiple framework provisions point at the same canonical requirement; a few canonical requirements are framework-specific. Verity's coverage commitment is per-canonical-requirement, not per-provision. The "decompose-as-needed, not aggressive minimization" rule lives here: when in doubt, keep separate; merging is hard to reverse.
+- **`requirement_coverage`** — Verity's stance on each canonical requirement. `coverage_level` is one of Full / Substantial / Partial / Gap; `rationale` explains why; `customer_actions` describes the policy / process / configuration the customer still has to provide. Separate 1:1 from `canonical_requirement` so coverage history can become SCD2 later without restructuring.
+
+**Right axis — what Verity ships**
+
+- **`feature_plane`** — Top of the feature hierarchy. Four rows: Governance, Runtime, Agents, Studio. The matrix's "G/R/A/S" prefixes become this column, but as a foreign-keyed surrogate, not a string code.
+- **`feature_capability`** — Mid level. Under Governance: Asset Registry, Lifecycle Engine, Testing & Validation, Decision Logging, etc. Under Runtime: Task Executor, Agent Loop, Async Execution, Connectors. Roughly a dozen capabilities total. Lets the UI render features grouped, and lets coverage statements be made at capability granularity if we want.
+- **`feature`** — The leaf. What the matrix labels G1, G2, R5, A2, etc. Each row is one shippable Verity capability. Has `status` (shipped / planned / partial / deprecated) so the model can carry roadmap items, not only shipped ones, without polluting coverage. Carries an embedding so future similarity work can match a new framework's provision against features. The `G1`-style label becomes a derived display string, never a structural key.
+
+**Bridges — the two M:N joins that make the model work**
+
+- **`provision_requirement_map`** — Connects left and center axes. "SR 11-7 §I says model inventory & registration" → one row linking that provision to the `model_inventory` canonical requirement. NAIC §3.1 also says model inventory → another row pointing to the same canonical. Many-to-many in both directions. Carries `match_strength` (semantic alignment, 0–1), `confidence`, and `mapping_source` (manual / semantic_recommended / human_validated). When a future agent ingests a new bill, it embeds each provision, finds nearby canonical requirements via cosine similarity, and proposes rows here as `semantic_recommended`. A reviewer flips them to `human_validated`. **This is the table that makes adding a new state law lightweight.**
+- **`requirement_feature_link`** — Connects center and right axes. "Model inventory canonical requirement is satisfied by these Verity features." Many-to-many: one feature can support several requirements; one requirement is usually backed by several features. `role` distinguishes `primary` from `supporting`. This is the table that proves the v2 matrix's "Verity Features" column claim, structurally.
+
+**Aside — embedding model identity**
+
+- **`embedding_config`** — One row marked `is_current = true` plus historical rows. Records which embedding model produced which vectors. Every embedded row carries `embedding_model_id` pointing here. When we eventually upgrade from BGE-small, the reembed CLI compares each row's `embedding_model_id` against the current config row and only re-embeds the stale ones — a 30-second job instead of a 30-minute one.
+
+### How the queries flow
+
+**Coverage Matrix UI page:** for each `regulatory_framework`, walk its `regulatory_provision`s → `provision_requirement_map` → `canonical_requirement` → `requirement_coverage`. Render as a grid. Each cell links to the provision text + the linked features.
+
+**"What does NAIC §3.1 require?"**: `regulatory_provision` (filter by citation) → bridge → `canonical_requirement`(s) → `requirement_feature_link` → `feature`(s).
+
+**"What does Verity feature G15 (developer ≠ validator) satisfy?"**: `feature` (filter by code) → `requirement_feature_link` → `canonical_requirement`(s) → bridge → `regulatory_provision`(s) → `regulatory_framework`(s). One query produces the regulator-facing answer "G15 satisfies these provisions across these frameworks."
+
+**Future similarity recommender:** new framework arrives → for each provision, embed → cosine search against `canonical_requirement.embedding` → propose `provision_requirement_map` rows with `mapping_source='semantic_recommended'`. Coverage % rolls up automatically once a human accepts.
+
+This metamodel is the foundation. Everything in L2–L5 attaches to the center axis — `canonical_requirement` is the contract between regulators and Verity. The architecture stays stable as new frameworks plug in on the left and new features ship on the right.
+
 ### Frameworks side
 
 ```
