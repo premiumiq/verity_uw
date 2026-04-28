@@ -1555,25 +1555,54 @@ LEFT JOIN LATERAL (
 ) first_claim ON TRUE;
 
 
--- ── OVERRIDE LOG ─────────────────────────────────────────────
+-- ── HITL OVERRIDE ────────────────────────────────────────────
+-- Per-field override of an AI-produced value. Distinct from
+-- override_log (decision-level, narrative): hitl_override is
+-- structured, JSONPath-anchored, and carries both the technical
+-- anchor (decision_log_id + output_path) and a parallel business
+-- identification (application + entity_type + entity_reference +
+-- fact_type) so downstream rollups can group by either axis.
+--
+-- Written by the UW edit handler (or any future caller) when a
+-- human corrects a value the AI produced. Reading these rows
+-- back lets governance reports answer:
+--   - which agents/extractors get overridden most often,
+--   - which fact_types drift between AI and human,
+--   - which submissions accumulate the most HITL corrections.
 
-CREATE TABLE override_log (
+CREATE TABLE IF NOT EXISTS hitl_override (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    decision_log_id         UUID NOT NULL REFERENCES agent_decision_log(id),
-    entity_type             entity_type NOT NULL,
-    entity_version_id       UUID NOT NULL,
 
-    overrider_name          VARCHAR(200) NOT NULL,
-    overrider_role          VARCHAR(100),
-    override_reason_code    VARCHAR(50) NOT NULL,
-    override_notes          TEXT,
-    ai_recommendation       JSONB,
-    human_decision          JSONB,
-    created_at              TIMESTAMP DEFAULT NOW()
+    -- Technical anchor: the Verity decision row whose output
+    -- carried the value the human is now correcting. The
+    -- output_path is a JSONPath into that decision's output_json.
+    decision_log_id         UUID NOT NULL REFERENCES agent_decision_log(id) ON DELETE CASCADE,
+    output_path             TEXT NOT NULL,
+
+    -- Values. ai_value is nullable (the AI may have looked but
+    -- not found anything — disambiguated by ai_found).
+    ai_value                JSONB,
+    ai_found                BOOLEAN NOT NULL,
+    hitl_value              JSONB NOT NULL,
+
+    -- Business identification — parallel to the technical anchor.
+    -- Lets reports group overrides by business meaning regardless
+    -- of which run produced them.
+    application             VARCHAR(100) NOT NULL,
+    entity_type             VARCHAR(100) NOT NULL,
+    entity_reference        VARCHAR(500) NOT NULL,
+    fact_type               VARCHAR(200) NOT NULL,
+
+    -- Audit
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by              VARCHAR(200) NOT NULL,
+    reason                  TEXT
 );
 
-CREATE INDEX idx_ol_entity ON override_log(entity_type, entity_version_id);
-CREATE INDEX idx_ol_created ON override_log(created_at);
+CREATE INDEX idx_ho_decision   ON hitl_override(decision_log_id);
+CREATE INDEX idx_ho_fact       ON hitl_override(application, entity_type, fact_type);
+CREATE INDEX idx_ho_entity_ref ON hitl_override(application, entity_type, entity_reference);
+CREATE INDEX idx_ho_created    ON hitl_override(created_at);
 
 
 -- ── MODEL CARDS ───────────────────────────────────────────────

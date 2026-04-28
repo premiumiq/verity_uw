@@ -1,0 +1,170 @@
+{# Reusable field row macro.
+
+   Renders one field cell with label, value, and an inline icon
+   slot. Used by every form-style surface in the app: the
+   Submission Details tab, the inline editor, the Upload Document
+   modal, the HITL queue resolution form, and any future
+   ontology editors.
+
+   The macro reads only the `field` dict — the route is
+   responsible for assembling it. Keeping the macro shape narrow
+   makes it easy to reuse from any template that builds the same
+   dict shape.
+
+   Argument:
+     field — dict with keys
+       field_name, label, formatter, raw_value, display_value,
+       extraction (or None), is_ai_authoritative, ai_not_found,
+       needs_review, source_filename (or None)
+
+   The macro renders both the read-only value AND the input form;
+   CSS toggles which is visible based on `data-state`. Pen click
+   flips state to 'editing'; Save submits via HTMX and the server
+   returns the same macro in 'readonly' state.
+#}
+
+{# Inline SVGs — kept simple and small. We don't import an icon
+   library to match the rest of the app's no-dependency style. #}
+{% macro _sparkle_svg() -%}
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"
+       aria-hidden="true" focusable="false">
+    {# Larger 4-pointed star plus two small accent stars so the
+       glyph reads as 'AI / sparkle' rather than a generic shape. #}
+    <path d="M12 2 L13.7 9.3 L20 11 L13.7 12.7 L12 20 L10.3 12.7 L4 11 L10.3 9.3 Z"/>
+    <circle cx="19" cy="5" r="1.4"/>
+    <circle cx="5" cy="19" r="1"/>
+  </svg>
+{%- endmacro %}
+
+{% macro _pen_svg() -%}
+  <svg width="13" height="13" viewBox="0 0 24 24"
+       fill="none" stroke="currentColor" stroke-width="2"
+       stroke-linecap="round" stroke-linejoin="round"
+       aria-hidden="true" focusable="false">
+    <path d="M12 20h9"/>
+    <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
+  </svg>
+{%- endmacro %}
+
+
+{% macro field_row(field, submission_id) %}
+  {%- set ext = field.extraction -%}
+  {%- set conf = ext.ai_confidence if ext else None -%}
+  {%- set sparkle_class = 'verity-sparkle--green' if conf and conf >= 0.85 else 'verity-sparkle--amber' -%}
+
+  {# Amber wash is reserved for fields that are both flagged for
+     review AND have no displayed value. If the cell shows
+     anything (broker-stated or AI-extracted), the row stays
+     neutral on the Details page; HITL review happens on the
+     Extraction tab where the amber treatment is louder. #}
+  {%- set show_review_wash = field.needs_review and field.display_value == '—' -%}
+  <div class="verity-field"
+       id="field-{{ field.field_name }}"
+       data-state="readonly"
+       data-field-name="{{ field.field_name }}"
+       {% if field.is_ai_authoritative %}data-ai-authoritative="true"{% endif %}
+       {% if show_review_wash %}data-needs-review="true"{% endif %}>
+
+    <label class="verity-field-label">{{ field.label }}</label>
+
+    {# ── Read-only value with affordances ─────────────────── #}
+    <div class="verity-field-value">
+      {% if field.ai_not_found and not field.broker_stated_only %}
+        {# AI tried and failed, AND no broker-stated fallback —
+           render an explicit empty pill so the user sees why
+           the cell is empty. #}
+        <span class="verity-badge verity-badge-shadow"
+              title="The AI extractor ran but could not locate this field in the source document.">
+          AI did not find this field
+        </span>
+      {% elif field.formatter == 'badge' %}
+        <span class="verity-badge verity-badge-agent">{{ field.display_value }}</span>
+      {% else %}
+        <span class="verity-field-display">{{ field.display_value }}</span>
+      {% endif %}
+
+      <span class="verity-field-affordances">
+        {# Sparkle: only when an AI value is currently
+           authoritative. The synchronous onclick opens the
+           dialog right away (so users see the modal frame
+           appear instantly); HTMX fetches the panel content in
+           parallel and swaps it into #provenance-modal-content.
+           Doing it in two channels avoids the htmx:afterSwap
+           event-bubbling pitfall — that event fires on the
+           swap target, not the source button. #}
+        {% if field.is_ai_authoritative %}
+          <button type="button"
+                  class="verity-sparkle {{ sparkle_class }}"
+                  title="View AI provenance"
+                  onclick="document.getElementById('provenance-modal').showModal()"
+                  hx-get="/submissions/{{ submission_id }}/extraction/{{ field.field_name }}/provenance"
+                  hx-target="#provenance-modal-content"
+                  hx-swap="innerHTML">
+            {{ _sparkle_svg() }}
+          </button>
+        {% endif %}
+
+        {# Pen: every field is editable. Click toggles to
+           editing state. Inline JS keeps it dependency-free. #}
+        <button type="button" class="verity-pen-btn"
+                title="Edit this field"
+                onclick="(function(b){var f=b.closest('.verity-field');f.dataset.state='editing';var i=f.querySelector('input,select,textarea');if(i)i.focus();})(this)">
+          {{ _pen_svg() }}
+        </button>
+      </span>
+    </div>
+
+    {# ── Editing form ─────────────────────────────────────
+       Hidden when data-state='readonly' (CSS rule); shown
+       when data-state='editing'. Posts via HTMX; on success
+       the server returns the same macro re-rendered in
+       readonly state and HTMX swaps the whole field root. #}
+    <form class="verity-field-edit-form"
+          hx-post="/submissions/{{ submission_id }}/extraction/{{ field.field_name }}/edit"
+          hx-target="closest .verity-field"
+          hx-swap="outerHTML">
+      {% set input_type = (
+          'number'  if field.formatter in ('currency','int','count')
+          else 'date' if field.formatter == 'date'
+          else 'text'
+      ) %}
+      <input class="verity-field-edit-value"
+             name="hitl_value"
+             type="{{ input_type }}"
+             value="{{ field.raw_value if field.raw_value is not none else '' }}"
+             {% if input_type == 'number' %}step="1"{% endif %}>
+
+      <input class="verity-field-edit-reason"
+             name="reason"
+             type="text"
+             placeholder="Reason for change (required when sending feedback)"
+             {% if field.feedback_default %}required{% endif %}>
+
+      {% if field.extraction %}
+      {# Send-feedback checkbox is shown only when an extraction
+         row exists (i.e. AI was involved in this field at all).
+         Default-checked when AI provided a value or was expected
+         to find one and missed. The inline JS toggles the
+         reason input's `required` attribute as the user
+         changes their mind. #}
+      <label class="verity-field-edit-feedback"
+             title="Forward this correction to Verity as a HITL override. When on, a reason is required.">
+        <input type="checkbox" name="send_feedback" value="1"
+               {% if field.feedback_default %}checked{% endif %}
+               onchange="(function(c){var r=c.closest('form').querySelector('.verity-field-edit-reason');if(r)r.required=c.checked;})(this)">
+        Send feedback to Verity
+      </label>
+      {% endif %}
+
+      <div class="verity-field-edit-actions">
+        <button type="button" class="verity-btn verity-btn-secondary verity-btn-sm"
+                onclick="(function(b){var f=b.closest('.verity-field');f.dataset.state='readonly';})(this)">
+          Cancel
+        </button>
+        <button type="submit" class="verity-btn verity-btn-primary verity-btn-sm">
+          Save
+        </button>
+      </div>
+    </form>
+  </div>
+{% endmacro %}

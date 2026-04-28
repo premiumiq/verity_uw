@@ -439,6 +439,551 @@ a:hover {
 }
 
 
+/* ══════════════════════════════════════════════════════════════
+   FORM COMPONENT MODULE
+   ══════════════════════════════════════════════════════════════
+   A small set of named primitives shared by every form-style
+   surface in the app: the Submission Details tab, the inline
+   field editor, the Upload Document modal, the HITL queue
+   resolution form, and any future ontology editors.
+
+   Naming: BEM-flavored. The base class names the primitive;
+   double-dash modifiers name the variant. E.g.
+   `.verity-form-grid--2` for a 2-column grid,
+   `.verity-field--span-3` for a cell spanning three columns
+   of its parent grid.
+
+   State variants are controlled with `data-*` attributes set by
+   the template (no JS needed):
+     [data-state="readonly"]  default; just shows the value
+     [data-state="editing"]   shows the input, hides the value
+     [data-state="dirty"]     value differs from saved
+     [data-state="error"]     validation failed
+     [data-needs-review]      amber wash; HITL chip slot in use
+     [data-ai-authoritative]  AI value is current; sparkle visible
+     [data-required]          asterisk on the label
+*/
+
+
+/* ── FORM CONTAINERS ─────────────────────────────────────── */
+
+.verity-form {
+    /* Root scope. Sets a stable typographic baseline so forms
+       inside .verity-card or modals all look the same. */
+    font-family: var(--verity-font);
+    font-size: 0.85rem;
+    color: var(--verity-text);
+}
+
+.verity-form-section {
+    /* A labeled grouping. Multiple sections sit one under another;
+       each owns one form grid. */
+    margin-bottom: 20px;
+}
+
+.verity-form-section:last-child {
+    margin-bottom: 0;
+}
+
+.verity-form-section-header {
+    /* Title row above a section's grid. Holds the title on the
+       left and any section-level controls on the right (e.g. an
+       Edit button that flips the section into editing mode). */
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--verity-border-light);
+    padding-bottom: 4px;
+    margin-bottom: 10px;
+}
+
+.verity-form-section-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--verity-text-light);
+}
+
+.verity-form-section-actions {
+    /* Right-side slot for buttons (Edit, Save, Cancel). Use
+       small button variants inside. */
+    display: flex;
+    gap: 6px;
+}
+
+
+/* ── GRID LAYOUT ─────────────────────────────────────────── */
+
+.verity-form-grid {
+    /* Default: single column. Use a modifier for 2 / 3. */
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px 28px;
+}
+
+.verity-form-grid--2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.verity-form-grid--3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 720px) {
+    /* Multi-column grids collapse to single-column on narrow viewports. */
+    .verity-form-grid--2,
+    .verity-form-grid--3 {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 10px;
+    }
+}
+
+
+/* ── FIELD CELL ──────────────────────────────────────────── */
+
+.verity-field {
+    /* One field unit: label stacked above value/input, optional
+       help and error text below. min-width:0 lets long values
+       wrap inside narrow grid cells. */
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+/* Column-span modifiers. NOTE: --span-2 is only meaningful in a
+   3-column grid; in a 2-column grid it visually equals --span-all
+   so use --span-all instead. */
+.verity-field--span-2 { grid-column: span 2; }
+.verity-field--span-3 { grid-column: span 3; }
+.verity-field--span-all { grid-column: 1 / -1; }
+
+.verity-field-label {
+    color: var(--verity-text-light);
+    font-weight: 500;
+    font-size: 0.75rem;
+    letter-spacing: 0.02em;
+}
+
+.verity-field-label[data-required="true"]::after {
+    content: " *";
+    color: var(--verity-red);
+    font-weight: 600;
+}
+
+.verity-field-value {
+    /* Read-only display container. Inline icon slot
+       (.verity-field-affordances) sits beside the value text. */
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    color: var(--verity-text);
+    font-size: 0.9rem;
+    line-height: 1.3;
+    min-height: 1.3em;
+}
+
+.verity-field-affordances {
+    /* Inline icon slot to the right of the value or input.
+       Sparkle, pen, queue chip, error icon, etc. all live here. */
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+
+/* ── INPUTS (used when a field is in the editing state) ── */
+
+.verity-field-input {
+    /* Common styling for <input>, <select>, <textarea>. The
+       template picks the right element; the class makes them
+       all look consistent. */
+    font-family: inherit;
+    font-size: 0.9rem;
+    line-height: 1.3;
+    padding: 6px 10px;
+    color: var(--verity-text);
+    background: var(--verity-bg);
+    border: 1px solid var(--verity-border);
+    border-radius: 4px;
+    width: 100%;
+    box-sizing: border-box;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.verity-field-input:focus {
+    outline: none;
+    border-color: var(--verity-blue-dark);
+    box-shadow: 0 0 0 2px rgba(64, 90, 138, 0.18);
+}
+
+.verity-field-input:disabled,
+.verity-field-input[readonly] {
+    background: var(--verity-gray-pale);
+    color: var(--verity-text-light);
+    cursor: not-allowed;
+}
+
+textarea.verity-field-input {
+    resize: vertical;
+    min-height: 70px;
+}
+
+
+/* ── HELP & ERROR TEXT ───────────────────────────────────── */
+
+.verity-field-help {
+    font-size: 0.7rem;
+    color: var(--verity-text-light);
+    margin-top: 2px;
+}
+
+.verity-field-error {
+    font-size: 0.7rem;
+    color: var(--verity-red);
+    margin-top: 2px;
+}
+
+
+/* ── STATE VARIANTS ──────────────────────────────────────── */
+
+/* Default: only the read-only value shows. Inputs are hidden
+   until the field flips to editing. Templates may render both
+   so the same DOM works for both states. */
+.verity-field[data-state="readonly"] .verity-field-input,
+.verity-field:not([data-state]) .verity-field-input {
+    display: none;
+}
+
+.verity-field[data-state="editing"] .verity-field-value {
+    display: none;
+}
+
+.verity-field[data-state="error"] .verity-field-input {
+    border-color: var(--verity-red);
+}
+
+.verity-field[data-state="dirty"] .verity-field-input {
+    /* Subtle indicator that the user changed the value but
+       hasn't saved. */
+    border-color: var(--verity-amber);
+    background: var(--verity-amber-light, #fdf6e3);
+}
+
+/* Soft amber wash on rows whose extraction is flagged for HITL
+   review, so flagged fields are findable in a long form view. */
+.verity-field[data-needs-review="true"] {
+    background: var(--verity-amber-light, #fdf6e3);
+    border-radius: 4px;
+    padding: 6px 10px;
+    margin: -6px -10px;
+}
+
+
+/* ── SPARKLE & PEN AFFORDANCES ─────────────────────────────
+   Inline icons inside .verity-field-affordances. Sparkle is
+   present only when an AI value is currently authoritative;
+   pen is always present.
+*/
+
+.verity-sparkle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    cursor: help;            /* the title= attribute is the tooltip */
+    line-height: 0;
+    transition: transform 0.12s ease, background 0.12s ease;
+}
+
+.verity-sparkle:hover {
+    transform: scale(1.08);
+}
+
+/* Strong colored fill so the glyph reads at a glance, plus a
+   matching tinted halo via the wrapper background so it doesn't
+   blend into the form. */
+.verity-sparkle--green {
+    color: var(--verity-green);
+    background: rgba(64, 145, 108, 0.14);
+}
+
+.verity-sparkle--green:hover {
+    background: rgba(64, 145, 108, 0.22);
+}
+
+.verity-sparkle--amber {
+    color: var(--verity-amber);
+    background: rgba(227, 180, 71, 0.18);
+}
+
+.verity-sparkle--amber:hover {
+    background: rgba(227, 180, 71, 0.28);
+}
+
+.verity-pen-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--verity-text-light);
+    cursor: pointer;
+    border-radius: 4px;
+    line-height: 0;
+    transition: background 0.15s, color 0.15s;
+}
+
+.verity-pen-btn:hover {
+    color: var(--verity-blue-dark);
+    background: var(--verity-gray-pale);
+}
+
+
+/* ── PROVENANCE MODAL ─────────────────────────────────────
+   Native <dialog id="provenance-modal"> opened via JS from the
+   sparkle button. Style the dialog itself + the structured
+   panels rendered inside.
+*/
+
+.verity-provenance-dialog {
+    /* The dialog box. Width clamped so it stays readable on
+       narrow viewports; backdrop is the native ::backdrop. */
+    border: 1px solid var(--verity-border);
+    border-radius: 8px;
+    padding: 0;
+    width: min(560px, 92vw);
+    max-height: 86vh;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
+    background: var(--verity-bg);
+    color: var(--verity-text);
+    overflow: hidden;        /* inner content scrolls, dialog doesn't */
+}
+
+.verity-provenance-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.42);
+}
+
+#provenance-modal-content {
+    overflow-y: auto;
+    max-height: 86vh;
+}
+
+.verity-provenance {
+    /* Inner shell. Header pinned, scrollable body, sticky-ish footer. */
+    display: flex;
+    flex-direction: column;
+    font-family: var(--verity-font);
+}
+
+.verity-provenance-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--verity-border-light);
+    background: var(--verity-gray-pale);
+}
+
+.verity-provenance-eyebrow {
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--verity-text-light);
+}
+
+.verity-provenance-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--verity-text);
+    margin: 2px 0 0;
+}
+
+.verity-provenance-close {
+    border: none;
+    background: transparent;
+    color: var(--verity-text-light);
+    font-size: 1.6rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 6px;
+    border-radius: 4px;
+}
+
+.verity-provenance-close:hover {
+    color: var(--verity-text);
+    background: var(--verity-border-light);
+}
+
+.verity-provenance-section {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--verity-border-light);
+}
+
+.verity-provenance-section:last-of-type {
+    border-bottom: none;
+}
+
+.verity-provenance-section-title {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--verity-text-light);
+    margin-bottom: 8px;
+}
+
+.verity-provenance-value {
+    font-size: 1.05rem;
+    font-weight: 500;
+    color: var(--verity-text);
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.verity-provenance-grid {
+    display: grid;
+    grid-template-columns: 130px 1fr;
+    gap: 6px 12px;
+    font-size: 0.85rem;
+}
+
+.verity-provenance-label {
+    color: var(--verity-text-light);
+    font-weight: 500;
+}
+
+.verity-provenance-data {
+    color: var(--verity-text);
+    word-break: break-word;
+}
+
+.verity-provenance-data code {
+    font-family: 'Fira Code', 'Consolas', monospace;
+    font-size: 0.78rem;
+    background: var(--verity-gray-pale);
+    padding: 2px 6px;
+    border-radius: 3px;
+    word-break: break-all;
+}
+
+.verity-provenance-quote {
+    font-style: italic;
+    border-left: 3px solid var(--verity-amber);
+    padding-left: 10px;
+    color: var(--verity-text);
+}
+
+.verity-provenance-footer {
+    display: flex;
+    justify-content: flex-end;
+    padding: 12px 20px;
+    border-top: 1px solid var(--verity-border-light);
+    background: var(--verity-gray-pale);
+}
+
+
+/* ── FIELD EDIT FORM ──────────────────────────────────────
+   The form sits inside .verity-field as a sibling of
+   .verity-field-value. CSS rules above (under STATE VARIANTS)
+   already toggle which is shown via [data-state]. These rules
+   give the edit form its layout.
+*/
+
+.verity-field-edit-form {
+    /* The form container the macro renders. Hidden via the
+       state-variants rule when the field is in 'readonly' state;
+       displays as a stack of inputs + actions when 'editing'. */
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+/* Hide the edit form unless the field is in editing state.
+   Mirrors how .verity-field-input was being toggled before. */
+.verity-field[data-state="readonly"] .verity-field-edit-form,
+.verity-field:not([data-state]) .verity-field-edit-form {
+    display: none;
+}
+
+.verity-field-edit-value,
+.verity-field-edit-reason {
+    /* Apply the shared input styling to the per-edit inputs
+       without forcing the macro to set two classes. */
+    font-family: inherit;
+    font-size: 0.9rem;
+    line-height: 1.3;
+    padding: 6px 10px;
+    color: var(--verity-text);
+    background: var(--verity-bg);
+    border: 1px solid var(--verity-border);
+    border-radius: 4px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.verity-field-edit-value:focus,
+.verity-field-edit-reason:focus {
+    outline: none;
+    border-color: var(--verity-blue-dark);
+    box-shadow: 0 0 0 2px rgba(64, 90, 138, 0.18);
+}
+
+.verity-field-edit-reason {
+    font-size: 0.8rem;
+}
+
+.verity-field-edit-feedback {
+    /* Compact checkbox row inside the edit form. Sits between
+       the inputs and the actions row; small font so it doesn't
+       overpower the fields. */
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    color: var(--verity-text-light);
+    cursor: pointer;
+    user-select: none;
+}
+
+.verity-field-edit-feedback input[type="checkbox"] {
+    margin: 0;
+}
+
+.verity-field-edit-actions {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+}
+
+
+/* ── FORM ACTIONS BAR ────────────────────────────────────── */
+
+.verity-form-actions {
+    /* Right-aligned button row for Save / Cancel beneath a form
+       section or at the bottom of a modal form. */
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--verity-border-light);
+}
+
+.verity-form-actions--start { justify-content: flex-start; }
+.verity-form-actions--center { justify-content: center; }
+
+
 /* ── CODE / JSON DISPLAY ───────────────────────────────────── */
 
 .verity-code {

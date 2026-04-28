@@ -1,12 +1,14 @@
-<!--
-  OVERRIDES PAGE — All human overrides of AI decisions
+{#
+  OVERRIDES PAGE — every per-field human correction of AI output
 
-  Shows every instance where a human overrode an AI recommendation,
-  with the reason code, who did it, and what changed.
+  Source: hitl_override (JSONPath-anchored, business-keyed). One row
+  per field-level override. Each row carries the decision_log_id
+  anchor, so reviewers can drill straight to the AI run that
+  produced the value.
 
   DATA PASSED BY ROUTE:
-  - overrides: list of override records with joined decision data
--->
+    overrides — list of rows from list_all_hitl_overrides
+#}
 {% extends "base.html" %}
 
 {% block title %}Overrides — Verity Admin{% endblock %}
@@ -16,60 +18,71 @@
     <span>Overrides</span>
 {% endblock %}
 
-{% block page_title %}Overrides{% endblock %}
+{% block page_title %}HITL Overrides{% endblock %}
 
 {% block content %}
 
 <div style="margin-bottom: 16px; font-size: 0.85rem; color: var(--verity-text-light);">
-    {{ overrides|length }} overrides recorded
+    {{ overrides|length }} override{{ '' if overrides|length == 1 else 's' }} recorded
 </div>
 
 {% if overrides %}
-{% for ov in overrides %}
-<div class="verity-card" style="margin-bottom: 12px; border-left: 3px solid var(--verity-amber);">
-    <!-- Override header -->
-    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-        <span class="verity-badge verity-badge-shadow">override</span>
-        <span style="font-weight: 600;">{{ ov.overrider_name }}</span>
-        <span style="color: var(--verity-text-light); font-size: 0.8rem;">{{ ov.overrider_role or '' }}</span>
-        <span style="margin-left: auto; font-size: 0.75rem; color: var(--verity-text-light);">
-            {{ ov.created_at.strftime('%Y-%m-%d %H:%M') if ov.created_at else '—' }}
-        </span>
-    </div>
-
-    <div class="verity-detail-grid" style="margin-bottom: 8px;">
-        <div class="verity-detail-label">Reason</div>
-        <div class="verity-detail-value">{{ ov.override_reason_code | replace('_', ' ') | title }}</div>
-
-        {% if ov.ai_recommendation %}
-        <div class="verity-detail-label">AI Said</div>
-        <div class="verity-detail-value verity-code" style="padding: 6px; font-size: 0.8rem;">{{ ov.ai_recommendation }}</div>
-        {% endif %}
-
-        {% if ov.human_decision %}
-        <div class="verity-detail-label">Human Said</div>
-        <div class="verity-detail-value verity-code" style="padding: 6px; font-size: 0.8rem;">{{ ov.human_decision }}</div>
-        {% endif %}
-    </div>
-
-    {% if ov.override_notes %}
-    <div style="font-size: 0.85rem; color: var(--verity-text); margin-top: 4px;">
-        <strong>Notes:</strong> {{ ov.override_notes }}
-    </div>
-    {% endif %}
-
-    <!-- Link to the original decision -->
-    <div style="margin-top: 8px;">
-        <a href="/admin/decisions/{{ ov.decision_log_id }}" class="verity-btn verity-btn-secondary verity-btn-sm">
-            View Original Decision
-        </a>
-    </div>
-</div>
-{% endfor %}
+<table class="verity-table">
+    <thead>
+        <tr>
+            <th style="width: 150px;">When</th>
+            <th>Application</th>
+            <th>Entity</th>
+            <th>Field</th>
+            <th>AI Value</th>
+            <th>Human Value</th>
+            <th>Actor</th>
+            <th>Reason</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for ov in overrides %}
+        <tr class="clickable" onclick="window.location='/admin/overrides/{{ ov.id }}'">
+            <td title="{{ ov.created_at.isoformat() if ov.created_at else '' }}">
+                {{ ov.created_at.strftime('%Y-%m-%d %H:%M') if ov.created_at else '—' }}
+            </td>
+            <td>{{ ov.application_display_name or ov.application }}</td>
+            <td>
+                <span class="verity-badge verity-badge-agent">{{ ov.business_entity_type }}</span>
+                <code style="font-size: 0.7rem;">{{ ov.entity_reference[:18] }}{% if ov.entity_reference|length > 18 %}…{% endif %}</code>
+            </td>
+            <td><code>{{ ov.fact_type }}</code></td>
+            <td>
+                {% if ov.ai_value and ov.ai_value != 'null' %}
+                    {{ ov.ai_value }}
+                {% else %}
+                    <span class="verity-badge verity-badge-shadow">{{ 'not found' if ov.ai_found else 'no AI value' }}</span>
+                {% endif %}
+            </td>
+            <td><strong>{{ ov.hitl_value }}</strong></td>
+            <td><code>{{ ov.created_by }}</code></td>
+            <td style="font-size: 0.8rem; color: var(--verity-text-light);">
+                {{ ov.reason or '—' }}
+            </td>
+            <td onclick="event.stopPropagation();">
+                <a href="/admin/overrides/{{ ov.id }}"
+                   class="verity-btn verity-btn-secondary verity-btn-sm">
+                    Details
+                </a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
 {% else %}
 <div class="verity-empty">
     <div style="font-size: 2rem; opacity: 0.3;">⚠</div>
-    <div class="verity-empty-message">No overrides recorded yet.</div>
+    <div class="verity-empty-message">
+        No HITL overrides recorded yet. They appear here whenever an
+        underwriter corrects an AI-extracted value through the
+        application UI with the "Send feedback" option enabled.
+    </div>
 </div>
 {% endif %}
 

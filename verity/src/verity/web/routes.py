@@ -418,7 +418,7 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             usage=usage,
         )
 
-    # ── MCP SERVERS (Phase 4f / FC-14) ─────────────────────────
+    # ── MCP SERVERS ─────────────────────────
     # Registry view of MCP servers Verity knows about. One row per
     # mcp_server record; each page shows its transport config and the
     # tools bound to it. Tool rows on /admin/tools link here via the
@@ -690,9 +690,10 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             {"app_name": app_name},
         )
         override_row = await verity.db.fetch_one_raw(
-            "SELECT COUNT(*) AS cnt FROM override_log ol "
-            "JOIN agent_decision_log adl ON adl.id = ol.decision_log_id "
-            "WHERE adl.application = %(app_name)s",
+            # hitl_override carries application directly — no need
+            # to join through agent_decision_log.
+            "SELECT COUNT(*) AS cnt FROM hitl_override "
+            "WHERE application = %(app_name)s",
             {"app_name": app_name},
         )
         return _render(templates, request, "application_detail.html",
@@ -1166,12 +1167,29 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
 
     @router.get("/overrides", response_class=HTMLResponse)
     async def overrides_page(request: Request):
-        """Show all human overrides of AI decisions."""
+        """Show every per-field human override recorded across all
+        applications. Source: hitl_override (the structured,
+        JSONPath-anchored table)."""
         await verity.ensure_connected()
-        overrides = await verity.db.fetch_all("list_all_overrides")
+        overrides = await verity.db.fetch_all("list_all_hitl_overrides")
         return _render(templates, request, "overrides.html",
             active_page="overrides",
             overrides=overrides,
+        )
+
+    @router.get("/overrides/{override_id}", response_class=HTMLResponse)
+    async def override_detail_page(request: Request, override_id: str):
+        """Single-override detail view. Resolves application
+        display name + decision context (entity, version, run id)
+        for navigation back into the audit trail."""
+        await verity.ensure_connected()
+        ov = await verity.db.fetch_one("get_hitl_override_by_id",
+                                       {"override_id": override_id})
+        if not ov:
+            return HTMLResponse("Override not found", status_code=404)
+        return _render(templates, request, "override_detail.html",
+            active_page="overrides",
+            override=ov,
         )
 
     # ── PLATFORM SETTINGS ──────────────────────────────────────

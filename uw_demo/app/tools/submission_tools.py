@@ -158,18 +158,33 @@ async def store_extraction_result(
     low_confidence_fields: list = None,
     unextractable_fields: list = None,
     source_document_id: str = None,
+    workflow_run_id: str = None,
+    decision_log_id: str = None,
+    extractor_id: str = None,
 ) -> dict:
     """Store extracted fields in uw_db.
 
-    Writes one row per field to submission_extraction. Flags
-    low-confidence and missing fields for HITL review.
+    Writes one row per field to submission_extraction's AI channel,
+    plus the structured provenance the override API and sparkle UX
+    need: source document id (already), extractor id (e.g.
+    'field_extractor@1.0.0'), Verity decision-log id of the run that
+    produced the value, JSONPath of the field within that run's
+    output, and the UW-side workflow_run_id.
 
     Args:
         submission_id: UUID of the submission.
         fields: Dict of field_name -> {value, confidence, note}.
-        low_confidence_fields: List of field names with low confidence.
-        unextractable_fields: List of field names that couldn't be extracted.
-        source_document_id: EDMS document ID the fields came from.
+        low_confidence_fields: Field names flagged low-confidence.
+        unextractable_fields: Field names the AI couldn't find.
+        source_document_id: uw_db `document.id` the fields came from.
+        workflow_run_id: UW-side correlation id for this pipeline run.
+        decision_log_id: Verity-side id of the extracting agent's
+            decision row. Stored on submission_extraction.verity_execution_run_id;
+            the override API uses this to anchor a HITL flip back
+            to the specific run that produced the value.
+        extractor_id: Identifier of the extracting agent
+            (e.g. 'field_extractor@1.0.0'). Drives the
+            sparkle-tooltip 'Extractor:' line.
     """
     low_conf = set(low_confidence_fields or [])
     unextractable = set(unextractable_fields or [])
@@ -206,32 +221,49 @@ async def store_extraction_result(
                 # hitl_* columns are untouched here; the approve_extraction
                 # handler is the only writer to that channel.
                 ai_found = field_name not in unextractable
+
                 # Map the extractor's free-form note to source_snippet
                 # (the verbatim quote that drives the sparkle tooltip);
                 # if the extractor didn't supply one we leave it null.
                 source_snippet = note or None
+
+                # JSONPath into this run's output_json. The
+                # field_extractor task produces
+                # {fields: {<name>: {value, confidence, note}}}
+                # so a per-field path of $.fields.<name>.value is
+                # what the override API will resolve at edit time.
+                output_path = f"$.fields.{field_name}.value"
+
                 await cur.execute(
                     """INSERT INTO submission_extraction (
                         submission_id, field_name,
                         ai_value, ai_confidence, ai_found,
                         source_document_id, source_snippet,
+                        verity_execution_run_id, output_path, extractor_id,
+                        workflow_run_id,
                         needs_review, review_reason
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (submission_id, field_name)
                     DO UPDATE SET
-                        ai_value           = EXCLUDED.ai_value,
-                        ai_confidence      = EXCLUDED.ai_confidence,
-                        ai_found           = EXCLUDED.ai_found,
-                        source_document_id = EXCLUDED.source_document_id,
-                        source_snippet     = EXCLUDED.source_snippet,
-                        needs_review       = EXCLUDED.needs_review,
-                        review_reason      = EXCLUDED.review_reason
+                        ai_value                = EXCLUDED.ai_value,
+                        ai_confidence           = EXCLUDED.ai_confidence,
+                        ai_found                = EXCLUDED.ai_found,
+                        source_document_id      = EXCLUDED.source_document_id,
+                        source_snippet          = EXCLUDED.source_snippet,
+                        verity_execution_run_id = EXCLUDED.verity_execution_run_id,
+                        output_path             = EXCLUDED.output_path,
+                        extractor_id            = EXCLUDED.extractor_id,
+                        workflow_run_id         = EXCLUDED.workflow_run_id,
+                        needs_review            = EXCLUDED.needs_review,
+                        review_reason           = EXCLUDED.review_reason
                     """,
                     (
                         submission_id, field_name,
                         str(value) if value is not None else None,
                         confidence, ai_found,
                         source_document_id, source_snippet,
+                        decision_log_id, output_path, extractor_id,
+                        workflow_run_id,
                         needs_review, review_reason,
                     ),
                 )

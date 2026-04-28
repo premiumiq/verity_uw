@@ -297,6 +297,18 @@
 </div>
 
 
+<!-- ── PROVENANCE MODAL ─────────────────────────────────────
+     Single page-level <dialog>. The sparkle button on each
+     field (in _field_row.html) HTMX-fetches the provenance
+     partial for that field, swaps it into #provenance-modal-content,
+     and opens this dialog via the macro's hx-on::after-swap.
+     Close happens via either the X / Close buttons inside the
+     partial or via Escape (native <dialog> behavior). -->
+<dialog id="provenance-modal" class="verity-provenance-dialog">
+    <div id="provenance-modal-content"></div>
+</dialog>
+
+
 <script>
 function setActiveTab(el) {
     document.querySelectorAll('.verity-tab').forEach(function(t) { t.classList.remove('active'); });

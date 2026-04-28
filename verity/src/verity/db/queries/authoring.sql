@@ -214,15 +214,17 @@ SELECT
                WHERE application_id = %(app_id)s::uuid
            )
     ) AS decision_count,
-    (SELECT COUNT(*) FROM override_log
-     WHERE decision_log_id IN (
-         SELECT id FROM agent_decision_log
-         WHERE application = %(app_name)s
-            OR execution_context_id IN (
-                   SELECT id FROM execution_context
-                   WHERE application_id = %(app_id)s::uuid
-               )
-     )) AS override_count,
+    (SELECT COUNT(*) FROM hitl_override
+     WHERE application = %(app_name)s
+        OR decision_log_id IN (
+               SELECT id FROM agent_decision_log
+               WHERE application = %(app_name)s
+                  OR execution_context_id IN (
+                         SELECT id FROM execution_context
+                         WHERE application_id = %(app_id)s::uuid
+                     )
+           )
+    ) AS override_count,
     (SELECT COUNT(*) FROM execution_context
      WHERE application_id = %(app_id)s::uuid) AS execution_context_count,
     (SELECT COUNT(*) FROM application_entity
@@ -230,25 +232,26 @@ SELECT
 
 
 -- name: purge_override_logs_for_application
--- Step 1 of purge: clear override_log rows that point at this app's
--- decisions. Must run before the agent_decision_log delete.
+-- Step 1 of purge: clear hitl_override rows that point at this
+-- app's decisions. Must run before the agent_decision_log delete
+-- (FK from hitl_override.decision_log_id).
 --
--- A decision "belongs to" the app if EITHER of:
---   (a) its `application` VARCHAR column matches %(app_name)s — the
---       normal flow when the client was constructed with application=<name>.
---   (b) its `execution_context_id` points at an execution_context row
---       owned by the app — catches REST-runtime-initiated decisions that
---       were tagged with the server's 'default' identity but were still
---       produced on behalf of %(app_name)s (e.g. from the DS Workbench).
-DELETE FROM override_log
-WHERE decision_log_id IN (
-    SELECT id FROM agent_decision_log
-    WHERE application = %(app_name)s
-       OR execution_context_id IN (
-              SELECT id FROM execution_context
-              WHERE application_id = %(app_id)s::uuid
-          )
-);
+-- A row "belongs to" the app if EITHER of:
+--   (a) hitl_override.application matches %(app_name)s directly
+--       (the normal write path).
+--   (b) the anchored decision is the app's — catches edge cases
+--       where the decision was minted under a different
+--       application name but linked to this app's context.
+DELETE FROM hitl_override
+WHERE application = %(app_name)s
+   OR decision_log_id IN (
+          SELECT id FROM agent_decision_log
+          WHERE application = %(app_name)s
+             OR execution_context_id IN (
+                    SELECT id FROM execution_context
+                    WHERE application_id = %(app_id)s::uuid
+                )
+      );
 
 
 -- name: purge_decisions_for_application

@@ -1,114 +1,47 @@
-<!-- Tab: Extracted Fields — extraction results + inline HITL review.
-     Dual-mode: review (editable form) or read-only (table with overrides). -->
+{# Tab: Extracted Fields — informational table.
+
+   Per-field corrections happen on the Submission Details tab via
+   the sparkle/pen affordance. This tab is now purely a read-only
+   summary of what the AI extracted plus its confidence and review
+   flags. The "Complete Review" button lives on the page-level
+   action bar; clicking it transitions information_review →
+   complete and auto-triggers triage + appetite. #}
 
 {% if not extractions %}
 <div class="verity-empty">
     <div class="verity-empty-message">
-        No extracted fields yet. Click "Process Documents" to classify and extract fields from submission documents.
+        No extracted fields yet. Click "Process Documents" on the
+        action bar to classify and extract fields from the
+        submission's documents.
     </div>
 </div>
 
 {% else %}
 
-<!-- Data Completeness Metric -->
+{# ── Summary card ─────────────────────────────────────── #}
 {% set total = extractions|length %}
 {% set present = extractions|selectattr('ai_value')|list|length %}
 {% set pct = (present / total * 100) if total > 0 else 0 %}
 {% set flagged = extractions|selectattr('needs_review')|list %}
 {% set missing = extractions|rejectattr('ai_value')|list %}
 
-<div class="verity-card">
-    <div class="verity-card-header">Data Completeness: {{ "%.1f"|format(pct) }}% ({{ present }}/{{ total }} fields)</div>
+<div class="verity-card verity-section">
+    <div class="verity-card-header">
+        Data Completeness: {{ "%.1f"|format(pct) }}% ({{ present }}/{{ total }} fields)
+    </div>
     {% if missing %}
-    <div class="verity-detail-label">Missing: {{ missing|map(attribute='field_name')|join(', ') }}</div>
+    <div class="verity-detail-label">
+        Missing: {{ missing|map(attribute='field_name')|join(', ') }}
+    </div>
     {% endif %}
     {% if flagged %}
-    <div class="verity-detail-label">Flagged for Review: {{ flagged|length }} fields</div>
+    <div class="verity-detail-label">
+        Flagged for Review: {{ flagged|length }} field{{ 's' if flagged|length != 1 else '' }}
+    </div>
     {% endif %}
 </div>
 
-
-{% if is_review_mode %}
-<!-- REVIEW MODE: Editable HITL form -->
-<div class="verity-card">
-    <div class="verity-card-header">Action Required — Review flagged fields and approve</div>
-</div>
-
-<form method="POST" action="/submissions/{{ sub.id }}/approve-extraction"
-      onsubmit="var b=this.querySelector('#approve-btn'); b.disabled=true; b.textContent='Approving...'; document.getElementById('approve-status').hidden=false; return true;">
-    <input type="hidden" name="reviewer_name" value="Underwriter">
-
-    <table class="verity-table">
-        <thead>
-            <tr>
-                <th>Field</th>
-                <th>Extracted Value</th>
-                <th>Confidence</th>
-                <th>Status</th>
-                <th>Override Value</th>
-                <th>Reason</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for ext in extractions %}
-            <tr>
-                <td><code>{{ ext.field_name }}</code></td>
-                <td>
-                    {% if ext.ai_value %}
-                        {{ ext.ai_value }}
-                    {% else %}
-                        <span class="verity-badge verity-badge-high">Not found</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if ext.ai_confidence is not none %}
-                        {% if ext.ai_confidence >= 0.85 %}
-                            <span class="verity-badge verity-badge-champion">{{ "%.0f"|format(ext.ai_confidence * 100) }}%</span>
-                        {% elif ext.ai_confidence >= 0.70 %}
-                            <span class="verity-badge verity-badge-shadow">{{ "%.0f"|format(ext.ai_confidence * 100) }}%</span>
-                        {% else %}
-                            <span class="verity-badge verity-badge-high">{{ "%.0f"|format(ext.ai_confidence * 100) }}%</span>
-                        {% endif %}
-                    {% else %}
-                        —
-                    {% endif %}
-                </td>
-                <td>
-                    {% if ext.needs_review %}
-                        <span class="verity-badge verity-badge-shadow">{{ ext.review_reason or 'review' }}</span>
-                    {% else %}
-                        <span class="verity-badge verity-badge-champion">OK</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if ext.needs_review %}
-                        <input type="text" name="override_{{ ext.field_name }}"
-                               placeholder="Enter correct value..." class="verity-input">
-                    {% endif %}
-                </td>
-                <td>
-                    {% if ext.needs_review %}
-                        <input type="text" name="reason_{{ ext.field_name }}"
-                               placeholder="Optional" class="verity-input">
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-
-    <div class="verity-action-bar">
-        <button type="submit" id="approve-btn" class="verity-btn verity-btn-primary">Approve & Continue</button>
-        <div id="approve-status" hidden>
-            <span class="verity-spinner"></span>
-            <span class="verity-detail-label">Approving and triggering risk assessment...</span>
-        </div>
-    </div>
-</form>
-
-
-{% else %}
-<!-- READ-ONLY MODE -->
+{# ── Read-only field table ───────────────────────────── #}
 <table class="verity-table">
     <thead>
         <tr>
@@ -126,12 +59,14 @@
                 {% if ext.hitl_value %}
                     {{ ext.hitl_value }}
                     <span class="verity-badge verity-badge-shadow">overridden</span>
+                {% elif ext.ai_value %}
+                    {{ ext.ai_value }}
                 {% else %}
-                    {{ ext.ai_value or '—' }}
+                    —
                 {% endif %}
             </td>
             <td>
-                {% if ext.ai_confidence is not none %}
+                {% if ext.ai_confidence is not none and ext.ai_confidence > 0 %}
                     {% if ext.ai_confidence >= 0.85 %}
                         <span class="verity-badge verity-badge-champion">{{ "%.0f"|format(ext.ai_confidence * 100) }}%</span>
                     {% elif ext.ai_confidence >= 0.70 %}
@@ -147,7 +82,7 @@
                 {% if ext.hitl_value %}
                     <span class="verity-badge verity-badge-shadow">Overridden</span>
                 {% elif ext.needs_review %}
-                    <span class="verity-badge verity-badge-high">{{ ext.review_reason }}</span>
+                    <span class="verity-badge verity-badge-high">{{ ext.review_reason or 'review' }}</span>
                 {% else %}
                     <span class="verity-badge verity-badge-champion">OK</span>
                 {% endif %}
@@ -156,5 +91,4 @@
         {% endfor %}
     </tbody>
 </table>
-{% endif %}
 {% endif %}

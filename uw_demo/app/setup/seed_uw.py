@@ -621,28 +621,71 @@ async def _seed_documents(cur, sub: dict, edms_doc_ids: dict[str, str]) -> int:
     return inserted
 
 
-async def _seed_extractions(cur, sub: dict) -> int:
-    """Insert per-field extraction rows in the new ai_*/hitl_* model.
+def _application_filename(submission_id: str) -> str | None:
+    """Pick the submission's primary application PDF — the
+    do_app_*.pdf or gl_app_*.pdf in its SUBMISSION_DOCS list.
+    That's the file most extracted fields are sourced from for
+    seed purposes; the sparkle tooltip names it as the source.
+    Falls back to the first listed file when no application file
+    is identified."""
+    files = SUBMISSION_DOCS.get(submission_id, [])
+    for f in files:
+        if f.startswith("do_app_") or f.startswith("gl_app_"):
+            return f
+    return files[0] if files else None
 
-    Seeded rows populate the AI channel (`ai_value`, `ai_confidence`,
-    `ai_found=TRUE`). The HITL channel stays NULL — Phase 6 will add
-    rich provenance fields and any seeded human edits when the
-    sparkle/pen UX lands."""
+
+async def _seed_extractions(cur, sub: dict) -> int:
+    """Insert per-field extraction rows in the new ai_*/hitl_* model
+    with structured provenance the sparkle UX needs.
+
+    For each seeded field we set:
+      ai_value, ai_confidence, ai_found=TRUE
+      source_document_id  (uw_db `document.id` of the submission's
+                           primary application PDF)
+      source_snippet      (a quoted version of the value; stand-in
+                           for a real verbatim quote)
+      extractor_id        ('field_extractor@seed' so the sparkle
+                           tooltip's Extractor: line is non-empty)
+      output_path         ('$.fields.<name>.value' — same convention
+                           live runs use)
+      verity_execution_run_id stays NULL on seeded rows because no
+      Verity decision exists; the edit handler will recognise NULL
+      and skip the override-API forwarding path for these rows."""
     fields = EXTRACTIONS_BY_SUBMISSION.get(sub["id"])
     if not fields:
         return 0
 
+    # Resolve the source document id once per submission.
+    src_filename = _application_filename(sub["id"])
+    src_doc_id: str | None = None
+    if src_filename:
+        await cur.execute(
+            """SELECT id FROM document
+            WHERE submission_id = %s AND filename = %s""",
+            (sub["id"], src_filename),
+        )
+        row = await cur.fetchone()
+        if row:
+            src_doc_id = str(row[0])
+
     for f in fields:
+        snippet = f'"{f["value"]}"' if f.get("value") is not None else None
+        output_path = f"$.fields.{f['field']}.value"
         await cur.execute(
             """INSERT INTO submission_extraction (
                 submission_id, field_name,
                 ai_value, ai_confidence, ai_found,
+                source_document_id, source_snippet,
+                extractor_id, output_path,
                 needs_review, review_reason
-            ) VALUES (%s, %s, %s, %s, TRUE, %s, %s)
+            ) VALUES (%s, %s, %s, %s, TRUE, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (submission_id, field_name) DO NOTHING
             """,
             (
                 sub["id"], f["field"], f["value"], f["confidence"],
+                src_doc_id, snippet,
+                "field_extractor@seed", output_path,
                 f.get("needs_review", False), f.get("review_reason"),
             ),
         )

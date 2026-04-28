@@ -44,7 +44,6 @@ from verity.models.decision import (
     AuditTrailEntry,
     DecisionLog,
     DecisionLogDetail,
-    OverrideLogCreate,
 )
 from verity.models.lifecycle import EntityType, LifecycleState, PromotionRequest
 from verity.models.reporting import DashboardCounts, ModelInventoryAgent, ModelInventoryTask
@@ -58,7 +57,7 @@ from verity.runtime.runtime import Runtime
 # ── UNIFIED DECISIONS CLASS (backward-compat helper) ──────────
 # Consuming code written before the split sometimes does:
 #   await verity.decisions.log_decision(...)        # writer
-#   await verity.decisions.record_override(...)     # reader-side write
+#   await verity.record_hitl_override(...)           # per-field HITL
 #   count = await verity.decisions.count_decisions() # reader
 # To preserve that flat API, we expose a single attribute `verity.decisions`
 # pointing at a class that has BOTH the reader and writer methods. Defined
@@ -501,10 +500,72 @@ class Verity:
         await self.ensure_connected()
         return await self._gov.decisions_reader.list_decisions(limit=limit, offset=offset)
 
-    async def record_override(self, override: OverrideLogCreate) -> dict:
-        """Record a human override of an AI decision."""
+    async def record_hitl_override(
+        self,
+        *,
+        decision_log_id,
+        output_path: str,
+        ai_value,
+        ai_found: bool,
+        hitl_value,
+        application: str,
+        entity_type: str,
+        entity_reference: str,
+        fact_type: str,
+        created_by: str,
+        reason: str | None = None,
+    ) -> dict:
+        """Persist a per-field human override into hitl_override.
+
+        Structured around (decision_log_id, output_path) plus
+        business keys, so governance rollups can group by agent
+        run, by submission, or by fact_type.
+
+        Args:
+          decision_log_id:  agent_decision_log.id of the run that
+                            produced ai_value.
+          output_path:      JSONPath into that run's output_json
+                            (e.g. '$.fields.annual_revenue.value').
+          ai_value:         What the AI produced (any JSON-serialisable
+                            value, or None when ai_found=False).
+          ai_found:         True if the AI looked AND produced a value
+                            (or deliberately recorded "not found");
+                            False is reserved for "AI hasn't run".
+          hitl_value:       The human-corrected value.
+          application:      Caller app id (e.g. 'uw_demo').
+          entity_type:      Business entity kind (e.g. 'submission').
+          entity_reference: The entity's primary key as a string.
+          fact_type:        Field name in the business model.
+          created_by:       Actor name.
+          reason:           Optional free-text rationale.
+
+        Returns the new override row's id and created_at.
+        """
+        import json as _json
+
         await self.ensure_connected()
-        return await self._gov.decisions_reader.record_override(override)
+
+        def _jsonify(v):
+            # JSONB columns expect a JSON document. The two
+            # columns we serialise (ai_value, hitl_value) take
+            # arbitrary scalars / objects; psycopg-encode them
+            # with json.dumps so they land as proper JSON.
+            return _json.dumps(v) if v is not None else None
+
+        row = await self.db.fetch_one("insert_hitl_override", {
+            "decision_log_id":  decision_log_id,
+            "output_path":      output_path,
+            "ai_value":         _jsonify(ai_value),
+            "ai_found":         ai_found,
+            "hitl_value":       _jsonify(hitl_value),
+            "application":      application,
+            "entity_type":      entity_type,
+            "entity_reference": entity_reference,
+            "fact_type":        fact_type,
+            "created_by":       created_by,
+            "reason":           reason,
+        })
+        return row or {}
 
     async def get_decisions_by_context(self, execution_context_id) -> list[dict]:
         """Get all decisions for an execution context."""

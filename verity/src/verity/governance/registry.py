@@ -1003,7 +1003,7 @@ class Registry:
             raise ValueError(f"Application '{name}' not found")
 
         async with self.db.transaction() as tx:
-            # Order matters: override_log → agent_decision_log (FK) →
+            # Order matters: hitl_override → agent_decision_log (FK) →
             # execution_context (referenced by agent_decision_log).
             # Both log purges match by app_name AND by execution_context
             # → application_id, so REST-runtime decisions tagged with the

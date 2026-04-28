@@ -25,6 +25,7 @@ from verity.web.api.models import build_models_router
 from verity.web.api.quotas import build_quotas_router
 from verity.web.api.registry import build_registry_router
 from verity.web.api.reporting import build_reporting_router
+from verity.web.api.overrides import build_overrides_router
 from verity.web.api.runs import build_runs_router
 from verity.web.api.runtime import build_runtime_router
 from verity.web.api.usage import build_usage_router
@@ -55,6 +56,10 @@ def build_api_router(verity) -> APIRouter:
     # The actual execution happens in the verity-worker service; this
     # API only inserts state-event rows.
     router.include_router(build_runs_router(verity))
+
+    # Per-field HITL overrides anchored to a Verity decision row.
+    # Routes live under /runs/{id}/overrides.
+    router.include_router(build_overrides_router(verity))
 
     # Authoring — POST wrappers for every register_* SDK method (headers,
     # versions, associations, governance artifacts).

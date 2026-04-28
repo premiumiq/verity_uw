@@ -149,33 +149,9 @@ WHERE adl.execution_context_id = %(execution_context_id)s::uuid
 ORDER BY adl.decision_depth, adl.created_at;
 
 
--- name: record_override
--- Record a human override of an AI decision.
--- No business keys here — the override links to the decision_log_id,
--- which links to execution_context_id for business context.
-INSERT INTO override_log (
-    decision_log_id, entity_type, entity_version_id,
-    overrider_name, overrider_role, override_reason_code,
-    override_notes, ai_recommendation, human_decision
-)
-VALUES (
-    %(decision_log_id)s, %(entity_type)s, %(entity_version_id)s,
-    %(overrider_name)s, %(overrider_role)s, %(override_reason_code)s,
-    %(override_notes)s, %(ai_recommendation)s, %(human_decision)s
-)
-RETURNING id, created_at;
-
-
--- name: list_overrides_by_entity
-SELECT
-    ol.*,
-    adl.output_summary AS original_output_summary,
-    adl.confidence_score AS original_confidence
-FROM override_log ol
-JOIN agent_decision_log adl ON adl.id = ol.decision_log_id
-WHERE ol.entity_type = %(entity_type)s
-  AND ol.entity_version_id = %(entity_version_id)s
-ORDER BY ol.created_at DESC;
+-- record_override + list_overrides_by_entity retired alongside
+-- the override_log table. Per-field HITL overrides live in
+-- hitl_override.sql.
 
 
 -- name: list_recent_decisions
@@ -272,19 +248,5 @@ ORDER BY adl.created_at;
 
 
 
--- name: list_all_overrides
--- All override records with joined decision context.
-SELECT
-    ol.*,
-    adl.output_summary AS original_output_summary,
-    adl.confidence_score AS original_confidence,
-    COALESCE(a.display_name, t.display_name) AS entity_name,
-    COALESCE(a.display_name, t.display_name) AS entity_display_name,
-    COALESCE(av.version_label, tv.version_label) AS version_label
-FROM override_log ol
-JOIN agent_decision_log adl ON adl.id = ol.decision_log_id
-LEFT JOIN agent_version av ON av.id = ol.entity_version_id AND ol.entity_type = 'agent'
-LEFT JOIN agent a ON a.id = av.agent_id
-LEFT JOIN task_version tv ON tv.id = ol.entity_version_id AND ol.entity_type = 'task'
-LEFT JOIN task t ON t.id = tv.task_id
-ORDER BY ol.created_at DESC;
+-- list_all_overrides retired. The /admin/overrides page now reads
+-- list_all_hitl_overrides from hitl_override.sql.

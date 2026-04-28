@@ -20,11 +20,11 @@ SELECT
     vr.cohens_kappa,
     mc.lifecycle_state AS model_card_status,
     mc.approved_by AS model_card_approved_by,
-    (SELECT COUNT(*) FROM override_log ol
-     JOIN agent_decision_log adl ON adl.id = ol.decision_log_id
-     WHERE ol.entity_type = 'agent'
-       AND ol.entity_version_id = av.id
-       AND ol.created_at > NOW() - INTERVAL '30 days') AS override_count_30d,
+    (SELECT COUNT(*) FROM hitl_override ho
+     JOIN agent_decision_log adl ON adl.id = ho.decision_log_id
+     WHERE adl.entity_type = 'agent'
+       AND adl.entity_version_id = av.id
+       AND ho.created_at > NOW() - INTERVAL '30 days') AS override_count_30d,
     (SELECT COUNT(*) FROM agent_decision_log adl
      WHERE adl.entity_type = 'agent'
        AND adl.entity_version_id = av.id
@@ -104,7 +104,7 @@ SELECT
     (SELECT COUNT(*) FROM tool WHERE active = TRUE) AS tool_count,
     (SELECT COUNT(*) FROM mcp_server WHERE active = TRUE) AS mcp_server_count,
     (SELECT COUNT(*) FROM agent_decision_log) AS total_decisions,
-    (SELECT COUNT(*) FROM override_log) AS total_overrides,
+    (SELECT COUNT(*) FROM hitl_override) AS total_overrides,
     (
         (SELECT COUNT(*) FROM incident WHERE status = 'open')
       + (SELECT COUNT(*) FROM (
@@ -144,15 +144,8 @@ SELECT
                  WHERE application_id = ANY(%(app_ids)s::uuid[])
              )
     ) AS total_decisions,
-    (SELECT COUNT(*) FROM override_log
-       WHERE decision_log_id IN (
-           SELECT id FROM agent_decision_log
-           WHERE application = ANY(%(app_names)s::text[])
-              OR execution_context_id IN (
-                     SELECT id FROM execution_context
-                     WHERE application_id = ANY(%(app_ids)s::uuid[])
-                 )
-       )
+    (SELECT COUNT(*) FROM hitl_override
+       WHERE application = ANY(%(app_names)s::text[])
     ) AS total_overrides,
     -- open_incidents stays global when scoped too — legacy incidents
     -- and quota breaches aren't (yet) attributable per application in
@@ -197,18 +190,25 @@ WHERE workflow_run_id IS NOT NULL
 
 
 -- name: override_analysis
+-- Recent HITL overrides grouped by entity (agent or task) and
+-- fact_type. Replaces a prior version that grouped by
+-- override_reason_code from the legacy override_log; we don't
+-- carry a structured reason code on hitl_override (just freetext
+-- reason), so the grouping moved to fact_type — which is more
+-- useful anyway for "which fields drift between AI and human?"
 SELECT
-    ol.override_reason_code,
+    ho.fact_type,
     COUNT(*) AS count,
     COALESCE(a.name, t.name) AS entity_name,
-    ol.entity_type
-FROM override_log ol
-LEFT JOIN agent_version av ON av.id = ol.entity_version_id AND ol.entity_type = 'agent'
-LEFT JOIN agent a ON a.id = av.agent_id
-LEFT JOIN task_version tv ON tv.id = ol.entity_version_id AND ol.entity_type = 'task'
-LEFT JOIN task t ON t.id = tv.task_id
-WHERE ol.created_at > NOW() - INTERVAL '%(days)s days'
-GROUP BY ol.override_reason_code, ol.entity_type, a.name, t.name
+    adl.entity_type
+FROM hitl_override ho
+JOIN agent_decision_log adl ON adl.id = ho.decision_log_id
+LEFT JOIN agent_version av  ON av.id = adl.entity_version_id AND adl.entity_type = 'agent'
+LEFT JOIN agent a           ON a.id  = av.agent_id
+LEFT JOIN task_version tv   ON tv.id = adl.entity_version_id AND adl.entity_type = 'task'
+LEFT JOIN task t            ON t.id  = tv.task_id
+WHERE ho.created_at > NOW() - INTERVAL '%(days)s days'
+GROUP BY ho.fact_type, adl.entity_type, a.name, t.name
 ORDER BY count DESC;
 
 

@@ -1,0 +1,151 @@
+{# Modal content for AI provenance.
+   Rendered by GET /submissions/{id}/extraction/{field_name}/provenance.
+   HTMX swaps this into #provenance-modal-content; JS then opens
+   the surrounding <dialog id="provenance-modal">.
+
+   Expects in context:
+     field   — the field-view dict (same shape as _field_row uses)
+     verity_admin_url   — base URL for Verity admin (e.g. http://localhost:8000)
+     vault_url          — base URL for Vault (e.g. http://localhost:8002)
+#}
+{%- set ext = field.extraction -%}
+
+<div class="verity-provenance">
+  <header class="verity-provenance-header">
+    <div>
+      <div class="verity-provenance-eyebrow">Provenance</div>
+      <h2 class="verity-provenance-title">{{ field.label }}</h2>
+    </div>
+    <button type="button" class="verity-provenance-close"
+            onclick="document.getElementById('provenance-modal').close()"
+            aria-label="Close">×</button>
+  </header>
+
+  {# ── Current value ─────────────────────────────────────── #}
+  <section class="verity-provenance-section">
+    <div class="verity-provenance-section-title">Current value</div>
+    <div class="verity-provenance-value">
+      {% if field.formatter == 'badge' %}
+        <span class="verity-badge verity-badge-agent">{{ field.display_value }}</span>
+      {% else %}
+        {{ field.display_value }}
+      {% endif %}
+      {% if ext and ext.hitl_value is not none %}
+        <span class="verity-badge verity-badge-shadow"
+              style="margin-left: 8px;">Human-edited</span>
+      {% elif field.is_ai_authoritative %}
+        <span class="verity-badge verity-badge-agent"
+              style="margin-left: 8px;">AI-authoritative</span>
+      {% endif %}
+    </div>
+  </section>
+
+  {# ── AI channel ────────────────────────────────────────── #}
+  {% if ext and (ext.ai_value is not none or ext.ai_found) %}
+  <section class="verity-provenance-section">
+    <div class="verity-provenance-section-title">AI Extraction</div>
+    <div class="verity-provenance-grid">
+      <div class="verity-provenance-label">Value</div>
+      <div class="verity-provenance-data">{{ ext.ai_value if ext.ai_value is not none else '(empty)' }}</div>
+
+      {% if ext.ai_confidence is not none %}
+      <div class="verity-provenance-label">Confidence</div>
+      <div class="verity-provenance-data">
+        {%- set pct = (ext.ai_confidence * 100) | round | int -%}
+        {%- set conf_class = 'verity-badge-champion' if ext.ai_confidence >= 0.85
+              else 'verity-badge-shadow' if ext.ai_confidence >= 0.70
+              else 'verity-badge-high' -%}
+        <span class="verity-badge {{ conf_class }}">{{ pct }}%</span>
+      </div>
+      {% endif %}
+
+      <div class="verity-provenance-label">AI found this</div>
+      <div class="verity-provenance-data">{{ 'Yes' if ext.ai_found else 'No' }}</div>
+
+      {% if ext.extractor_id %}
+      <div class="verity-provenance-label">Extractor</div>
+      <div class="verity-provenance-data"><code>{{ ext.extractor_id }}</code></div>
+      {% endif %}
+
+      {% if ext.output_path %}
+      <div class="verity-provenance-label">Output path</div>
+      <div class="verity-provenance-data"><code>{{ ext.output_path }}</code></div>
+      {% endif %}
+
+      {% if ext.verity_execution_run_id %}
+      <div class="verity-provenance-label">Decision id</div>
+      <div class="verity-provenance-data">
+        <code>{{ ext.verity_execution_run_id }}</code>
+        <a href="{{ verity_admin_url }}/admin/decisions/{{ ext.verity_execution_run_id }}"
+           target="_blank"
+           class="verity-btn verity-btn-secondary verity-btn-sm"
+           style="margin-left: 8px;">View AI Run ↗</a>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  {# ── Source document ──────────────────────────────────── #}
+  {% if ext and (field.source_filename or ext.source_snippet) %}
+  <section class="verity-provenance-section">
+    <div class="verity-provenance-section-title">Source Document</div>
+    <div class="verity-provenance-grid">
+      {% if field.source_filename %}
+      <div class="verity-provenance-label">File</div>
+      <div class="verity-provenance-data">
+        {{ field.source_filename }}
+        {% if field.source_edms_id %}
+        <a href="{{ vault_url }}/ui/documents/{{ field.source_edms_id }}"
+           target="_blank"
+           class="verity-btn verity-btn-secondary verity-btn-sm"
+           style="margin-left: 8px;">Open in Vault ↗</a>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% if ext.source_page %}
+      <div class="verity-provenance-label">Page</div>
+      <div class="verity-provenance-data">{{ ext.source_page }}</div>
+      {% endif %}
+
+      {% if ext.source_snippet %}
+      <div class="verity-provenance-label">Quote</div>
+      <div class="verity-provenance-data verity-provenance-quote">
+        {{ ext.source_snippet }}
+      </div>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  {# ── HITL override (shown only when overridden) ──────── #}
+  {% if ext and ext.hitl_value is not none %}
+  <section class="verity-provenance-section">
+    <div class="verity-provenance-section-title">Human Override</div>
+    <div class="verity-provenance-grid">
+      <div class="verity-provenance-label">Edited by</div>
+      <div class="verity-provenance-data">{{ ext.hitl_by or '—' }}</div>
+
+      {% if ext.hitl_at %}
+      <div class="verity-provenance-label">Edited at</div>
+      <div class="verity-provenance-data">{{ ext.hitl_at.strftime('%b %d, %Y %H:%M') }}</div>
+      {% endif %}
+
+      <div class="verity-provenance-label">AI value</div>
+      <div class="verity-provenance-data">{{ ext.ai_value if ext.ai_value is not none else '(empty)' }}</div>
+
+      <div class="verity-provenance-label">New value</div>
+      <div class="verity-provenance-data"><strong>{{ ext.hitl_value }}</strong></div>
+    </div>
+  </section>
+  {% endif %}
+
+  <footer class="verity-provenance-footer">
+    <button type="button"
+            class="verity-btn verity-btn-secondary"
+            onclick="document.getElementById('provenance-modal').close()">
+      Close
+    </button>
+  </footer>
+</div>
