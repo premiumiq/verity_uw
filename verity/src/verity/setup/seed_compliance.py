@@ -22,6 +22,7 @@ import yaml
 
 
 STATIC_SEED_FILE = Path(__file__).parent / "compliance_seed_static.yaml"
+DATA_SEED_FILE = Path(__file__).parent / "compliance_seed_data.yaml"
 
 
 # =============================================================================
@@ -247,6 +248,261 @@ async def _seed_feature_hierarchy(
 
 
 # =============================================================================
+# Phase 1.3 — canonical requirements + provisions + bridges + coverage
+# =============================================================================
+
+
+async def seed_data(database_url: str) -> dict[str, int]:
+    """Seed canonical requirements, provisions, bridges, coverage from YAML.
+
+    Pre-requisite: seed_static() must have been run first (frameworks, themes,
+    feature hierarchy must exist; this seeder looks them up by code).
+
+    Idempotent — UPSERTs by natural key. Bridge rows for canonical-feature and
+    provision-canonical relationships are recomputed: existing rows are deleted
+    for each canonical / provision and re-inserted from YAML on every run, so
+    removing a row from YAML actually removes it from DB.
+
+    Returns a counts dict.
+    """
+    data = yaml.safe_load(DATA_SEED_FILE.read_text())
+
+    counts = {
+        "canonical_requirements": 0,
+        "requirement_coverage": 0,
+        "requirement_feature_links": 0,
+        "provisions": 0,
+        "provision_requirement_maps": 0,
+    }
+
+    async with await psycopg.AsyncConnection.connect(
+        database_url, autocommit=False
+    ) as conn:
+        async with conn.cursor() as cur:
+            # Pre-fetch lookup tables.
+            theme_lookup = await _lookup(cur, "verity_compliance.canonical_requirement_theme")
+            framework_lookup = await _lookup(cur, "verity_compliance.regulatory_framework")
+            feature_lookup = await _lookup(cur, "verity_compliance.feature")
+
+            # ---- canonical requirements + coverage + feature links -------
+            canonical_lookup: dict[str, str] = {}
+            for cr in data["canonical_requirements"]:
+                cr_id = await _upsert_canonical_requirement(
+                    cur, cr, theme_lookup
+                )
+                canonical_lookup[cr["code"]] = cr_id
+                counts["canonical_requirements"] += 1
+
+                if "coverage" in cr:
+                    await _upsert_coverage(cur, cr_id, cr["coverage"])
+                    counts["requirement_coverage"] += 1
+
+                if "feature_links" in cr:
+                    n = await _refresh_feature_links(
+                        cur, cr_id, cr["feature_links"], feature_lookup, cr["code"]
+                    )
+                    counts["requirement_feature_links"] += n
+
+            # ---- provisions + bridge to canonical requirements ----------
+            for prov in data["provisions"]:
+                prov_id = await _upsert_provision(cur, prov, framework_lookup)
+                counts["provisions"] += 1
+
+                links = prov.get("canonical_links", [])
+                n = await _refresh_provision_canonical_links(
+                    cur, prov_id, links, canonical_lookup, prov["citation"]
+                )
+                counts["provision_requirement_maps"] += n
+
+        await conn.commit()
+
+    return counts
+
+
+async def _lookup(cur: psycopg.AsyncCursor, table: str) -> dict[str, str]:
+    """Build a {code: id} lookup for a table that has both."""
+    await cur.execute(f"SELECT code, id FROM {table}")
+    return {row[0]: row[1] for row in await cur.fetchall()}
+
+
+async def _upsert_canonical_requirement(
+    cur: psycopg.AsyncCursor,
+    cr: dict[str, Any],
+    theme_lookup: dict[str, str],
+) -> str:
+    theme_code = cr["theme"]
+    if theme_code not in theme_lookup:
+        raise ValueError(
+            f"canonical_requirement {cr['code']!r} references unknown "
+            f"theme {theme_code!r}. Run seed_static first or fix the YAML."
+        )
+
+    await cur.execute(
+        """
+        INSERT INTO verity_compliance.canonical_requirement
+            (theme_id, code, title, description, sort_seq)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (code) DO UPDATE SET
+            theme_id    = EXCLUDED.theme_id,
+            title       = EXCLUDED.title,
+            description = EXCLUDED.description,
+            sort_seq    = EXCLUDED.sort_seq,
+            updated_at  = now()
+        RETURNING id
+        """,
+        (
+            theme_lookup[theme_code],
+            cr["code"],
+            cr["title"],
+            cr.get("description"),
+            cr.get("sort_seq", 0),
+        ),
+    )
+    row = await cur.fetchone()
+    return row[0]
+
+
+async def _upsert_coverage(
+    cur: psycopg.AsyncCursor,
+    canonical_requirement_id: str,
+    coverage: dict[str, Any],
+) -> None:
+    await cur.execute(
+        """
+        INSERT INTO verity_compliance.requirement_coverage
+            (canonical_requirement_id, coverage_level, rationale, customer_actions)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (canonical_requirement_id) DO UPDATE SET
+            coverage_level   = EXCLUDED.coverage_level,
+            rationale        = EXCLUDED.rationale,
+            customer_actions = EXCLUDED.customer_actions,
+            last_reviewed_at = now(),
+            updated_at       = now()
+        """,
+        (
+            canonical_requirement_id,
+            coverage["level"],
+            coverage.get("rationale"),
+            coverage.get("customer_actions"),
+        ),
+    )
+
+
+async def _refresh_feature_links(
+    cur: psycopg.AsyncCursor,
+    canonical_requirement_id: str,
+    links: list[dict[str, Any]],
+    feature_lookup: dict[str, str],
+    cr_code: str,
+) -> int:
+    # Delete-and-replace so removing a link from YAML actually removes it.
+    await cur.execute(
+        "DELETE FROM verity_compliance.requirement_feature_link "
+        "WHERE canonical_requirement_id = %s",
+        (canonical_requirement_id,),
+    )
+    n = 0
+    for link in links:
+        feat_code = link["code"]
+        if feat_code not in feature_lookup:
+            raise ValueError(
+                f"canonical_requirement {cr_code!r} references unknown "
+                f"feature {feat_code!r}. Run seed_static first or fix the YAML."
+            )
+        await cur.execute(
+            """
+            INSERT INTO verity_compliance.requirement_feature_link
+                (canonical_requirement_id, feature_id, role, notes)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (
+                canonical_requirement_id,
+                feature_lookup[feat_code],
+                link.get("role", "primary"),
+                link.get("notes"),
+            ),
+        )
+        n += 1
+    return n
+
+
+async def _upsert_provision(
+    cur: psycopg.AsyncCursor,
+    prov: dict[str, Any],
+    framework_lookup: dict[str, str],
+) -> str:
+    fw_code = prov["framework"]
+    if fw_code not in framework_lookup:
+        raise ValueError(
+            f"provision {prov['citation']!r} references unknown "
+            f"framework {fw_code!r}. Run seed_static first or fix the YAML."
+        )
+
+    await cur.execute(
+        """
+        INSERT INTO verity_compliance.regulatory_provision
+            (framework_id, citation, title, text, sort_seq)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (framework_id, citation) DO UPDATE SET
+            title       = EXCLUDED.title,
+            text        = EXCLUDED.text,
+            sort_seq    = EXCLUDED.sort_seq,
+            updated_at  = now()
+        RETURNING id
+        """,
+        (
+            framework_lookup[fw_code],
+            prov["citation"],
+            prov["title"],
+            prov.get("text"),
+            prov.get("sort_seq", 0),
+        ),
+    )
+    row = await cur.fetchone()
+    return row[0]
+
+
+async def _refresh_provision_canonical_links(
+    cur: psycopg.AsyncCursor,
+    provision_id: str,
+    links: list[dict[str, Any]],
+    canonical_lookup: dict[str, str],
+    prov_citation: str,
+) -> int:
+    await cur.execute(
+        "DELETE FROM verity_compliance.provision_requirement_map "
+        "WHERE provision_id = %s",
+        (provision_id,),
+    )
+    n = 0
+    for link in links:
+        cr_code = link["canonical"]
+        if cr_code not in canonical_lookup:
+            raise ValueError(
+                f"provision {prov_citation!r} references unknown "
+                f"canonical_requirement {cr_code!r}."
+            )
+        await cur.execute(
+            """
+            INSERT INTO verity_compliance.provision_requirement_map
+                (provision_id, canonical_requirement_id,
+                 match_strength, confidence, mapping_source, notes)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (
+                provision_id,
+                canonical_lookup[cr_code],
+                link.get("match_strength", 1.00),
+                link.get("confidence", 1.00),
+                link.get("mapping_source", "manual"),
+                link.get("notes"),
+            ),
+        )
+        n += 1
+    return n
+
+
+# =============================================================================
 # Inspection — print what's in the DB as a tree (review affordance)
 # =============================================================================
 
@@ -353,6 +609,80 @@ async def show(database_url: str) -> None:
                 f"{feat_count} features"
             )
 
+            # ---- canonical requirements + coverage --------------------
+            print("\n=== CANONICAL REQUIREMENTS (with coverage) ===")
+            await cur.execute(
+                """
+                SELECT cr.code, cr.title, t.code AS theme_code,
+                       cov.coverage_level, cov.customer_actions
+                FROM verity_compliance.canonical_requirement cr
+                JOIN verity_compliance.canonical_requirement_theme t ON t.id = cr.theme_id
+                LEFT JOIN verity_compliance.requirement_coverage cov
+                       ON cov.canonical_requirement_id = cr.id
+                ORDER BY t.sort_seq, cr.sort_seq, cr.code
+                """
+            )
+            rows = await cur.fetchall()
+            if not rows:
+                print("  (none — run `verity compliance seed-data` first)")
+                return
+
+            cur_theme = None
+            cov_counts: dict[str, int] = {}
+            cr_count = 0
+            for cr_code, cr_title, theme_code, level, actions in rows:
+                if theme_code != cur_theme:
+                    print(f"\n  ▸ THEME: {theme_code}")
+                    cur_theme = theme_code
+                marker = {
+                    "full": "✓ FULL       ",
+                    "substantial": "◐ SUBSTANT.  ",
+                    "partial": "◑ PARTIAL    ",
+                    "gap": "✗ GAP        ",
+                }.get(level or "", "  (no cov)   ")
+                print(f"      {marker} {cr_title}  [{cr_code}]")
+                if actions:
+                    first_line = actions.strip().split("\n")[0][:88]
+                    print(f"                    customer: {first_line}")
+                if level:
+                    cov_counts[level] = cov_counts.get(level, 0) + 1
+                cr_count += 1
+
+            print("\n  Coverage rollup:")
+            for level in ("full", "substantial", "partial", "gap"):
+                print(f"    {level:<13} {cov_counts.get(level, 0)}")
+            print(f"    total         {cr_count}")
+
+            # ---- provisions per framework ----------------------------
+            print("\n=== PROVISIONS BY FRAMEWORK ===")
+            await cur.execute(
+                """
+                SELECT f.code, f.name, p.citation, p.title,
+                       count(prm.id) AS link_count
+                FROM verity_compliance.regulatory_framework f
+                LEFT JOIN verity_compliance.regulatory_provision p ON p.framework_id = f.id
+                LEFT JOIN verity_compliance.provision_requirement_map prm
+                       ON prm.provision_id = p.id
+                GROUP BY f.code, f.name, p.id, p.citation, p.title, f.sort_seq, p.sort_seq
+                ORDER BY f.sort_seq, p.sort_seq NULLS FIRST
+                """
+            )
+            rows = await cur.fetchall()
+            cur_fw = None
+            prov_total = 0
+            for fw_code, fw_name, citation, title, link_count in rows:
+                if fw_code != cur_fw:
+                    print(f"\n  ▸ {fw_name}  [{fw_code}]")
+                    cur_fw = fw_code
+                if citation is None:
+                    print("      (no provisions seeded)")
+                    continue
+                bridge_marker = f"→{link_count} canonical" if link_count else "→0 canonical"
+                print(f"      • {citation}  {bridge_marker}")
+                prov_total += 1
+
+            print(f"\n  TOTAL provisions: {prov_total}")
+
 
 # =============================================================================
 # Convenience: standalone runner
@@ -375,10 +705,15 @@ def main() -> None:
         print("Static compliance seed complete:")
         for k, v in counts.items():
             print(f"  {k:<22} {v}")
+    elif action == "seed-data":
+        counts = asyncio.run(seed_data(db_url))
+        print("Compliance data seed complete:")
+        for k, v in counts.items():
+            print(f"  {k:<28} {v}")
     elif action == "show":
         asyncio.run(show(db_url))
     else:
-        print(f"Unknown action: {action!r}. Use 'seed' or 'show'.")
+        print(f"Unknown action: {action!r}. Use 'seed', 'seed-data', or 'show'.")
         sys.exit(1)
 
 

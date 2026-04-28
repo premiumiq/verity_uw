@@ -55,8 +55,14 @@ def main():
     )
     seed_static_parser.add_argument("--database-url", required=True)
 
+    seed_data_parser = compliance_sub.add_parser(
+        "seed-data",
+        help="Seed canonical requirements, provisions, bridges, and coverage from compliance_seed_data.yaml",
+    )
+    seed_data_parser.add_argument("--database-url", required=True)
+
     show_parser = compliance_sub.add_parser(
-        "show", help="Print seeded compliance data (frameworks, themes, features) as a tree"
+        "show", help="Print seeded compliance data (frameworks, themes, features, canonicals, provisions) as a tree"
     )
     show_parser.add_argument("--database-url", required=True)
 
@@ -108,6 +114,11 @@ def main():
             print("Static compliance seed complete:")
             for k, v in counts.items():
                 print(f"  {k:<22} {v}")
+        elif args.compliance_action == "seed-data":
+            counts = asyncio.run(seed_compliance.seed_data(args.database_url))
+            print("Compliance data seed complete:")
+            for k, v in counts.items():
+                print(f"  {k:<28} {v}")
         elif args.compliance_action == "show":
             asyncio.run(seed_compliance.show(args.database_url))
         else:

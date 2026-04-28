@@ -15,8 +15,8 @@ This doc is the working tracker. Each sub-step is a single reviewable commit. Ar
 - [ ] **Phase 1** — L3 compliance metamodel + seed
   - [x] 1.1 — Schema only (committed 9ae919b — 11 tables in `verity_compliance`, empty `verity_analytics` schema)
   - [x] 1.2 — Static seeds — 5 frameworks, 15 themes, 4 planes, 13 capabilities, 68 features. Reviewable via `verity compliance show` (tree print) or directly in `verity/src/verity/setup/compliance_seed_static.yaml`.
-  - [ ] 1.2.5 — Author `docs/plans/compliance-seed-data.yaml` (review checkpoint)
-  - [ ] 1.3 — Provisions, canonical requirements, bridge, coverage seed
+  - [x] 1.2.5 — `verity/src/verity/setup/compliance_seed_data.yaml` authored: 37 canonicals across 15 themes, 48 provisions across 5 frameworks, 126 feature links, 51 provision↔canonical bridges, 37 coverage rows.
+  - [x] 1.3 — Seeder extended; `verity compliance seed-data` populates all of the above; `verity compliance show` renders coverage rollup (15 Full / 15 Substantial / 6 Partial / 1 Gap).
   - [ ] 1.4 — Coverage Matrix UI page
   - [ ] 1.5 — Embedding pipeline (fastembed, reembed CLI)
 - [ ] **Phase 2** — L2 compliance mart minimum slice
