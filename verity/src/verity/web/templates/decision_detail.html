@@ -23,6 +23,8 @@
 
 {% block content %}
 
+{% include "partials/_execution_subnav.html" %}
+
 {# ── PARENT DECISION LINK (FC-1d) ──────────────────────────
    When this decision is itself a sub-agent run (parent_decision_id
    is set), surface a breadcrumb up to the parent's decision page

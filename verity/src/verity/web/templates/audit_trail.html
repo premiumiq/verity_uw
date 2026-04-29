@@ -24,6 +24,8 @@
 
 {% block content %}
 
+{% include "partials/_execution_subnav.html" %}
+
 <div style="margin-bottom: 16px; font-size: 0.85rem; color: var(--verity-text-light);">
     {% if workflow_run_id %}
     Pipeline Run: <span style="font-family: monospace;">{{ workflow_run_id[:8] }}...{{ workflow_run_id[-4:] }}</span>
