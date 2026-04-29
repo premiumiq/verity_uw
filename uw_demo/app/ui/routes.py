@@ -42,6 +42,7 @@ from uw_demo.app.db.state import (
     record_event,
     transition_stage,
 )
+from uw_demo.app.ui.field_layout import FIELD_GROUPS, format_value
 from uw_demo.app.workflows import run_doc_processing, run_risk_assessment
 
 
@@ -277,6 +278,188 @@ async def _get_stage_counts() -> dict[str, int]:
             return {row[0]: row[1] for row in rows}
 
 
+def _build_field_sections(
+    sub: dict,
+    extractions: list[dict],
+    documents: list[dict] | None = None,
+) -> list[dict]:
+    """Merge the submission row and its extraction rows into the
+    sectioned form-view structure the Details tab template iterates.
+
+    Called from two places:
+      - tab_details (HTMX swap when the tab is clicked)
+      - submission_detail (page-load include of _tab_details.html)
+    Single helper so both surfaces show the same data without a
+    second DB round-trip — extractions and documents are already
+    loaded by the detail route, so this is pure computation.
+
+    `documents` is optional but recommended: when provided, the
+    function resolves each extraction's source_document_id into
+    the actual filename so the sparkle tooltip can name the
+    source doc without another query.
+    """
+    ext_by_name = {e["field_name"]: e for e in extractions}
+    # Build a lookup from document.id (uw_db UUID) to (filename,
+    # edms_document_id). Filename drives the modal's display;
+    # edms_document_id builds the "Open in Vault" link.
+    doc_lookup: dict[str, dict] = {}
+    for d in (documents or []):
+        if d.get("id"):
+            doc_lookup[str(d["id"])] = {
+                "filename": d.get("filename"),
+                "edms_document_id": d.get("edms_document_id"),
+            }
+    sections: list[dict] = []
+
+    for section_title, fields, lob_filter in FIELD_GROUPS:
+        # LOB-gated sections (e.g. Board for D&O): skip when the
+        # submission's LOB doesn't match.
+        if lob_filter and sub.get("lob") != lob_filter:
+            continue
+
+        field_views: list[dict] = []
+        for fname, label, formatter in fields:
+            ext = ext_by_name.get(fname)
+            # Displayed value precedence:
+            #   1. HITL value (human-corrected)
+            #   2. AI value (AI-extracted)
+            #   3. Submission row value (broker-stated)
+            if ext and ext.get("hitl_value") is not None:
+                raw_value = ext["hitl_value"]
+            elif ext and ext.get("ai_value") is not None:
+                raw_value = ext["ai_value"]
+            else:
+                raw_value = sub.get(fname)
+            # is_ai_authoritative drives the sparkle: AI produced
+            # this value AND no human has overridden it.
+            is_ai_authoritative = bool(
+                ext and ext.get("ai_value") is not None
+                and ext.get("hitl_value") is None
+            )
+            # ai_not_found is TRUE when the AI ran AND has no
+            # value to report. The semantic comes from how
+            # store_extraction_result writes the row:
+            #   ai_found = field_name not in unextractable
+            # so a row with ai_found=False AND ai_value IS NULL
+            # means the AI explicitly listed this field as
+            # unextractable. ai_value is empty string with
+            # ai_found=True can also mean "extracted but empty".
+            ai_not_found = bool(
+                ext is not None
+                and ext.get("ai_value") in (None, "")
+                and (ext.get("ai_found") is False
+                     or ext.get("review_reason") == "missing")
+            )
+            # broker_stated_only: AI tried and didn't find, but the
+            # row still has a value because the broker provided one
+            # at intake (it's on the submission row directly).
+            # Drives a small "Broker-stated" chip next to the value
+            # so the user knows the source even when the AI gave up.
+            broker_stated_only = bool(
+                ai_not_found
+                and sub.get(fname) not in (None, "")
+            )
+            # Resolve source document context (filename for display,
+            # edms_document_id for the Vault link).
+            source_filename = None
+            source_edms_id  = None
+            if ext and ext.get("source_document_id"):
+                ref = doc_lookup.get(str(ext["source_document_id"]))
+                if ref:
+                    source_filename = ref["filename"]
+                    source_edms_id  = ref["edms_document_id"]
+            # Whether the "Send feedback to Verity" checkbox in the
+            # edit modal should default to ON. The signal here is
+            # "AI was involved in this field's value, either by
+            # providing one or by being expected to and missing":
+            #   - AI gave a value (is_ai_authoritative) → check
+            #   - AI ran and missed (ai_not_found)      → check
+            # Otherwise (broker filled in, AI never ran) → unchecked.
+            # The macro hides the checkbox entirely when no
+            # extraction row exists at all (nothing to forward).
+            feedback_default = bool(is_ai_authoritative or ai_not_found)
+            field_views.append({
+                "field_name": fname,
+                "label": label,
+                "formatter": formatter,
+                "raw_value": raw_value,
+                "display_value": format_value(raw_value, formatter),
+                "extraction": ext,
+                "is_ai_authoritative": is_ai_authoritative,
+                "ai_not_found": ai_not_found,
+                "broker_stated_only": broker_stated_only,
+                "feedback_default": feedback_default,
+                "needs_review": bool(ext and ext.get("needs_review")),
+                "source_filename": source_filename,
+                "source_edms_id":  source_edms_id,
+            })
+
+        sections.append({"title": section_title, "fields": field_views})
+
+    return sections
+
+
+def _humanize_event(ev: dict) -> str:
+    """Turn a submission_event row into a one-line audit
+    description. Single chokepoint so the template stays free of
+    branching logic and new event types only need a clause here."""
+    typ = ev.get("event_type") or ""
+    payload = ev.get("payload") or {}
+
+    # State changes — payload carries from/to/stage.
+    if typ == "stage_status_changed":
+        stage = (payload.get("stage") or "").replace("_", " ").title()
+        to    = (payload.get("to")    or "").replace("_", " ").title()
+        return f"Stage '{stage}' → {to}"
+
+    # Discovery & document handling.
+    if typ == "discovery_triggered":
+        return "Document discovery triggered"
+    if typ == "discovery_completed":
+        n = payload.get("doc_count", 0)
+        return f"Discovery completed — {n} document{'' if n == 1 else 's'} found"
+    if typ == "document_uploaded":
+        f = payload.get("filename") or "(unnamed)"
+        t = payload.get("document_type") or "document"
+        return f"Uploaded '{f}' ({t.replace('_', ' ')})"
+
+    # Pipeline lifecycle.
+    if typ == "pipeline_triggered":
+        kind = (payload.get("kind") or "pipeline").replace("_", " ")
+        return f"User triggered {kind}"
+    if typ == "started":
+        kind = (payload.get("kind") or "pipeline").replace("_", " ").title()
+        return f"{kind} started"
+    if typ == "completed":
+        kind = (payload.get("kind") or "pipeline").replace("_", " ").title()
+        outcome = payload.get("outcome")
+        return f"{kind} completed{' — ' + outcome if outcome else ''}"
+    if typ == "failed":
+        kind = (payload.get("kind") or "pipeline").replace("_", " ").title()
+        err = (payload.get("error") or "")[:80]
+        return f"{kind} failed{': ' + err if err else ''}"
+    if typ == "blocked":
+        kind = (payload.get("kind") or "pipeline").replace("_", " ").title()
+        reason = payload.get("blocked_reason") or ""
+        return f"{kind} blocked{': ' + reason if reason else ''}"
+
+    # HITL actions.
+    if typ == "extraction_approved":
+        return "Extraction review approved"
+    if typ == "field_edited":
+        f = payload.get("field_name") or ev.get("field_name") or "?"
+        old = (str(payload.get("old_value") or "")).strip()
+        new = (str(payload.get("new_value") or "")).strip()
+        if old and len(old) > 30: old = old[:30] + "…"
+        if new and len(new) > 30: new = new[:30] + "…"
+        return f"Field '{f}' edited: '{old}' → '{new}'"
+
+    # Fallback — show the raw type so unmapped events are still
+    # visible rather than silently swallowed.
+    cat = ev.get("event_category") or "event"
+    return f"{cat}: {typ}"
+
+
 def _humanize_age(timestamp) -> str:
     """Convert a past timestamp into a short relative age string,
     e.g. 'just now', '12m', '3h', '2d'. Returns '—' for None."""
@@ -318,6 +501,10 @@ def _compute_next_action(
     function just decides what UI button to show right now."""
     sid = str(submission_id)
 
+    # Pretty stage labels — used both for "running" indicators and
+    # any contextual messaging the action bar might show.
+    stage_label = stage.replace("_", " ").title()
+
     # Document Processing stage covers both "discovery" (pull
     # references from Vault) and "processing" (classify + extract).
     # Discovery is implied by has_docs; processing is the next step
@@ -331,13 +518,24 @@ def _compute_next_action(
             return {"label": "Process Documents",
                     "url": f"/submissions/{sid}/process-documents",
                     "method": "POST"}
-        # running: action bar shows nothing; the page polls.
+        if stage_status == "running":
+            # AI is processing documents server-side. There's
+            # nothing for the user to click; the action bar
+            # shows a "running" indicator so coming back to the
+            # page mid-run doesn't read as "Workflow Complete".
+            return {"label": f"{stage_label} in progress…",
+                    "running": True}
         return None
 
     if stage == "information_review":
+        # Information Review is HITL — `running` here means "user
+        # is in the middle of reviewing", not "AI is running".
+        # The action button shows in both running and
+        # blocked_on_input so the user can complete the review.
         if stage_status in ("running", "blocked_on_input"):
-            return {"label": "Review & Approve Fields",
-                    "tab": "extraction"}
+            return {"label": "Complete Review",
+                    "url": f"/submissions/{sid}/approve-extraction",
+                    "method": "POST"}
         if stage_status == "failed":
             return {"label": "Re-run Extraction",
                     "url": f"/submissions/{sid}/process-documents",
@@ -349,7 +547,10 @@ def _compute_next_action(
             return {"label": "Assess Risk",
                     "url": f"/submissions/{sid}/assess-risk",
                     "method": "POST"}
-        return None  # running → poll; complete → all done
+        if stage_status == "running":
+            return {"label": f"{stage_label} in progress…",
+                    "running": True}
+        return None  # complete — handled by the all-done case below
 
     # intake / declined / unknown — no contextual action.
     return None
@@ -584,6 +785,14 @@ def create_uw_routes(verity) -> APIRouter:
         documents = await _get_documents(submission_id)
         doc_count = len(documents)
 
+        # Submission Details is the default tab — its content is
+        # included directly in submission_detail.html on first load
+        # (not via HTMX), so the route has to pass `sections` along
+        # for the include to render. The HTMX tab handler calls
+        # the same helper. Documents are passed so the sparkle
+        # tooltip can name the source file.
+        sections = _build_field_sections(sub, extractions, documents)
+
         next_action = _compute_next_action(
             submission_id, cur_stage, cur_status, has_docs=doc_count > 0,
         )
@@ -618,6 +827,7 @@ def create_uw_routes(verity) -> APIRouter:
             "next_action": next_action,
             "review_count": review_count,
             "doc_count": doc_count,
+            "sections": sections,
             "current_stage_label": current_stage_label,
             "current_stage_age": current_stage_age,
             "run_id": run_id if run_id else None,
@@ -630,8 +840,21 @@ def create_uw_routes(verity) -> APIRouter:
 
     @router.get("/submissions/{submission_id}/tab/details", response_class=HTMLResponse)
     async def tab_details(request: Request, submission_id: str):
+        """Render the Submission Details tab via HTMX swap. Same
+        data shape as the page-load include — both routes call
+        _build_field_sections so the two render paths can't drift."""
         sub = await _get_submission(submission_id)
-        return templates.TemplateResponse(request, "partials/_tab_details.html", {"sub": sub})
+        if not sub:
+            return HTMLResponse("<h1>Submission not found</h1>", status_code=404)
+        extractions = await _get_extractions(submission_id)
+        # Same documents lookup as the page-load route so the
+        # sparkle tooltip resolves source_document_id → filename.
+        documents = await _get_documents(submission_id)
+        sections = _build_field_sections(sub, extractions, documents)
+        return templates.TemplateResponse(
+            request, "partials/_tab_details.html",
+            {"sub": sub, "sections": sections},
+        )
 
     @router.get("/submissions/{submission_id}/tab/documents", response_class=HTMLResponse)
     async def tab_documents(request: Request, submission_id: str):
@@ -688,25 +911,51 @@ def create_uw_routes(verity) -> APIRouter:
 
     @router.get("/submissions/{submission_id}/tab/audit-trail", response_class=HTMLResponse)
     async def tab_audit_trail(request: Request, submission_id: str):
-        """Submission-scoped audit trail.
+        """Submission-scoped audit trail driven by `submission_event`.
 
-        Queries by `execution_context_id` so every workflow invocation
-        for the submission shows up — doc-processing classifies/extracts
-        AND risk-assessment triage/appetite, across however many
-        workflow runs the submission has gone through. The previous
-        version picked one workflow_run_id and silently hid every
-        decision from the OTHER workflow.
+        Renders the UW-side history of everything that's happened to
+        this submission: state changes, user actions (uploads,
+        approvals, field edits), pipeline lifecycle moments, and
+        system events. Each row carries a `workflow_run_id` when
+        relevant — those rows get a 'View in Verity' link straight
+        to the run-level audit trail in Verity admin.
+
+        A footer link to /admin/audit-trail/context/{exec_ctx_id}
+        gives the user the cross-run view in Verity.
         """
-        await verity.ensure_connected()
         sub = await _get_submission(submission_id)
-        trail = []
+        if not sub:
+            return HTMLResponse("Submission not found.", status_code=404)
+
+        events: list[dict] = []
+        async with await _get_conn() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """SELECT event_category, event_type, actor, occurred_at,
+                              payload, workflow_run_id, document_id, field_name
+                    FROM submission_event
+                    WHERE submission_id = %s
+                    ORDER BY occurred_at DESC""",
+                    (submission_id,),
+                )
+                cols = [d.name for d in cur.description]
+                events = [dict(zip(cols, row)) for row in await cur.fetchall()]
+
+        # Pre-render each row's humanised description so the
+        # template stays simple. Keeps rendering logic in Python
+        # rather than spreading it across Jinja conditionals.
+        for ev in events:
+            ev["description"] = _humanize_event(ev)
+
         ctx_id = sub.get("execution_context_id")
-        if ctx_id:
-            trail = await verity.get_audit_trail(str(ctx_id))
-        return templates.TemplateResponse(request, "partials/_tab_audit_trail.html", {
-            "trail": trail,
-            "execution_context_id": str(ctx_id) if ctx_id else None,
-        })
+        return templates.TemplateResponse(
+            request, "partials/_tab_audit_trail.html",
+            {
+                "events": events,
+                "execution_context_id": str(ctx_id) if ctx_id else None,
+                "verity_admin_url": "http://localhost:8000",
+            },
+        )
 
     # ── DOCUMENT DISCOVERY ───────────────────────────────────
     #
@@ -1116,7 +1365,11 @@ def create_uw_routes(verity) -> APIRouter:
 
         # Write extraction results to uw_db from every per-doc extract
         # step that succeeded. Per-doc workflow generates step_names
-        # like 'extract_fields:do_app_acme.pdf'.
+        # like 'extract_fields:do_app_acme.pdf'. The provenance
+        # passed to store_extraction_result (decision_log_id,
+        # extractor_id, output_path, workflow_run_id) drives the
+        # sparkle tooltip and gives the override API the anchor it
+        # needs to reach back to the specific run.
         from uw_demo.app.tools.submission_tools import store_extraction_result
         extract_steps = [
             s for s in result.all_steps
@@ -1124,13 +1377,36 @@ def create_uw_routes(verity) -> APIRouter:
             and s.status == "complete"
             and s.execution_result and s.execution_result.output
         ]
+        # Pre-load this submission's document index once so we can
+        # resolve each step's filename to its uw_db document.id
+        # without N round-trips. The step_name suffix carries the
+        # filename — `extract_fields:do_app_acme.pdf` → `do_app_acme.pdf`.
+        uw_docs_by_name = {
+            d["filename"]: str(d["id"])
+            for d in await _get_documents(submission_id)
+            if d.get("filename")
+        }
         for s in extract_steps:
             output = s.execution_result.output
+            er = s.execution_result
+            extractor_id = (
+                f"{er.entity_name}@{er.version_label}"
+                if er.entity_name and er.version_label else er.entity_name
+            )
+            # Resolve which document this step extracted from. The
+            # source_document_id is what powers the sparkle modal's
+            # 'Source: <filename>' line and 'Open in Vault' link.
+            doc_filename = s.step_name.split(":", 1)[1] if ":" in s.step_name else None
+            source_document_id = uw_docs_by_name.get(doc_filename)
             await store_extraction_result(
                 submission_id=submission_id,
                 fields=output.get("fields", {}),
                 low_confidence_fields=output.get("low_confidence_fields", []),
                 unextractable_fields=output.get("unextractable_fields", []),
+                source_document_id=source_document_id,
+                workflow_run_id=run_id,
+                decision_log_id=str(er.decision_log_id) if er.decision_log_id else None,
+                extractor_id=extractor_id,
             )
 
         # ── Decide whether HITL review is needed ─────────────────
@@ -1154,11 +1430,257 @@ def create_uw_routes(verity) -> APIRouter:
                     )
             await conn.commit()
 
-            # Auto-trigger Pipeline 2 (risk assessment)
+        # Auto-trigger Pipeline 2 (risk assessment) ONLY when there
+        # were no flagged fields. With flags, the workflow has to
+        # wait on the underwriter's HITL review (triggered later
+        # by approve_extraction).
+        if not needs_review:
             await _run_risk_assessment_internal(verity, submission_id, sub, templates)
 
-        # Redirect back to detail page
         return RedirectResponse(url=f"/submissions/{submission_id}", status_code=303)
+
+    # ── PROVENANCE MODAL ─────────────────────────────────────
+    #
+    # Returns the provenance panel for one extracted field. The
+    # sparkle icon's HTMX get hits this endpoint; the response
+    # is swapped into the page-level <dialog>'s content slot,
+    # then JS opens the dialog. Every link inside the modal
+    # opens in a new tab — Vault doc, Verity decision page.
+
+    @router.get("/submissions/{submission_id}/extraction/{field_name}/provenance",
+                response_class=HTMLResponse)
+    async def provenance_panel(request: Request,
+                                submission_id: str,
+                                field_name: str):
+        sub = await _get_submission(submission_id)
+        if not sub:
+            return HTMLResponse("Submission not found.", status_code=404)
+        extractions = await _get_extractions(submission_id)
+        documents = await _get_documents(submission_id)
+        sections = _build_field_sections(sub, extractions, documents)
+
+        target = None
+        for sec in sections:
+            for f in sec["fields"]:
+                if f["field_name"] == field_name:
+                    target = f
+                    break
+            if target:
+                break
+        if not target:
+            return HTMLResponse(
+                f"<div style='padding:20px'>No layout entry for "
+                f"<code>{field_name}</code>.</div>",
+                status_code=404,
+            )
+
+        return templates.TemplateResponse(
+            request, "partials/_provenance_modal.html",
+            {
+                "field": target,
+                "sub": sub,
+                # Hard-coded base URLs for the demo. Both services
+                # are co-located at known ports; future deployments
+                # would resolve these from settings.
+                "verity_admin_url": "http://localhost:8000",
+                "vault_url":        "http://localhost:8002",
+            },
+        )
+
+    # ── PER-FIELD INLINE EDIT ────────────────────────────────
+    #
+    # Handles the HTMX POST from the pen/save flow on each field
+    # in the Submission Details tab. Three writes in one transaction:
+    #   1. submission_extraction_audit  (always, append-only)
+    #   2. verity_db.hitl_override      (only on AI→HITL flip with
+    #                                    a Verity decision anchor)
+    #   3. submission_extraction        (updates hitl_* channel)
+    # On success, re-renders the same field_row macro so HTMX can
+    # swap it back into the page in 'readonly' state.
+
+    @router.post("/submissions/{submission_id}/extraction/{field_name}/edit",
+                  response_class=HTMLResponse)
+    async def edit_extraction_field(
+        request: Request,
+        submission_id: str,
+        field_name: str,
+        hitl_value: str = Form(...),
+        reason: str = Form(""),
+        send_feedback: str = Form(""),
+    ):
+        # Treat any non-empty checkbox value as "on". HTML omits
+        # unchecked checkboxes from the form body entirely.
+        forward_to_verity = bool(send_feedback)
+        # When the user opts in to forwarding, a reason is
+        # mandatory — the governance signal needs context.
+        if forward_to_verity and not reason.strip():
+            return HTMLResponse(
+                "Reason is required when 'Send feedback to Verity' "
+                "is enabled.",
+                status_code=400,
+            )
+        # Read the current extraction row. Have to know the prior
+        # value, the prior origin (AI vs HITL), and the Verity
+        # anchors before we can build the audit + override calls.
+        async with await _get_conn() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """SELECT * FROM submission_extraction
+                    WHERE submission_id = %s AND field_name = %s""",
+                    (submission_id, field_name),
+                )
+                cols = [d.name for d in cur.description]
+                row_tuple = await cur.fetchone()
+                if not row_tuple:
+                    return HTMLResponse(
+                        f"No extraction row for field '{field_name}'.",
+                        status_code=404,
+                    )
+                ext = dict(zip(cols, row_tuple))
+
+                # was_ai_authoritative drives whether we need to
+                # call Verity. AI-authoritative means: AI produced
+                # a value AND no human has overridden it yet.
+                was_ai_authoritative = (
+                    ext.get("ai_value") is not None
+                    and ext.get("hitl_value") is None
+                )
+                old_value = (
+                    ext.get("hitl_value")
+                    if ext.get("hitl_value") is not None
+                    else ext.get("ai_value")
+                )
+                actor = "uw_user"  # auth not yet wired
+
+                # Forward to Verity only when the user opted in
+                # via the Send-feedback checkbox AND we have a
+                # decision-log anchor to attach the override to.
+                # The semantic broadens beyond strict AI→HITL
+                # flips: if the AI ran and missed (ai_not_found)
+                # AND the user opts in, we forward that too —
+                # the pen modal default-checks the box for those.
+                hitl_override_id: object = None
+                anchor = ext.get("verity_execution_run_id")
+                if forward_to_verity and anchor:
+                    try:
+                        ov = await verity.record_hitl_override(
+                            decision_log_id  = anchor,
+                            output_path      = ext.get("output_path") or
+                                                f"$.fields.{field_name}.value",
+                            ai_value         = ext.get("ai_value"),
+                            ai_found         = bool(ext.get("ai_found")),
+                            hitl_value       = hitl_value,
+                            application      = "uw_demo",
+                            entity_type      = "submission",
+                            entity_reference = str(submission_id),
+                            fact_type        = field_name,
+                            created_by       = actor,
+                            reason           = reason or None,
+                        )
+                        hitl_override_id = ov.get("id")
+                    except Exception as e:
+                        # Don't block the local edit if Verity is
+                        # unreachable / the run was wiped — log
+                        # and continue. The audit row still
+                        # records the change locally.
+                        logger.warning(
+                            "record_hitl_override failed for "
+                            "submission=%s field=%s: %s",
+                            submission_id, field_name, e,
+                        )
+                elif forward_to_verity and not anchor:
+                    # User wanted to forward but no Verity decision
+                    # is anchored to this row (seeded data, or AI
+                    # never ran on this submission). Log so it's
+                    # visible in app logs; the audit row still
+                    # captures the local edit.
+                    logger.info(
+                        "send_feedback requested but no Verity anchor "
+                        "for submission=%s field=%s; saving locally "
+                        "without forwarding.",
+                        submission_id, field_name,
+                    )
+
+                # 1) Audit row (always). Carries the prior origin
+                # so reports can answer "how many AI→HITL flips
+                # happened on field X?".
+                await cur.execute(
+                    """INSERT INTO submission_extraction_audit (
+                        submission_id, field_name,
+                        old_value, new_value,
+                        was_ai_authoritative,
+                        actor, hitl_override_id,
+                        workflow_run_id
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                    (
+                        submission_id, field_name,
+                        old_value, hitl_value,
+                        was_ai_authoritative,
+                        actor, hitl_override_id,
+                        ext.get("workflow_run_id"),
+                    ),
+                )
+
+                # 2) Update the submission_extraction row's HITL
+                # channel. ai_* columns stay untouched — they
+                # remain the immutable record of what the AI
+                # produced on this run.
+                await cur.execute(
+                    """UPDATE submission_extraction SET
+                        hitl_value = %s,
+                        hitl_at    = NOW(),
+                        hitl_by    = %s,
+                        needs_review = FALSE
+                    WHERE submission_id = %s AND field_name = %s""",
+                    (hitl_value, actor, submission_id, field_name),
+                )
+
+                # 3) submission_event row for the audit-trail tab.
+                # Categorised as a user_action (not state_change)
+                # since it doesn't move a stage — it just records
+                # the human edit.
+                await record_event(
+                    cur, submission_id,
+                    event_category="user_action",
+                    event_type="field_edited",
+                    actor=actor,
+                    payload={
+                        "field_name": field_name,
+                        "old_value":  old_value,
+                        "new_value":  hitl_value,
+                        "was_ai_authoritative": was_ai_authoritative,
+                        "reason":     reason or None,
+                        "hitl_override_id":
+                            str(hitl_override_id) if hitl_override_id else None,
+                    },
+                    field_name=field_name,
+                )
+            await conn.commit()
+
+        # Re-fetch the row + supporting context and rebuild ONE
+        # field-view dict so we can re-render the macro. HTMX swaps
+        # the outer .verity-field with this fresh markup.
+        sub = await _get_submission(submission_id)
+        extractions = await _get_extractions(submission_id)
+        documents = await _get_documents(submission_id)
+        sections = _build_field_sections(sub, extractions, documents)
+        target = None
+        for sec in sections:
+            for f in sec["fields"]:
+                if f["field_name"] == field_name:
+                    target = f
+                    break
+            if target:
+                break
+        if not target:
+            # Field isn't in the layout map. Should never happen
+            # — defensive fallback returns nothing so HTMX clears
+            # the row rather than rendering stale markup.
+            return HTMLResponse("", status_code=200)
+        return templates.TemplateResponse(
+            request, "partials/_field_row_swap.html",
+            {"field": target, "sub": sub},
+        )
 
     # ── HITL EXTRACTION APPROVAL ─────────────────────────────
 

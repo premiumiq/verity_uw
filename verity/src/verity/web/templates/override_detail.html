@@ -1,0 +1,165 @@
+{#
+  OVERRIDE DETAIL PAGE — single hitl_override row, fully expanded.
+
+  Sections:
+    - Identity / origin (when, by whom, application, entity, fact_type)
+    - Value diff (AI vs HITL)
+    - Reason
+    - Verity decision context (entity, version, run, model, duration)
+    - Navigation actions (View Run, Decision detail, back to list)
+
+  DATA PASSED BY ROUTE:
+    override — the dict returned by get_hitl_override_by_id
+#}
+{% extends "base.html" %}
+
+{% block title %}Override {{ override.id }} — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/overrides">Overrides</a>
+    <span class="separator">›</span>
+    <span>{{ override.fact_type }}</span>
+{% endblock %}
+
+{% block page_title %}HITL Override · {{ override.fact_type }}{% endblock %}
+
+{% block content %}
+
+<div class="verity-card" style="border-left: 3px solid var(--verity-amber); margin-bottom: 16px;">
+  <div class="verity-card-header">Identity</div>
+  <div class="verity-detail-grid">
+    <div class="verity-detail-label">Override id</div>
+    <div class="verity-detail-value"><code>{{ override.id }}</code></div>
+
+    <div class="verity-detail-label">When</div>
+    <div class="verity-detail-value">
+      {{ override.created_at.strftime('%Y-%m-%d %H:%M:%S') if override.created_at else '—' }}
+    </div>
+
+    <div class="verity-detail-label">Actor</div>
+    <div class="verity-detail-value"><code>{{ override.created_by }}</code></div>
+
+    <div class="verity-detail-label">Application</div>
+    <div class="verity-detail-value">
+      {{ override.application_display_name or override.application }}
+      <span style="color: var(--verity-text-light);">(<code>{{ override.application }}</code>)</span>
+    </div>
+
+    <div class="verity-detail-label">Entity</div>
+    <div class="verity-detail-value">
+      <span class="verity-badge verity-badge-agent">{{ override.business_entity_type }}</span>
+      <code>{{ override.entity_reference }}</code>
+    </div>
+
+    <div class="verity-detail-label">Fact type</div>
+    <div class="verity-detail-value"><code>{{ override.fact_type }}</code></div>
+
+    <div class="verity-detail-label">Output path</div>
+    <div class="verity-detail-value"><code>{{ override.output_path }}</code></div>
+  </div>
+</div>
+
+<div class="verity-card" style="margin-bottom: 16px;">
+  <div class="verity-card-header">Value</div>
+  <div class="verity-detail-grid">
+    <div class="verity-detail-label">AI value</div>
+    <div class="verity-detail-value">
+      {% if override.ai_value and override.ai_value != 'null' %}
+        <code>{{ override.ai_value }}</code>
+      {% else %}
+        <span class="verity-badge verity-badge-shadow">
+          {{ 'AI did not find this field' if override.ai_found else 'AI never produced a value' }}
+        </span>
+      {% endif %}
+    </div>
+
+    <div class="verity-detail-label">Human value</div>
+    <div class="verity-detail-value">
+      <strong><code>{{ override.hitl_value }}</code></strong>
+    </div>
+  </div>
+</div>
+
+{% if override.reason %}
+<div class="verity-card" style="margin-bottom: 16px;">
+  <div class="verity-card-header">Reason</div>
+  <div style="font-size: 0.9rem; color: var(--verity-text); padding: 8px 0;">
+    {{ override.reason }}
+  </div>
+</div>
+{% endif %}
+
+{% if override.decision_log_id %}
+<div class="verity-card" style="margin-bottom: 16px;">
+  <div class="verity-card-header">AI Run Context</div>
+  <div class="verity-detail-grid">
+    <div class="verity-detail-label">Entity</div>
+    <div class="verity-detail-value">
+      <span class="verity-badge verity-badge-agent">{{ override.decision_entity_type }}</span>
+      {{ override.entity_name or '—' }}
+      {% if override.version_label %}
+        <code style="font-size: 0.75rem;">v{{ override.version_label }}</code>
+      {% endif %}
+    </div>
+
+    {% if override.decision_step_name %}
+    <div class="verity-detail-label">Step</div>
+    <div class="verity-detail-value"><code>{{ override.decision_step_name }}</code></div>
+    {% endif %}
+
+    {% if override.decision_model_used %}
+    <div class="verity-detail-label">Model</div>
+    <div class="verity-detail-value"><code>{{ override.decision_model_used }}</code></div>
+    {% endif %}
+
+    {% if override.decision_duration_ms is not none %}
+    <div class="verity-detail-label">Duration</div>
+    <div class="verity-detail-value">{{ override.decision_duration_ms }}ms</div>
+    {% endif %}
+
+    {% if override.decision_confidence is not none %}
+    <div class="verity-detail-label">Confidence</div>
+    <div class="verity-detail-value">{{ "%.0f"|format(override.decision_confidence * 100) }}%</div>
+    {% endif %}
+
+    <div class="verity-detail-label">Decision id</div>
+    <div class="verity-detail-value"><code>{{ override.decision_log_id }}</code></div>
+
+    {% if override.workflow_run_id %}
+    <div class="verity-detail-label">Workflow run</div>
+    <div class="verity-detail-value"><code>{{ override.workflow_run_id }}</code></div>
+    {% endif %}
+  </div>
+
+  {% if override.decision_output_summary %}
+  <div class="verity-card-header" style="margin-top: 12px;">Decision Output Summary</div>
+  <div class="verity-code">{{ override.decision_output_summary }}</div>
+  {% endif %}
+
+  <div class="verity-card-footer">
+    <a href="/admin/decisions/{{ override.decision_log_id }}"
+       class="verity-btn verity-btn-secondary verity-btn-sm">
+      View Decision Detail ↗
+    </a>
+    {% if override.workflow_run_id %}
+    <a href="/admin/audit-trail/run/{{ override.workflow_run_id }}"
+       class="verity-btn verity-btn-secondary verity-btn-sm">
+      View Workflow Run ↗
+    </a>
+    {% endif %}
+    {% if override.execution_context_id %}
+    <a href="/admin/audit-trail/context/{{ override.execution_context_id }}"
+       class="verity-btn verity-btn-secondary verity-btn-sm">
+      View Business Context Trail ↗
+    </a>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<div style="margin-top: 16px;">
+  <a href="/admin/overrides" class="verity-btn verity-btn-secondary">← Back to Overrides</a>
+</div>
+
+{% endblock %}

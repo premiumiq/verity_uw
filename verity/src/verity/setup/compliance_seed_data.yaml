@@ -1,0 +1,1196 @@
+# =============================================================================
+# Verity Compliance Seed Data — Canonical Requirements + Provisions + Bridges
+# =============================================================================
+#
+# Source: Verity_Complete_Regulatory_Matrix_v2.md (47 matrix rows)
+#
+# Rationalization principle: decompose-as-needed, not minimization.
+#   - Two matrix rows describing the same operational requirement collapse
+#     to one canonical_requirement (e.g. "Model inventory" appears in
+#     SR 11-7, NAIC, NAIC Eval Tool, cross-framework — one canonical).
+#   - Two matrix rows describing related-but-distinct requirements stay
+#     separate (e.g. pre-deployment fairness vs production fairness
+#     monitoring; merging would mask Verity's Gap-rated coverage).
+#
+# Coverage levels mirror the matrix verbatim — full / substantial / partial / gap.
+#
+# Edit freely; re-running `verity compliance seed-data` UPSERTs by code.
+#
+# Architecture: docs/architecture/compliance-stack.md
+# Build plan:   docs/plans/compliance-build-plan.md
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# CANONICAL REQUIREMENTS — the rationalized vocabulary.
+#
+# Each canonical requirement carries: theme, title, description,
+# coverage (level + rationale + customer_actions), feature_links.
+# Provisions bridge to these via the provisions: section below.
+# -----------------------------------------------------------------------------
+canonical_requirements:
+
+  # --- governance_program -----------------------------------------------------
+  - code: model_inventory_registration
+    theme: governance_program
+    title: Model inventory & registration
+    description: All AI models must be identified, catalogued, and centrally tracked.
+    sort_seq: 10
+    coverage:
+      level: full
+      rationale: |
+        Asset Registry stores task_version, agent_version, prompt_template,
+        tool, connector, MCP server — all versioned DB records with name,
+        owner, materiality, lifecycle_state. Model Inventory Report
+        auto-generated cross-application.
+    feature_links:
+      - { code: task_version_registration, role: primary }
+      - { code: agent_version_registration, role: primary }
+      - { code: prompt_template_versioning, role: supporting }
+      - { code: tool_registration, role: supporting }
+      - { code: mcp_server_trust_registry, role: supporting }
+      - { code: application_registration, role: primary }
+      - { code: model_inventory_report, role: primary }
+
+  - code: model_ownership_accountability
+    theme: governance_program
+    title: Model ownership & accountability
+    description: |
+      Each model has a designated owner. Accountability for AI decisions
+      (including third-party AI) is named, traceable, and queryable end-to-end.
+    sort_seq: 20
+    coverage:
+      level: full
+      rationale: |
+        Owner field on every entity version. Approval record for each lifecycle
+        promotion records the responsible approver. Override logs linked to
+        named users. Accountability chain queryable end-to-end.
+    feature_links:
+      - { code: agent_version_registration, role: supporting }
+      - { code: task_version_registration, role: supporting }
+      - { code: hitl_approval_records, role: primary }
+      - { code: lifecycle_event_audit, role: supporting }
+      - { code: immutable_decision_log, role: supporting }
+
+  - code: written_ais_program
+    theme: governance_program
+    title: Written AIS Program
+    description: |
+      A documented AI Systems Program governing all AI use in regulated practices.
+      Verity is the operational implementation; the written policy wrapper
+      is customer responsibility.
+    sort_seq: 30
+    coverage:
+      level: substantial
+      rationale: |
+        Verity IS the operational AIS Program implementation: registry,
+        lifecycle, testing, decision logging, compliance reporting.
+      customer_actions: |
+        The written policy document referencing Verity controls as the AIS
+        Program infrastructure is customer responsibility.
+    feature_links:
+      - { code: seven_state_lifecycle, role: primary }
+      - { code: configurable_gates_per_materiality, role: supporting }
+      - { code: regulatory_evidence_package, role: supporting }
+      - { code: incident_log, role: supporting }
+
+  - code: ai_governance_organizational_structure
+    theme: governance_program
+    title: AI governance organizational structure
+    description: |
+      Documented governance structure — committee composition, roles,
+      escalation paths — for AI risk management.
+    sort_seq: 40
+    coverage:
+      level: substantial
+      rationale: |
+        HITL approval chains, incident escalation, rollback, override tracking
+        — the technical governance controls are implemented.
+      customer_actions: |
+        Governance structure (committee, roles, escalation paths) must be
+        defined in written policy by the insurer.
+    feature_links:
+      - { code: hitl_approval_records, role: supporting }
+      - { code: incident_log, role: supporting }
+      - { code: lifecycle_event_audit, role: supporting }
+
+  - code: model_risk_identification_classification
+    theme: governance_program
+    title: Model risk identification & classification
+    description: |
+      Models are identified and classified by risk level for ERM
+      (enterprise risk management) purposes.
+    sort_seq: 50
+    coverage:
+      level: full
+      rationale: |
+        Materiality tier classification is the direct ORSA implementation.
+        Model inventory report provides a snapshot for ORSA model risk
+        section. Incident log provides loss event history.
+    feature_links:
+      - { code: materiality_tier_classification, role: primary }
+      - { code: model_inventory_report, role: supporting }
+      - { code: incident_log, role: supporting }
+
+  # --- conceptual_soundness ---------------------------------------------------
+  - code: model_conceptual_soundness
+    theme: conceptual_soundness
+    title: Conceptual soundness
+    description: |
+      Model design (theory, assumptions, logic) is documented sufficiently
+      for a qualified reviewer.
+    sort_seq: 10
+    coverage:
+      level: substantial
+      rationale: |
+        Metamodel stores design rationale, prompt content, tool allowlist,
+        authority thresholds. Explainability output captures reasoning per decision.
+      customer_actions: |
+        LLM reasoning is probabilistic; formal "mathematical structure"
+        documentation as envisioned for statistical models doesn't directly apply.
+        Supplementary LLM Model Card per High-materiality agent needed.
+    feature_links:
+      - { code: agent_version_registration, role: primary }
+      - { code: prompt_template_versioning, role: primary }
+      - { code: tool_authorization_checking, role: supporting }
+      - { code: validation_report_storage, role: supporting }
+
+  - code: model_documentation_for_qualified_review
+    theme: conceptual_soundness
+    title: Model documentation sufficient for qualified review
+    description: |
+      Documentation of purpose, inputs, outputs, authority thresholds,
+      validation results — sufficient for a qualified actuarial reviewer
+      (ASOP 56 Sec. 3.4).
+    sort_seq: 20
+    coverage:
+      level: substantial
+      rationale: |
+        Metamodel stores purpose, inputs, outputs, authority thresholds,
+        validation results. Auto-generated documentation.
+      customer_actions: |
+        "Sufficient for a qualified reviewer" standard requires supplementary
+        LLM-specific documentation per agent.
+    feature_links:
+      - { code: agent_version_registration, role: primary }
+      - { code: validation_report_storage, role: primary }
+      - { code: model_inventory_report, role: supporting }
+
+  - code: model_limitations_documentation
+    theme: conceptual_soundness
+    title: Model limitations documentation
+    description: |
+      Known limitations and conditions under which the model may fail are
+      documented and disclosed proactively.
+    sort_seq: 30
+    coverage:
+      level: partial
+      rationale: |
+        Metamodel includes a limitations field per version. Validation reports
+        document conditions under which accuracy degrades.
+      customer_actions: |
+        For LLM agents, full scope of limitations (hallucination risk, prompt
+        sensitivity, out-of-distribution behavior) not automatically characterized.
+        Supplementary documentation required. Proactive disclosure to
+        management (ASOP 56 Sec. 3.8) is a customer process.
+    feature_links:
+      - { code: agent_version_registration, role: supporting }
+      - { code: validation_report_storage, role: supporting }
+
+  # --- data_inputs_governance -------------------------------------------------
+  - code: input_data_quality
+    theme: data_inputs_governance
+    title: Input data quality & appropriateness
+    description: |
+      Input data is assessed for quality and relevance before reaching agents.
+    sort_seq: 10
+    coverage:
+      level: substantial
+      rationale: |
+        Data classification tiers govern permissible inputs. Mock mode testing
+        validates pipeline with controlled data. Source resolutions audit
+        tracks per-binding provenance.
+      customer_actions: |
+        No automated data quality scoring or real-time data quality monitoring.
+        Classification is at document-type level, not field-level.
+    feature_links:
+      - { code: source_binding_resolution, role: primary }
+      - { code: source_resolutions_audit, role: primary }
+      - { code: mock_mode_testing, role: supporting }
+
+  - code: proxy_discrimination_screening
+    theme: data_inputs_governance
+    title: Proxy discrimination screening (input level)
+    description: |
+      Inputs are screened to prevent use of proxies for protected classes.
+    sort_seq: 20
+    coverage:
+      level: substantial
+      rationale: |
+        Data classification tiers control what data flows to agents.
+        Enrichment data fields screened for known protected-class proxies.
+        MCP trust registry with data classification.
+      customer_actions: |
+        Automated proxy variable detection in unstructured data not built.
+    feature_links:
+      - { code: mcp_server_trust_registry, role: primary }
+      - { code: source_binding_resolution, role: supporting }
+      - { code: source_resolutions_audit, role: supporting }
+
+  - code: external_data_algorithm_governance
+    theme: data_inputs_governance
+    title: External data sources & algorithms governance
+    description: |
+      List of external data sources and algorithms is producible on regulator request.
+    sort_seq: 30
+    coverage:
+      level: full
+      rationale: |
+        MCP server trust registry is the exact implementation. Metamodel records
+        which external tools each version can call. Both queryable and exportable.
+    feature_links:
+      - { code: mcp_server_trust_registry, role: primary }
+      - { code: tool_registration, role: supporting }
+      - { code: connector_registration, role: supporting }
+      - { code: tool_authorization_checking, role: supporting }
+
+  - code: data_governance_documentation
+    theme: data_inputs_governance
+    title: Data governance documentation
+    description: |
+      Documented governance policies for external data, including controls,
+      access patterns, and quality standards.
+    sort_seq: 40
+    coverage:
+      level: substantial
+      rationale: |
+        Data classification policies in metamodel. MCP trust assessments
+        document governance of each external provider.
+      customer_actions: |
+        Written data governance policy document referencing Verity controls
+        is supplementary.
+    feature_links:
+      - { code: mcp_server_trust_registry, role: primary }
+      - { code: connector_registration, role: supporting }
+
+  # --- testing_validation -----------------------------------------------------
+  - code: pre_deployment_testing
+    theme: testing_validation
+    title: Pre-deployment testing & validation
+    description: |
+      Models are tested before deployment. Multi-layer testing is required;
+      no version reaches production without passing.
+    sort_seq: 10
+    coverage:
+      level: full
+      rationale: |
+        Four-layer testing framework — mock mode → staging pytest → ground
+        truth validation (F1 / precision / recall / kappa) → shadow deployment.
+        All results stored in test_execution_log linked to entity version.
+        No version promotes to Champion without passing all configured layers.
+    feature_links:
+      - { code: mock_mode_testing, role: primary }
+      - { code: staging_pytest_suite, role: primary }
+      - { code: ground_truth_validation, role: primary }
+      - { code: shadow_deployment, role: primary }
+      - { code: test_execution_log, role: supporting }
+
+  - code: independent_qualified_validation
+    theme: testing_validation
+    title: Independent and qualified validation
+    description: |
+      Validation is performed by personnel structurally independent of the
+      developer and possessing appropriate qualifications.
+    sort_seq: 20
+    coverage:
+      level: substantial
+      rationale: |
+        High-materiality agents require named validator distinct from developer.
+        Approval record captures both. Structured validation report.
+      customer_actions: |
+        Verity enforces the technical control but cannot guarantee organizational
+        independence or actuarial qualification — the insurer must ensure model
+        risk team is structurally separate from AI development and that pricing-
+        influencing agents have qualified actuarial validators.
+    feature_links:
+      - { code: developer_validator_separation, role: primary }
+      - { code: hitl_approval_records, role: primary }
+      - { code: ground_truth_validation, role: supporting }
+
+  - code: robustness_edge_cases
+    theme: testing_validation
+    title: Robustness across conditions including edge cases
+    description: |
+      AI performs reliably across conditions including edge cases. Adversarial
+      and out-of-distribution behaviors are anticipated and tested.
+    sort_seq: 30
+    coverage:
+      level: substantial
+      rationale: |
+        Ground truth datasets include edge cases designed by SMEs. Staging suite
+        includes adversarial test cases. Shadow deployment measures full
+        production distribution before promotion.
+      customer_actions: |
+        Formal adversarial robustness testing (red-teaming, prompt injection
+        simulation) not in standard pipeline (B6).
+    feature_links:
+      - { code: ground_truth_validation, role: primary }
+      - { code: staging_pytest_suite, role: supporting }
+      - { code: shadow_deployment, role: supporting }
+
+  - code: bias_testing_methodology
+    theme: testing_validation
+    title: Bias testing methodology
+    description: |
+      Methodology, dataset, and results of bias / fairness testing are
+      documented and producible on regulator request.
+    sort_seq: 40
+    coverage:
+      level: full
+      rationale: |
+        Complete methodology stored per version — dataset, demographic proxies,
+        statistical tests, results. Documentation directly producible for examiner.
+    feature_links:
+      - { code: ground_truth_validation, role: primary }
+      - { code: test_execution_log, role: primary }
+      - { code: validation_report_storage, role: supporting }
+
+  # --- fairness ---------------------------------------------------------------
+  - code: fairness_pre_deployment
+    theme: fairness
+    title: Fairness — pre-deployment testing
+    description: |
+      AI must be tested for unfair discrimination and proxy bias before promotion.
+    sort_seq: 10
+    coverage:
+      level: full
+      rationale: |
+        Fairness analysis is a mandatory validation step before promotion.
+        Metrics include statistical parity tests across SIC sector, geographic
+        region, revenue band. Enrichment data fields screened for protected
+        class proxies.
+    feature_links:
+      - { code: ground_truth_validation, role: primary }
+      - { code: test_execution_log, role: supporting }
+      - { code: validation_report_storage, role: supporting }
+
+  - code: fairness_production_monitoring
+    theme: fairness
+    title: Fairness — production monitoring
+    description: |
+      Ongoing monitoring of decision outputs for discriminatory outcomes
+      (disparate impact) with automated alerts.
+    sort_seq: 20
+    coverage:
+      level: gap
+      rationale: |
+        Decision data infrastructure is in place — outputs are logged with
+        full provenance — but the alerting / disparity-tracking logic is not built.
+      customer_actions: |
+        Production fairness monitoring module required (B1) — track decision
+        outcome distributions across demographic proxies in real time with
+        automated alerts when disparity metrics exceed thresholds.
+    feature_links:
+      - { code: immutable_decision_log, role: supporting }
+      - { code: drift_detection_agents, role: primary }
+
+  # --- monitoring_drift -------------------------------------------------------
+  - code: ongoing_performance_monitoring
+    theme: monitoring_drift
+    title: Ongoing performance monitoring
+    description: |
+      Performance is monitored continuously against benchmarks; override rates,
+      confidence distributions, and incident frequencies are tracked.
+    sort_seq: 10
+    coverage:
+      level: substantial
+      rationale: |
+        Champion metrics tracked in production. Override rate patterns,
+        confidence distributions tracked. Incident log captures performance
+        concerns. Decision log provides monitoring data infrastructure.
+      customer_actions: |
+        No built-in SPC engine. Automated drift detection with configurable
+        thresholds requires supplementary configuration (B2).
+    feature_links:
+      - { code: immutable_decision_log, role: primary }
+      - { code: model_invocation_log, role: supporting }
+      - { code: incident_log, role: supporting }
+
+  - code: model_drift_monitoring_with_thresholds
+    theme: monitoring_drift
+    title: Model drift monitoring with thresholds
+    description: |
+      Statistical drift detection with configurable control-chart thresholds
+      and alerting when boundaries are crossed.
+    sort_seq: 20
+    coverage:
+      level: partial
+      rationale: |
+        Override rate tracking, incident log, performance data in decision logs.
+        Drift detection agents planned (A1).
+      customer_actions: |
+        No automated drift detection with configurable control-chart thresholds (B2).
+        Data is available; alerting logic is not built.
+    feature_links:
+      - { code: immutable_decision_log, role: supporting }
+      - { code: drift_detection_agents, role: primary }
+      - { code: incident_log, role: supporting }
+
+  - code: outcome_back_testing
+    theme: monitoring_drift
+    title: Continuous monitoring & back-testing against realized outcomes
+    description: |
+      AI decisions are back-tested against eventual realized outcomes
+      (e.g. claim losses 12–24 months later).
+    sort_seq: 30
+    coverage:
+      level: partial
+      rationale: |
+        Production monitoring tracks metrics, override rates. Decision data
+        stored for analysis.
+      customer_actions: |
+        True back-testing (comparing AI decisions to loss outcomes 12–24 months
+        later) requires claims system integration and separate analytics
+        capability (B4).
+    feature_links:
+      - { code: immutable_decision_log, role: supporting }
+      - { code: model_invocation_log, role: supporting }
+
+  # --- change_management ------------------------------------------------------
+  - code: change_management_versioning
+    theme: change_management
+    title: Change management with versioning and approval
+    description: |
+      Every model change creates a new version, goes through documented change
+      management with approval, and preserves full change history.
+    sort_seq: 10
+    coverage:
+      level: full
+      rationale: |
+        Every change creates a new version record. State transitions require
+        approval records. Prompt changes versioned independently. Composition
+        frozen at promotion. Full change history permanently stored and queryable.
+    feature_links:
+      - { code: seven_state_lifecycle, role: primary }
+      - { code: hitl_approval_records, role: primary }
+      - { code: frozen_composition_at_promotion, role: primary }
+      - { code: lifecycle_event_audit, role: primary }
+      - { code: prompt_template_versioning, role: supporting }
+
+  # --- use_user_controls ------------------------------------------------------
+  - code: use_user_authorization_controls
+    theme: use_user_controls
+    title: Use and user authorization controls
+    description: |
+      Controls ensure the model is used only for its intended purpose by
+      authorized users; tool calls are restricted to declared capabilities.
+    sort_seq: 10
+    coverage:
+      level: full
+      rationale: |
+        Authority thresholds in metamodel enforced at runtime. Tool allowlists
+        restrict agent capabilities. HITL gates prevent action above thresholds
+        without human confirmation. Materiality tiers control gate requirements.
+        Quotas limit per-entity usage.
+    feature_links:
+      - { code: tool_authorization_checking, role: primary }
+      - { code: write_authority_per_tool, role: primary }
+      - { code: configurable_gates_per_materiality, role: supporting }
+      - { code: rate_limiting, role: supporting }
+      - { code: hitl_approval_records, role: supporting }
+
+  - code: human_oversight_intervention
+    theme: use_user_controls
+    title: Human oversight & intervention
+    description: |
+      Meaningful human oversight; ability to override or shut down AI decisions
+      and to roll back models in production.
+    sort_seq: 20
+    coverage:
+      level: full
+      rationale: |
+        HITL gates at promotion and per-decision above thresholds. Override
+        mechanism with reason-coded logging. Rollback to prior Champion in
+        less than 1 minute via single API call. Agent suspension without code
+        deployment via admin UI.
+    feature_links:
+      - { code: hitl_approval_records, role: primary }
+      - { code: champion_resolution_at_runtime, role: primary }
+      - { code: configurable_gates_per_materiality, role: supporting }
+      - { code: lifecycle_event_audit, role: supporting }
+
+  - code: risk_proportionate_controls
+    theme: use_user_controls
+    title: Risk-proportionate controls
+    description: |
+      Controls are commensurate with risk — high-materiality systems get full
+      governance; low-materiality systems get lightweight tracking.
+    sort_seq: 30
+    coverage:
+      level: full
+      rationale: |
+        Materiality tiers (High / Medium / Low) with configurable gates per tier.
+        High — full 7-state lifecycle with 3 HITL gates. Medium — reduced gates.
+        Low — version tracking only. Quotas per-entity.
+    feature_links:
+      - { code: materiality_tier_classification, role: primary }
+      - { code: configurable_gates_per_materiality, role: primary }
+      - { code: rate_limiting, role: supporting }
+
+  # --- transparency_explainability --------------------------------------------
+  - code: ai_transparency_descriptions
+    theme: transparency_explainability
+    title: AI transparency — plain-language descriptions
+    description: |
+      Plain-language descriptions of AI use are available for regulators and
+      policyholders, including each agent's purpose, inputs, outputs, limitations.
+    sort_seq: 10
+    coverage:
+      level: full
+      rationale: |
+        Metamodel stores human-readable descriptions of every agent's purpose,
+        inputs, outputs, limitations. Auto-documentation generator produces
+        plain-language agent capability documents.
+    feature_links:
+      - { code: agent_version_registration, role: primary }
+      - { code: task_version_registration, role: primary }
+      - { code: model_inventory_report, role: supporting }
+
+  - code: decision_explainability
+    theme: transparency_explainability
+    title: Decision-level explainability
+    description: |
+      AI decisions are explainable in specific, plain-language terms — citing
+      the factors and the responsible agent.
+    sort_seq: 20
+    coverage:
+      level: full
+      rationale: |
+        Decision agents produce structured reasoning summaries per submission.
+        System auto-generates adverse action summaries citing specific risk
+        factors, agent version, approving underwriter. Stored in Vault linked
+        to submission.
+    feature_links:
+      - { code: immutable_decision_log, role: primary }
+      - { code: model_invocation_log, role: primary }
+      - { code: detail_level_control, role: supporting }
+      - { code: execution_context_threading, role: supporting }
+
+  - code: adverse_action_explainability
+    theme: transparency_explainability
+    title: Adverse action explainability
+    description: |
+      Adverse action notices include specific, understandable reasons drawn
+      from the actual decision logic, not post-hoc reconstruction.
+    sort_seq: 30
+    coverage:
+      level: full
+      rationale: |
+        Decision agents produce structured adverse action summaries citing
+        specific risk factors. Underwriter reviews before inclusion in notice.
+        Reasoning from actual decision logic, not post-hoc.
+    feature_links:
+      - { code: immutable_decision_log, role: primary }
+      - { code: model_invocation_log, role: primary }
+      - { code: detail_level_control, role: supporting }
+
+  # --- privacy_security -------------------------------------------------------
+  - code: privacy_data_security
+    theme: privacy_security
+    title: Privacy & data security
+    description: |
+      AI complies with state data privacy and security laws; PII handling and
+      data classification controls are enforced.
+    sort_seq: 10
+    coverage:
+      level: substantial
+      rationale: |
+        Four-tier data classification governs agent / tool access. Tier 3 / 4
+        data cannot go to external MCP servers without explicit authorization.
+        All MCP tool calls logged with data classification assessed. Redaction
+        pipeline scrubs PII before storage.
+      customer_actions: |
+        No automated PII detection in unstructured document inputs (B3).
+        Classification depends on document-type tier, not real-time content scanning.
+    feature_links:
+      - { code: detail_level_control, role: primary }
+      - { code: mcp_server_trust_registry, role: supporting }
+      - { code: tool_authorization_checking, role: supporting }
+
+  # --- third_party_oversight --------------------------------------------------
+  - code: third_party_vendor_oversight
+    theme: third_party_oversight
+    title: Third-party vendor oversight
+    description: |
+      Third-party AI / vendors are subject to equivalent governance — trust
+      assessments, allowed-tools registries, decision logging on every call.
+    sort_seq: 10
+    coverage:
+      level: substantial
+      rationale: |
+        MCP server trust registry with trust level, allowed tools, last
+        assessment date. All external tool calls logged with authorization
+        checks. Claude API registered as third-party vendor.
+      customer_actions: |
+        Formal third-party AI vendor risk assessment documents (Anthropic
+        model card review, SOC 2, data processing agreement) are supplementary.
+        Contractual terms (audit rights, cooperation clauses) are customer's
+        procurement responsibility.
+    feature_links:
+      - { code: mcp_server_trust_registry, role: primary }
+      - { code: tool_authorization_checking, role: supporting }
+      - { code: tool_calls_audit, role: supporting }
+      - { code: mcp_client, role: supporting }
+
+  # --- consumer_protection ----------------------------------------------------
+  - code: consumer_ai_notification
+    theme: consumer_protection
+    title: Consumer notification of AI use
+    description: |
+      Consumers are informed when AI is used in decisions affecting them.
+    sort_seq: 10
+    coverage:
+      level: partial
+      rationale: |
+        Decision records are available and queryable for disclosure. Reasoning
+        text and risk factors stored per decision.
+      customer_actions: |
+        The notification mechanism (when, how, what to tell consumers) is
+        app-level and business-process. Verity stores the evidence needed
+        for disclosure but doesn't generate consumer-facing notices.
+    feature_links:
+      - { code: immutable_decision_log, role: supporting }
+      - { code: detail_level_control, role: supporting }
+
+  - code: utpa_compliance_ai
+    theme: consumer_protection
+    title: UTPA compliance for AI decisions
+    description: |
+      AI decisions comply with the Unfair Trade Practices Act — including no
+      AI-only adverse decisions and explainability for adverse outcomes.
+    sort_seq: 20
+    coverage:
+      level: substantial
+      rationale: |
+        HITL prevents AI-only adverse decisions. Explainability for adverse
+        outcomes. Lifecycle prevents untested AI reaching production.
+      customer_actions: |
+        Substantive UTPA compliance (rate filings, form approvals) is the
+        customer's legal responsibility.
+    feature_links:
+      - { code: hitl_approval_records, role: primary }
+      - { code: configurable_gates_per_materiality, role: supporting }
+
+  - code: insurance_law_compliance
+    theme: consumer_protection
+    title: Compliance with insurance laws (rate filings, etc.)
+    description: |
+      AI complies with all applicable insurance laws including rate filing
+      requirements; AI-assisted rating decisions are consistent with filed rates.
+    sort_seq: 30
+    coverage:
+      level: partial
+      rationale: |
+        Lifecycle and governance processes support compliance. Materiality
+        tier and regulatory notes help flag compliance-sensitive agents.
+      customer_actions: |
+        Verity does not contain insurance law compliance logic. Insurer must
+        separately ensure AI-assisted rating decisions are consistent with
+        filed rates.
+    feature_links:
+      - { code: materiality_tier_classification, role: supporting }
+      - { code: configurable_gates_per_materiality, role: supporting }
+
+  # --- examination_readiness --------------------------------------------------
+  - code: regulatory_examination_readiness
+    theme: examination_readiness
+    title: Regulatory examination readiness
+    description: |
+      Prepared to produce the documentation and evidence required during
+      market conduct examinations — covering NAIC Evaluation Tool Exhibits A–D.
+    sort_seq: 10
+    coverage:
+      level: substantial
+      rationale: |
+        Model Inventory Report, regulatory evidence packages, queryable decision
+        audit (execution_context_id), test execution logs — covers all 4 exhibits
+        of the NAIC Evaluation Tool.
+      customer_actions: |
+        Formatting to match specific Evaluation Tool exhibit templates may
+        need customization.
+    feature_links:
+      - { code: model_inventory_report, role: primary }
+      - { code: regulatory_evidence_package, role: primary }
+      - { code: test_execution_log, role: supporting }
+      - { code: execution_context_threading, role: supporting }
+
+  - code: annual_compliance_certification
+    theme: examination_readiness
+    title: Annual compliance certification
+    description: |
+      Annual certification to the regulator that AI systems comply with
+      applicable requirements (CO Sec. 10-3-1104.9(5); CT MC-25).
+    sort_seq: 20
+    coverage:
+      level: partial
+      rationale: |
+        Verity produces the underlying evidence — fairness reports, model
+        inventory, data source registry. Evidence packages generated from trust DB.
+      customer_actions: |
+        Certification workflow (extract reports → legal review → executive
+        sign-off → filing) is a customer process.
+    feature_links:
+      - { code: regulatory_evidence_package, role: primary }
+      - { code: model_inventory_report, role: supporting }
+      - { code: validation_report_storage, role: supporting }
+
+  # --- data_lineage_provenance ------------------------------------------------
+  - code: data_lineage_provenance
+    theme: data_lineage_provenance
+    title: Data lineage & provenance tracking
+    description: |
+      Full data lineage and provenance — from input source through agent
+      reasoning through write target — is captured and queryable.
+    sort_seq: 10
+    coverage:
+      level: full
+      rationale: |
+        Source resolutions per-binding audit (connector, method, fetch_id,
+        payload_bytes, duration). Target writes with handles. Vault document
+        lineage (parent → child). Execution context threading across workflows.
+    feature_links:
+      - { code: source_resolutions_audit, role: primary }
+      - { code: target_writes_audit, role: primary }
+      - { code: tool_calls_audit, role: primary }
+      - { code: execution_context_threading, role: primary }
+      - { code: edms_vault_connector, role: supporting }
+      - { code: derived_document_creation, role: supporting }
+
+  # --- board_reporting --------------------------------------------------------
+  - code: board_senior_mgmt_reporting
+    theme: board_reporting
+    title: Board & senior management reporting
+    description: |
+      Regular reports on model risk to senior management and the board.
+    sort_seq: 10
+    coverage:
+      level: substantial
+      rationale: |
+        Model Inventory Report designed for Model Risk Committee review.
+        Incident log feeds senior management reporting. Regulatory evidence
+        packages exportable.
+      customer_actions: |
+        No pre-formatted board-level dashboard or report template. Insurer's
+        model risk function must design board reporting format (B5).
+    feature_links:
+      - { code: model_inventory_report, role: primary }
+      - { code: incident_log, role: supporting }
+      - { code: regulatory_evidence_package, role: supporting }
+
+
+# -----------------------------------------------------------------------------
+# REGULATORY PROVISIONS — what each framework actually says.
+#
+# Each provision is one citation within one framework. The matrix's 47 rows
+# produce ~47 provisions; cross-framework matrix rows (44–47) produce one
+# provision in EACH cited framework so the bridge can attribute coverage
+# correctly per framework.
+#
+# `canonical_links` = bridge to canonical_requirement(s) with match_strength.
+# -----------------------------------------------------------------------------
+provisions:
+
+  # ----- SR 11-7 (12 provisions) ---------------------------------------------
+  - framework: SR_11_7
+    citation: "Sec. I — Model inventory & registration"
+    title: Model inventory & registration
+    text: All models must be identified, catalogued, and tracked.
+    sort_seq: 1
+    canonical_links:
+      - { canonical: model_inventory_registration, match_strength: 1.00 }
+
+  - framework: SR_11_7
+    citation: "Sec. I — Model ownership & accountability"
+    title: Model ownership & accountability
+    text: Each model must have a designated owner.
+    sort_seq: 2
+    canonical_links:
+      - { canonical: model_ownership_accountability, match_strength: 1.00 }
+
+  - framework: SR_11_7
+    citation: "Sec. II.A — Conceptual soundness"
+    title: Conceptual soundness
+    text: Model design must be documented — theory, assumptions, logic.
+    sort_seq: 3
+    canonical_links:
+      - { canonical: model_conceptual_soundness, match_strength: 1.00 }
+
+  - framework: SR_11_7
+    citation: "Sec. II.A — Data quality & appropriateness"
+    title: Data quality & appropriateness
+    text: Input data must be assessed for quality and relevance.
+    sort_seq: 4
+    canonical_links:
+      - { canonical: input_data_quality, match_strength: 1.00 }
+
+  - framework: SR_11_7
+    citation: "Sec. II.B — Pre-deployment testing & validation"
+    title: Pre-deployment testing & validation
+    text: Models must be tested before deployment.
+    sort_seq: 5
+    canonical_links:
+      - { canonical: pre_deployment_testing, match_strength: 1.00 }
+
+  - framework: SR_11_7
+    citation: "Sec. II.B — Independent validation"
+    title: Independent validation
+    text: Validation must be performed by staff independent of development.
+    sort_seq: 6
+    canonical_links:
+      - { canonical: independent_qualified_validation, match_strength: 1.00 }
+
+  - framework: SR_11_7
+    citation: "Sec. II.C — Ongoing monitoring"
+    title: Ongoing monitoring
+    text: Performance must be monitored continuously against benchmarks.
+    sort_seq: 7
+    canonical_links:
+      - { canonical: ongoing_performance_monitoring, match_strength: 1.00 }
+
+  - framework: SR_11_7
+    citation: "Sec. II.C — Model change management"
+    title: Model change management
+    text: Any change must go through defined change management with approval.
+    sort_seq: 8
+    canonical_links:
+      - { canonical: change_management_versioning, match_strength: 1.00 }
+
+  - framework: SR_11_7
+    citation: "Sec. II.A — Limitations documentation"
+    title: Model limitations documentation
+    text: Known limitations and conditions under which model may fail must be documented.
+    sort_seq: 9
+    canonical_links:
+      - { canonical: model_limitations_documentation, match_strength: 1.00 }
+
+  - framework: SR_11_7
+    citation: "Sec. I — Use and user controls"
+    title: Use and user controls
+    text: Controls must ensure model used only for intended purpose by authorized users.
+    sort_seq: 10
+    canonical_links:
+      - { canonical: use_user_authorization_controls, match_strength: 1.00 }
+
+  - framework: SR_11_7
+    citation: "Sec. III — Vendor model oversight"
+    title: Vendor model oversight
+    text: Third-party models subject to equivalent governance.
+    sort_seq: 11
+    canonical_links:
+      - { canonical: third_party_vendor_oversight, match_strength: 1.00 }
+
+  - framework: SR_11_7
+    citation: "Sec. IV — Board & senior management reporting"
+    title: Board & senior management reporting
+    text: Regular reports on model risk to senior management and board.
+    sort_seq: 12
+    canonical_links:
+      - { canonical: board_senior_mgmt_reporting, match_strength: 1.00 }
+
+  # ----- NAIC AI Bulletin (15 provisions) ------------------------------------
+  - framework: NAIC_AI_BULLETIN
+    citation: "Sec. III.A — Accountability"
+    title: Accountability
+    text: Insurers accountable for all AI decisions, including third-party.
+    sort_seq: 1
+    canonical_links:
+      - { canonical: model_ownership_accountability, match_strength: 1.00 }
+
+  - framework: NAIC_AI_BULLETIN
+    citation: "Sec. III.B — Compliance with insurance laws"
+    title: Compliance with insurance laws
+    text: AI must comply with all applicable insurance laws including rate filing.
+    sort_seq: 2
+    canonical_links:
+      - { canonical: insurance_law_compliance, match_strength: 1.00 }
+
+  - framework: NAIC_AI_BULLETIN
+    citation: "Sec. III.C — Transparency"
+    title: Transparency
+    text: Plain-language description of AI use for regulators and policyholders.
+    sort_seq: 3
+    canonical_links:
+      - { canonical: ai_transparency_descriptions, match_strength: 1.00 }
+
+  - framework: NAIC_AI_BULLETIN
+    citation: "Sec. III.D — Explainability"
+    title: Explainability
+    text: AI decisions must be explainable in specific, plain-language terms.
+    sort_seq: 4
+    canonical_links:
+      - { canonical: decision_explainability, match_strength: 1.00 }
+
+  - framework: NAIC_AI_BULLETIN
+    citation: "Sec. III.E — Fairness, pre-deployment testing"
+    title: Fairness — pre-deployment testing
+    text: AI must not unfairly discriminate; must test for proxy discrimination.
+    sort_seq: 5
+    canonical_links:
+      - { canonical: fairness_pre_deployment, match_strength: 1.00 }
+
+  - framework: NAIC_AI_BULLETIN
+    citation: "Sec. III.E — Fairness, production monitoring"
+    title: Fairness — production monitoring
+    text: Ongoing monitoring for discriminatory outcomes.
+    sort_seq: 6
+    canonical_links:
+      - { canonical: fairness_production_monitoring, match_strength: 1.00 }
+
+  - framework: NAIC_AI_BULLETIN
+    citation: "Sec. III.F — Privacy & data security"
+    title: Privacy & data security
+    text: AI must comply with state data privacy and security laws.
+    sort_seq: 7
+    canonical_links:
+      - { canonical: privacy_data_security, match_strength: 1.00 }
+
+  - framework: NAIC_AI_BULLETIN
+    citation: "Sec. III.G — Robustness"
+    title: Robustness
+    text: AI must perform reliably across conditions including edge cases.
+    sort_seq: 8
+    canonical_links:
+      - { canonical: robustness_edge_cases, match_strength: 1.00 }
+
+  - framework: NAIC_AI_BULLETIN
+    citation: "Sec. III.H — Human oversight & intervention"
+    title: Human oversight & intervention
+    text: Meaningful human oversight; ability to override or shut down.
+    sort_seq: 9
+    canonical_links:
+      - { canonical: human_oversight_intervention, match_strength: 1.00 }
+
+  - framework: NAIC_AI_BULLETIN
+    citation: "Sec. 3.1 — Written AIS Program"
+    title: Written AIS Program
+    text: Documented AI program governing all AI use in regulated practices.
+    sort_seq: 10
+    canonical_links:
+      - { canonical: written_ais_program, match_strength: 1.00 }
+      - { canonical: model_inventory_registration, match_strength: 0.40 }
+
+  - framework: NAIC_AI_BULLETIN
+    citation: "Sec. 3.3 — Consumer notification of AI use"
+    title: Consumer notification of AI use
+    text: Inform consumers when AI is used in decisions affecting them.
+    sort_seq: 11
+    canonical_links:
+      - { canonical: consumer_ai_notification, match_strength: 1.00 }
+
+  - framework: NAIC_AI_BULLETIN
+    citation: "Sec. 3.2 — Risk-proportionate controls"
+    title: Risk-proportionate controls
+    text: Controls commensurate with risk (5-factor NAIC assessment).
+    sort_seq: 12
+    canonical_links:
+      - { canonical: risk_proportionate_controls, match_strength: 1.00 }
+
+  - framework: NAIC_AI_BULLETIN
+    citation: "Sec. 3.4 — Third-party vendor management program"
+    title: Third-party vendor management program
+    text: Documented standards for assessing, acquiring, using third-party AI.
+    sort_seq: 13
+    canonical_links:
+      - { canonical: third_party_vendor_oversight, match_strength: 1.00 }
+
+  - framework: NAIC_AI_BULLETIN
+    citation: "Sec. 4 — Regulatory examination readiness"
+    title: Regulatory examination readiness
+    text: Prepared to produce documentation during market conduct examinations.
+    sort_seq: 14
+    canonical_links:
+      - { canonical: regulatory_examination_readiness, match_strength: 1.00 }
+
+  - framework: NAIC_AI_BULLETIN
+    citation: "Sec. 1 — UTPA compliance for AI decisions"
+    title: UTPA compliance for AI decisions
+    text: AI decisions must comply with Unfair Trade Practices Act.
+    sort_seq: 15
+    canonical_links:
+      - { canonical: utpa_compliance_ai, match_strength: 1.00 }
+
+  # ----- NAIC Evaluation Tool ------------------------------------------------
+  - framework: NAIC_EVAL_TOOL
+    citation: "Exhibit A — Breadth of AI Adoption"
+    title: Breadth of AI Adoption (enterprise-wide inventory)
+    text: What AI are you using, and where? Enterprise-wide AI system inventory.
+    sort_seq: 1
+    canonical_links:
+      - { canonical: model_inventory_registration, match_strength: 1.00 }
+
+  # ----- CO SB21-169 (7 provisions) ------------------------------------------
+  - framework: CO_SB21_169
+    citation: "Sec. 10-3-1104.9(3) — Proxy screening (input level)"
+    title: Prohibition on unfair discrimination — proxy screening
+    text: Input-level — may not use proxies for protected classes.
+    sort_seq: 1
+    canonical_links:
+      - { canonical: proxy_discrimination_screening, match_strength: 1.00 }
+
+  - framework: CO_SB21_169
+    citation: "Sec. 10-3-1104.9(3) — Output disparate impact"
+    title: Prohibition — output disparate impact
+    text: Output-level — outcomes must not produce disparate impact.
+    sort_seq: 2
+    canonical_links:
+      - { canonical: fairness_production_monitoring, match_strength: 1.00 }
+
+  - framework: CO_SB21_169
+    citation: "Sec. 10-3-1104.9(4) — External data & algorithm governance"
+    title: External data & algorithm governance
+    text: List of external data sources and algorithms, producible on request.
+    sort_seq: 3
+    canonical_links:
+      - { canonical: external_data_algorithm_governance, match_strength: 1.00 }
+
+  - framework: CO_SB21_169
+    citation: "Sec. 10-3-1104.9(5) — Annual certification"
+    title: Annual certification
+    text: Annual certification to commissioner that AI complies.
+    sort_seq: 4
+    canonical_links:
+      - { canonical: annual_compliance_certification, match_strength: 1.00 }
+
+  - framework: CO_SB21_169
+    citation: "Sec. 10-3-1104.9(4)(b) — Data governance documentation"
+    title: Data governance documentation
+    text: Documented governance policies for external data.
+    sort_seq: 5
+    canonical_links:
+      - { canonical: data_governance_documentation, match_strength: 1.00 }
+
+  - framework: CO_SB21_169
+    citation: "Sec. 10-3-1104.9(4)(a) — Bias testing methodology"
+    title: Bias testing methodology
+    text: Describe methodology and produce results on request.
+    sort_seq: 6
+    canonical_links:
+      - { canonical: bias_testing_methodology, match_strength: 1.00 }
+
+  - framework: CO_SB21_169
+    citation: "Sec. 10-3-1104.9(6) — Adverse action explainability"
+    title: Adverse action explainability
+    text: Adverse action notice must include specific understandable reasons.
+    sort_seq: 7
+    canonical_links:
+      - { canonical: adverse_action_explainability, match_strength: 1.00 }
+
+  # ----- ORSA / ASOP 56 / CAS (9 provisions) ---------------------------------
+  - framework: ORSA_ASOP_56_CAS
+    citation: "ORSA Sec. 2.3 — Model risk identification & classification"
+    title: Model risk identification & classification
+    text: Identify and classify models by risk level for ERM purposes.
+    sort_seq: 1
+    canonical_links:
+      - { canonical: model_risk_identification_classification, match_strength: 1.00 }
+
+  - framework: ORSA_ASOP_56_CAS
+    citation: "ASOP 56 Sec. 3.4 — Model documentation"
+    title: Model documentation
+    text: Documentation sufficient for a qualified reviewer.
+    sort_seq: 2
+    canonical_links:
+      - { canonical: model_documentation_for_qualified_review, match_strength: 1.00 }
+
+  - framework: ORSA_ASOP_56_CAS
+    citation: "ASOP 56 Sec. 3.6 — Validation by qualified reviewer"
+    title: Validation by qualified reviewer
+    text: Named validator separate from developer with appropriate qualifications.
+    sort_seq: 3
+    canonical_links:
+      - { canonical: independent_qualified_validation, match_strength: 1.00 }
+
+  - framework: ORSA_ASOP_56_CAS
+    citation: "ASOP 56 Sec. 3.8 — Disclosure of limitations"
+    title: Disclosure of limitations
+    text: Limitations and degradation conditions disclosed proactively.
+    sort_seq: 4
+    canonical_links:
+      - { canonical: model_limitations_documentation, match_strength: 1.00 }
+
+  - framework: ORSA_ASOP_56_CAS
+    citation: "ORSA Sec. 3.5 — Model governance structure"
+    title: Model governance structure
+    text: Governance structure — committee, roles, escalation.
+    sort_seq: 5
+    canonical_links:
+      - { canonical: ai_governance_organizational_structure, match_strength: 1.00 }
+
+  - framework: ORSA_ASOP_56_CAS
+    citation: "CAS Sec. 4 / ORSA Sec. 2.3 — Continuous monitoring & back-testing"
+    title: Continuous monitoring & back-testing
+    text: Comparing decisions to realized outcomes over 12–24 months.
+    sort_seq: 6
+    canonical_links:
+      - { canonical: outcome_back_testing, match_strength: 1.00 }
+
+  - framework: ORSA_ASOP_56_CAS
+    citation: "CAS Sec. 2 — AI accountability & ownership"
+    title: AI accountability & ownership
+    text: AI ownership enforced; audit trail links AI outcome to named approver.
+    sort_seq: 7
+    canonical_links:
+      - { canonical: model_ownership_accountability, match_strength: 1.00 }
+
+  - framework: ORSA_ASOP_56_CAS
+    citation: "CAS Sec. 3 — Bias prevention & fairness"
+    title: Bias prevention & fairness
+    text: Methodology, results, proxy screening for fairness.
+    sort_seq: 8
+    canonical_links:
+      - { canonical: fairness_pre_deployment, match_strength: 0.50 }
+      - { canonical: bias_testing_methodology, match_strength: 0.50 }
+      - { canonical: proxy_discrimination_screening, match_strength: 0.40 }
+
+  - framework: ORSA_ASOP_56_CAS
+    citation: "CAS Sec. 5 / ASOP 56 Sec. 3.7 — Third-party AI oversight"
+    title: Third-party AI oversight
+    text: Use-case-specific vendor evaluation for third-party AI.
+    sort_seq: 9
+    canonical_links:
+      - { canonical: third_party_vendor_oversight, match_strength: 1.00 }
+
+  # ----- Cross-framework rows (44-47) ----------------------------------------
+  # These attach to existing frameworks via their NAIC and SR 11-7 citations.
+  # CT MC-25 and NY DFS 2024-7 are out of scope for the seeded framework set.
+
+  - framework: SR_11_7
+    citation: "Sec. II.C — Drift monitoring with thresholds"
+    title: Model drift monitoring with thresholds (SR 11-7)
+    text: Drift monitoring with control-chart thresholds.
+    sort_seq: 13
+    canonical_links:
+      - { canonical: model_drift_monitoring_with_thresholds, match_strength: 1.00 }
+
+  - framework: NAIC_AI_BULLETIN
+    citation: "Sec. 4 — Drift monitoring with thresholds"
+    title: Model drift monitoring with thresholds (NAIC)
+    text: Drift monitoring expectation in market conduct exams.
+    sort_seq: 16
+    canonical_links:
+      - { canonical: model_drift_monitoring_with_thresholds, match_strength: 1.00 }
+
+  - framework: SR_11_7
+    citation: "Sec. II.A — Data lineage & provenance"
+    title: Data lineage & provenance (SR 11-7)
+    text: Full data lineage required.
+    sort_seq: 14
+    canonical_links:
+      - { canonical: data_lineage_provenance, match_strength: 1.00 }
+
+  - framework: NAIC_AI_BULLETIN
+    citation: "Sec. 3.2 — Data lineage & provenance"
+    title: Data lineage & provenance (NAIC)
+    text: Full data lineage required.
+    sort_seq: 17
+    canonical_links:
+      - { canonical: data_lineage_provenance, match_strength: 1.00 }

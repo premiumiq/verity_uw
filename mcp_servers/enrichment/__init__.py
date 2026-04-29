@@ -11,11 +11,6 @@ name, with a deterministic synthetic fallback (seeded by the company name)
 for unknown names. Same company name always produces the same output —
 good for demos and audit reruns.
 
-This MCP server replaces the in-process Python tool
-`uw_demo/app/tools/external_enrichment.py` as of Phase 4d-2 of FC-14.
-The migration demonstrates Verity's ability to govern in-process and
-MCP-sourced tools under the same registry + decision-log contract.
-
 Launch standalone:
     python -m mcp_servers.enrichment.server
 

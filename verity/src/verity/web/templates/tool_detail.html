@@ -36,7 +36,7 @@
             <div class="verity-detail-label">Description</div>
             <div class="verity-detail-value">{{ tool.description }}</div>
 
-            {# Transport — added in Phase 4f. Distinguishes in-process Python
+            {# Transport — Distinguishes in-process Python
                tools from MCP-sourced tools; MCP tools link to their server. #}
             {% set t_transport = tool.transport if tool.transport else 'python_inprocess' %}
             {% set t_is_mcp = t_transport.startswith('mcp_') %}

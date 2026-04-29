@@ -19,7 +19,7 @@ from fastapi import APIRouter, HTTPException, Query
 from psycopg.errors import Error as PsycopgError
 
 from verity.models.decision import (
-    AuditTrailEntry, DecisionLog, DecisionLogDetail, OverrideLogCreate,
+    AuditTrailEntry, DecisionLog, DecisionLogDetail,
 )
 
 
@@ -75,15 +75,8 @@ def build_decisions_router(verity) -> APIRouter:
         correlation id is caller-supplied and unique per invocation."""
         return await verity.get_audit_trail_by_run(workflow_run_id)
 
-    @router.post("/overrides")
-    async def record_override(override: OverrideLogCreate) -> dict:
-        """Record a human override of an AI decision. The override
-        links to decision_log_id (which in turn links to an
-        execution_context), so no separate business keys are
-        needed on the override row itself."""
-        try:
-            return await verity.record_override(override)
-        except (ValueError, PsycopgError) as exc:
-            raise _as_400(exc)
+    # POST /decisions/.../overrides — retired alongside the
+    # override_log table. Per-field HITL overrides go to
+    # POST /api/v1/runs/{decision_log_id}/overrides instead.
 
     return router

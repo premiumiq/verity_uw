@@ -1,0 +1,5 @@
+{# HTMX swap target for a single field-row.
+   The edit endpoint renders this with `field` + `sub` in the
+   context; HTMX replaces the outer .verity-field via outerHTML. #}
+{% from 'partials/_field_row.html' import field_row %}
+{{ field_row(field, sub.id) }}

@@ -1,0 +1,19 @@
+{#
+  Read-only banner shown on every /admin/compliance/* page.
+  (Used to live alongside a horizontal tab sub-nav; sub-nav is gone — sidebar
+  links replaced it for consistency with the rest of the admin.)
+#}
+<div class="verity-card" style="margin-bottom: 16px; border-left: 3px solid var(--verity-blue-deep); background: var(--verity-blue-pale);">
+  <div style="display: flex; align-items: flex-start; gap: 12px; padding: 6px 4px;">
+    <span style="font-size: 1.05rem;">ⓘ</span>
+    <div style="font-size: 0.82rem; line-height: 1.5; color: var(--verity-text);">
+      <strong>Read-only.</strong>
+      Source of truth: <code>verity/src/verity/setup/compliance_seed_data.yaml</code>
+      (regulatory + canonical + bridges),
+      <code>compliance_seed_static.yaml</code> (frameworks + features hierarchy), and
+      <code>compliance_seed_reports.yaml</code> (mart_field + reports).
+      To edit: change the YAML, re-run
+      <code>verity compliance seed-static / seed-data / seed-reports</code>, refresh.
+    </div>
+  </div>
+</div>

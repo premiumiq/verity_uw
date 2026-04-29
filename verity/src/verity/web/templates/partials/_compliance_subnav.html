@@ -1,0 +1,48 @@
+{#
+  COMPLIANCE SUB-NAV — horizontal pill bar across all /admin/compliance/* pages.
+
+  Caller passes `subnav_active` ∈ {overview, frameworks, canonicals, features, bridges}
+  Style follows the existing /admin styling — no new CSS rules required.
+#}
+<div style="display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--verity-border); padding-bottom: 0;">
+  {% set tabs = [
+      ('overview',   'Overview',           '/admin/compliance/'),
+      ('frameworks', 'Regulatory',         '/admin/compliance/frameworks'),
+      ('canonicals', 'Canonical Reqs',     '/admin/compliance/canonicals'),
+      ('features',   'Engineering',        '/admin/compliance/features'),
+      ('bridges',    'Bridges',            '/admin/compliance/bridges'),
+  ] %}
+  {% for code, label, url in tabs %}
+    {% if subnav_active == code %}
+      <a href="{{ url }}"
+         style="padding: 8px 16px; border-bottom: 2px solid var(--verity-blue-deep);
+                color: var(--verity-blue-deep); font-weight: 600; text-decoration: none;
+                font-size: 0.85rem; margin-bottom: -1px;">
+        {{ label }}
+      </a>
+    {% else %}
+      <a href="{{ url }}"
+         style="padding: 8px 16px; border-bottom: 2px solid transparent;
+                color: var(--verity-text-light); text-decoration: none;
+                font-size: 0.85rem; margin-bottom: -1px;"
+         onmouseover="this.style.color='var(--verity-text)'"
+         onmouseout="this.style.color='var(--verity-text-light)'">
+        {{ label }}
+      </a>
+    {% endif %}
+  {% endfor %}
+</div>
+
+<div class="verity-card" style="margin-bottom: 16px; border-left: 3px solid var(--verity-blue-deep); background: var(--verity-blue-pale);">
+  <div style="display: flex; align-items: flex-start; gap: 12px; padding: 6px 4px;">
+    <span style="font-size: 1.05rem;">ⓘ</span>
+    <div style="font-size: 0.82rem; line-height: 1.5; color: var(--verity-text);">
+      <strong>Read-only.</strong>
+      Source of truth: <code>verity/src/verity/setup/compliance_seed_data.yaml</code>
+      (regulatory + canonical + bridges) and
+      <code>compliance_seed_static.yaml</code> (frameworks + features hierarchy).
+      To edit: change the YAML, run
+      <code>verity compliance seed-data</code>, refresh.
+    </div>
+  </div>
+</div>

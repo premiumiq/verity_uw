@@ -1,0 +1,417 @@
+# =============================================================================
+# Verity Compliance — Reports + mart_field Seed
+# =============================================================================
+# Source of truth for:
+#   verity_analytics.mart_field
+#   verity_compliance.requirement_evidence_field
+#   verity_compliance.report_definition
+#   verity_compliance.report_requirement
+#
+# Edit freely; re-running `verity compliance seed-reports` UPSERTs by
+# (table_name, column_name) for mart_field and by code for reports.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# mart_field — every column reachable from a report.
+# Columns are grouped by view; each entry must match an actual column in
+# verity_analytics.<view>.  semantic_type drives downstream rendering.
+# -----------------------------------------------------------------------------
+mart_fields:
+
+  # ---- v_entity_version --------------------------------------------------
+  - { table: v_entity_version, column: entity_type,         type: category,   description: "agent | task | prompt", sort: 1 }
+  - { table: v_entity_version, column: entity_name,         type: text,       description: "Entity registered code name",   sort: 2 }
+  - { table: v_entity_version, column: entity_display_name, type: text,       description: "Human-readable display name",   sort: 3 }
+  - { table: v_entity_version, column: entity_description,  type: text,       description: "Plain-language purpose",        sort: 4 }
+  - { table: v_entity_version, column: version_label,       type: text,       description: "Three-part version (e.g. 1.0.0)", sort: 5 }
+  - { table: v_entity_version, column: lifecycle_state,     type: category,   description: "draft|candidate|staging|shadow|challenger|champion|deprecated", sort: 6 }
+  - { table: v_entity_version, column: channel,             type: category,   description: "Deployment channel of this version", sort: 7 }
+  - { table: v_entity_version, column: materiality_tier,    type: category,   description: "high|medium|low — risk classification", sort: 8 }
+  - { table: v_entity_version, column: owner_name,          type: text,       description: "Named owner of the entity", is_pii: true, sort: 9 }
+  - { table: v_entity_version, column: owner_email,         type: text,       description: "Owner email", is_pii: true, sort: 10 }
+  - { table: v_entity_version, column: domain,              type: category,   description: "Business domain", sort: 11 }
+  - { table: v_entity_version, column: created_at,          type: date,       description: "When this version was registered", sort: 12 }
+
+  # ---- v_application_entity ---------------------------------------------
+  - { table: v_application_entity, column: application_name,         type: identifier, description: "Application registry name", sort: 1 }
+  - { table: v_application_entity, column: application_display_name, type: text,       description: "Application display label", sort: 2 }
+  - { table: v_application_entity, column: entity_type,              type: category,   description: "agent|task|prompt|tool|mcp_server", sort: 3 }
+  - { table: v_application_entity, column: entity_id,                type: identifier, description: "FK to v_entity_version.entity_id", sort: 4 }
+
+  # ---- v_lifecycle_event ------------------------------------------------
+  - { table: v_lifecycle_event, column: entity_type,        type: category,   description: "agent|task|prompt|tool|mcp_server", sort: 1 }
+  - { table: v_lifecycle_event, column: entity_version_id,  type: identifier, description: "Which entity_version was promoted/transitioned", sort: 2 }
+  - { table: v_lifecycle_event, column: gate_type,          type: category,   description: "Type of gate (e.g. 'staging_promotion')", sort: 3 }
+  - { table: v_lifecycle_event, column: from_state,         type: category,   description: "Lifecycle state before transition", sort: 4 }
+  - { table: v_lifecycle_event, column: to_state,           type: category,   description: "Lifecycle state after transition",  sort: 5 }
+  - { table: v_lifecycle_event, column: approver_name,      type: text,       description: "Who approved this transition", is_pii: true, sort: 6 }
+  - { table: v_lifecycle_event, column: approver_role,      type: category,   description: "Approver role/title", sort: 7 }
+  - { table: v_lifecycle_event, column: rationale,          type: text,       description: "Approval rationale narrative", sort: 8 }
+  - { table: v_lifecycle_event, column: approved_at,        type: date,       description: "When the gate was approved", sort: 9 }
+
+  # ---- v_decision -------------------------------------------------------
+  - { table: v_decision, column: decision_id,           type: identifier, description: "Surrogate id of one decision-log entry", sort: 1 }
+  - { table: v_decision, column: execution_context_id,  type: identifier, description: "FK linking decisions in one workflow", sort: 2 }
+  - { table: v_decision, column: workflow_run_id,       type: identifier, description: "Caller-supplied workflow grouping", sort: 3 }
+  - { table: v_decision, column: entity_type,           type: category,   description: "agent|task — which kind made this call", sort: 4 }
+  - { table: v_decision, column: entity_version_id,     type: identifier, description: "Specific entity_version that produced this decision", sort: 5 }
+  - { table: v_decision, column: application_code,      type: identifier, description: "Application this decision was scoped to", sort: 6 }
+  - { table: v_decision, column: channel,               type: category,   description: "Deployment channel at decision time", sort: 7 }
+  - { table: v_decision, column: run_purpose,           type: category,   description: "production | shadow | challenger | replay | test", sort: 8 }
+  - { table: v_decision, column: step_name,             type: text,       description: "Workflow step label", sort: 9 }
+  - { table: v_decision, column: input_summary,         type: text,       description: "Caller-supplied human summary of the input", sort: 10 }
+  - { table: v_decision, column: output_summary,        type: text,       description: "Human summary of the output", sort: 11 }
+  - { table: v_decision, column: reasoning_text,        type: text,       description: "Reasoning the model emitted for this decision", sort: 12 }
+  - { table: v_decision, column: confidence_score,      type: measure,    description: "Model-reported confidence (0..1)", sort: 13 }
+  - { table: v_decision, column: duration_ms,           type: measure,    description: "Duration of the decision call (ms)", sort: 14 }
+  - { table: v_decision, column: input_tokens,          type: measure,    description: "Input tokens consumed", sort: 15 }
+  - { table: v_decision, column: output_tokens,         type: measure,    description: "Output tokens produced", sort: 16 }
+  - { table: v_decision, column: model_used,            type: category,   description: "Underlying LLM that produced the decision", sort: 17 }
+  - { table: v_decision, column: hitl_required,         type: category,   description: "Whether this decision required HITL approval", sort: 18 }
+  - { table: v_decision, column: hitl_completed,        type: category,   description: "Whether HITL approval was completed", sort: 19 }
+  - { table: v_decision, column: low_confidence_flag,   type: category,   description: "Flagged because confidence below threshold", sort: 20 }
+  - { table: v_decision, column: created_at,            type: date,       description: "When the decision was logged", sort: 21 }
+
+  # ---- v_override ------------------------------------------------------
+  - { table: v_override, column: override_id,                type: identifier, description: "Surrogate id of one HITL override", sort: 1 }
+  - { table: v_override, column: decision_id,                type: identifier, description: "Which decision-log entry was overridden", sort: 2 }
+  - { table: v_override, column: application_code,           type: identifier, description: "Application context", sort: 3 }
+  - { table: v_override, column: business_entity_type,       type: category,   description: "Business object type the override targets", sort: 4 }
+  - { table: v_override, column: business_entity_reference,  type: identifier, description: "Business id (e.g. submission id)", sort: 5 }
+  - { table: v_override, column: fact_type,                  type: category,   description: "Which fact was overridden (e.g. risk_tier)", sort: 6 }
+  - { table: v_override, column: output_path,                type: text,       description: "JSONPath or dotted path to the overridden field", sort: 7 }
+  - { table: v_override, column: ai_value,                   type: json,       description: "AI-produced value", sort: 8 }
+  - { table: v_override, column: hitl_value,                 type: json,       description: "Human-supplied corrected value", sort: 9 }
+  - { table: v_override, column: ai_found,                   type: category,   description: "Whether the AI produced any value at all", sort: 10 }
+  - { table: v_override, column: override_reason,            type: text,       description: "Free-text reason captured at override time", sort: 11 }
+  - { table: v_override, column: overridden_by,              type: text,       description: "Who applied the override", is_pii: true, sort: 12 }
+  - { table: v_override, column: created_at,                 type: date,       description: "When the override was recorded", sort: 13 }
+
+  # ---- v_validation_result ---------------------------------------------
+  - { table: v_validation_result, column: test_log_id,        type: identifier, description: "Surrogate id of one test execution row", sort: 1 }
+  - { table: v_validation_result, column: entity_type,        type: category,   description: "Which kind of entity was tested", sort: 2 }
+  - { table: v_validation_result, column: entity_version_id,  type: identifier, description: "Specific entity_version under test", sort: 3 }
+  - { table: v_validation_result, column: suite_id,           type: identifier, description: "FK to the test_suite that was run", sort: 4 }
+  - { table: v_validation_result, column: test_case_id,       type: identifier, description: "FK to the individual test_case", sort: 5 }
+  - { table: v_validation_result, column: passed,             type: category,   description: "True/false — case passed", sort: 6 }
+  - { table: v_validation_result, column: duration_ms,        type: measure,    description: "Duration of the test execution (ms)", sort: 7 }
+  - { table: v_validation_result, column: metric_type,        type: category,   description: "Which metric this row reports (accuracy, fairness, etc.)", sort: 8 }
+  - { table: v_validation_result, column: metric_result,      type: json,       description: "Metric payload (precision, recall, F1, kappa, disparity ratios, etc.)", sort: 9 }
+  - { table: v_validation_result, column: failure_reason,     type: text,       description: "Human-readable failure reason if not passed", sort: 10 }
+  - { table: v_validation_result, column: channel,            type: category,   description: "Deployment channel at test time", sort: 11 }
+  - { table: v_validation_result, column: mock_mode,          type: category,   description: "Whether the test ran in mock mode", sort: 12 }
+  - { table: v_validation_result, column: run_at,             type: date,       description: "When the test was run", sort: 13 }
+
+
+# -----------------------------------------------------------------------------
+# requirement_evidence_field — for each canonical_requirement, declare which
+# mart_fields are required to evidence it. Reports inherit these from the
+# canonicals they cover.
+#
+# Field references are by (table, column).  role ∈ {key, measure, dimension,
+# filter, context}.
+# -----------------------------------------------------------------------------
+requirement_evidence_fields:
+
+  # canonical: model_inventory_registration
+  - canonical: model_inventory_registration
+    fields:
+      - { table: v_entity_version, column: entity_type,         role: dimension, sort: 1 }
+      - { table: v_entity_version, column: entity_name,         role: key,       sort: 2 }
+      - { table: v_entity_version, column: entity_display_name, role: dimension, sort: 3 }
+      - { table: v_entity_version, column: entity_description,  role: context,   sort: 4 }
+      - { table: v_entity_version, column: version_label,       role: dimension, sort: 5 }
+      - { table: v_entity_version, column: lifecycle_state,     role: dimension, sort: 6 }
+      - { table: v_entity_version, column: materiality_tier,    role: dimension, sort: 7 }
+      - { table: v_application_entity, column: application_name, role: dimension, sort: 8 }
+
+  # canonical: model_ownership_accountability
+  - canonical: model_ownership_accountability
+    fields:
+      - { table: v_entity_version, column: entity_name,    role: key,       sort: 1 }
+      - { table: v_entity_version, column: owner_name,     role: dimension, sort: 2 }
+      - { table: v_entity_version, column: owner_email,    role: context,   sort: 3 }
+      - { table: v_lifecycle_event, column: approver_name, role: dimension, sort: 4 }
+      - { table: v_lifecycle_event, column: approver_role, role: dimension, sort: 5 }
+
+  # canonical: change_management_versioning
+  - canonical: change_management_versioning
+    fields:
+      - { table: v_entity_version, column: entity_name,    role: key,       sort: 1 }
+      - { table: v_entity_version, column: version_label,  role: dimension, sort: 2 }
+      - { table: v_lifecycle_event, column: gate_type,     role: dimension, sort: 3 }
+      - { table: v_lifecycle_event, column: from_state,    role: dimension, sort: 4 }
+      - { table: v_lifecycle_event, column: to_state,      role: dimension, sort: 5 }
+      - { table: v_lifecycle_event, column: approved_at,   role: dimension, sort: 6 }
+
+  # canonical: model_risk_identification_classification
+  - canonical: model_risk_identification_classification
+    fields:
+      - { table: v_entity_version, column: entity_name,         role: key,       sort: 1 }
+      - { table: v_entity_version, column: materiality_tier,    role: dimension, sort: 2 }
+      - { table: v_entity_version, column: domain,              role: dimension, sort: 3 }
+
+  # canonical: decision_explainability
+  - canonical: decision_explainability
+    fields:
+      - { table: v_decision, column: decision_id,           role: key,       sort: 1 }
+      - { table: v_decision, column: execution_context_id,  role: filter,    sort: 2 }
+      - { table: v_decision, column: workflow_run_id,       role: dimension, sort: 3 }
+      - { table: v_decision, column: step_name,             role: dimension, sort: 4 }
+      - { table: v_decision, column: input_summary,         role: context,   sort: 5 }
+      - { table: v_decision, column: output_summary,        role: context,   sort: 6 }
+      - { table: v_decision, column: reasoning_text,        role: context,   sort: 7 }
+      - { table: v_decision, column: confidence_score,      role: measure,   sort: 8 }
+      - { table: v_decision, column: model_used,            role: dimension, sort: 9 }
+      - { table: v_decision, column: created_at,            role: dimension, sort: 10 }
+
+  # canonical: data_lineage_provenance
+  - canonical: data_lineage_provenance
+    fields:
+      - { table: v_decision, column: execution_context_id,  role: key,       sort: 1 }
+      - { table: v_decision, column: workflow_run_id,       role: dimension, sort: 2 }
+      - { table: v_decision, column: decision_id,           role: dimension, sort: 3 }
+      - { table: v_decision, column: entity_version_id,     role: dimension, sort: 4 }
+      - { table: v_decision, column: input_summary,         role: context,   sort: 5 }
+      - { table: v_decision, column: output_summary,        role: context,   sort: 6 }
+
+  # canonical: ai_transparency_descriptions
+  - canonical: ai_transparency_descriptions
+    fields:
+      - { table: v_entity_version, column: entity_name,           role: key,       sort: 1 }
+      - { table: v_entity_version, column: entity_display_name,   role: dimension, sort: 2 }
+      - { table: v_entity_version, column: entity_description,    role: context,   sort: 3 }
+
+  # canonical: adverse_action_explainability
+  - canonical: adverse_action_explainability
+    fields:
+      - { table: v_decision, column: decision_id,       role: key,     sort: 1 }
+      - { table: v_decision, column: reasoning_text,    role: context, sort: 2 }
+      - { table: v_decision, column: output_summary,    role: context, sort: 3 }
+      - { table: v_override, column: hitl_value,        role: context, sort: 4 }
+      - { table: v_override, column: override_reason,   role: context, sort: 5 }
+
+  # canonical: fairness_pre_deployment
+  - canonical: fairness_pre_deployment
+    fields:
+      - { table: v_validation_result, column: entity_version_id, role: filter,    sort: 1 }
+      - { table: v_validation_result, column: suite_id,          role: dimension, sort: 2 }
+      - { table: v_validation_result, column: metric_type,       role: dimension, sort: 3 }
+      - { table: v_validation_result, column: metric_result,     role: measure,   sort: 4 }
+      - { table: v_validation_result, column: passed,            role: dimension, sort: 5 }
+      - { table: v_validation_result, column: run_at,            role: dimension, sort: 6 }
+
+  # canonical: bias_testing_methodology
+  - canonical: bias_testing_methodology
+    fields:
+      - { table: v_validation_result, column: suite_id,         role: key,       sort: 1 }
+      - { table: v_validation_result, column: metric_type,      role: dimension, sort: 2 }
+      - { table: v_validation_result, column: metric_result,    role: measure,   sort: 3 }
+      - { table: v_validation_result, column: failure_reason,   role: context,   sort: 4 }
+
+  # canonical: pre_deployment_testing
+  - canonical: pre_deployment_testing
+    fields:
+      - { table: v_validation_result, column: entity_version_id, role: filter,    sort: 1 }
+      - { table: v_validation_result, column: suite_id,          role: dimension, sort: 2 }
+      - { table: v_validation_result, column: passed,            role: measure,   sort: 3 }
+      - { table: v_validation_result, column: metric_type,       role: dimension, sort: 4 }
+      - { table: v_validation_result, column: run_at,            role: dimension, sort: 5 }
+
+  # canonical: human_oversight_intervention
+  - canonical: human_oversight_intervention
+    fields:
+      - { table: v_decision, column: hitl_required,    role: dimension, sort: 1 }
+      - { table: v_decision, column: hitl_completed,   role: dimension, sort: 2 }
+      - { table: v_override, column: override_id,      role: dimension, sort: 3 }
+      - { table: v_override, column: overridden_by,    role: dimension, sort: 4 }
+      - { table: v_override, column: override_reason,  role: context,   sort: 5 }
+
+  # canonical: model_conceptual_soundness
+  - canonical: model_conceptual_soundness
+    fields:
+      - { table: v_entity_version, column: entity_name,         role: key,       sort: 1 }
+      - { table: v_entity_version, column: entity_description,  role: context,   sort: 2 }
+      - { table: v_entity_version, column: domain,              role: dimension, sort: 3 }
+
+  # canonical: use_user_authorization_controls
+  - canonical: use_user_authorization_controls
+    fields:
+      - { table: v_entity_version, column: materiality_tier,    role: dimension, sort: 1 }
+      - { table: v_decision,       column: hitl_required,        role: dimension, sort: 2 }
+      - { table: v_decision,       column: hitl_completed,       role: dimension, sort: 3 }
+
+  # canonical: ongoing_performance_monitoring
+  - canonical: ongoing_performance_monitoring
+    fields:
+      - { table: v_decision, column: confidence_score,      role: measure,   sort: 1 }
+      - { table: v_decision, column: low_confidence_flag,   role: dimension, sort: 2 }
+      - { table: v_decision, column: duration_ms,           role: measure,   sort: 3 }
+      - { table: v_override, column: override_id,           role: measure,   sort: 4 }
+
+
+# -----------------------------------------------------------------------------
+# report_definition + report_requirement — reports as data.
+# -----------------------------------------------------------------------------
+reports:
+
+  - code: model_inventory
+    name: Model Inventory Report
+    description: |
+      Enumerates every AI model (agent / task / prompt) registered to Verity,
+      with its current version, lifecycle state, materiality tier, named owner,
+      and the application(s) it serves. Satisfies SR 11-7 §I (model inventory),
+      NAIC §3.1 (enterprise AI inventory), and CAS §2 (AI accountability &
+      ownership) in a single document.
+    report_kind: metadata_driven
+    docx_template: reports/model_inventory.docx
+    output_formats: [html, docx, pdf]
+    scope_params:
+      type: object
+      properties:
+        application_code:
+          type: string
+          description: "Filter to one application (optional)"
+        materiality_tier:
+          type: string
+          enum: [high, medium, low]
+          description: "Filter to one materiality tier (optional)"
+        as_of_date:
+          type: string
+          format: date
+          description: "Inventory as-of date (defaults to today)"
+    sort_seq: 10
+    canonical_requirements:
+      - { code: model_inventory_registration,            section: "Inventory Table",   sort: 1 }
+      - { code: model_ownership_accountability,          section: "Ownership Summary", sort: 2 }
+      - { code: change_management_versioning,            section: "Recent Changes",    sort: 3 }
+      - { code: model_risk_identification_classification, section: "Materiality Distribution", sort: 4 }
+
+  - code: decision_audit_trail
+    name: Decision Audit Trail (single decision)
+    description: |
+      Deep-dive audit of one specific AI decision — full reasoning, input,
+      output, the agent / task version that produced it, the LLM used,
+      confidence score, any human overrides applied. The right artifact
+      to attach to an adverse-action notice or to satisfy a regulator
+      asking 'why did the AI conclude X for this customer?'. Generated
+      from the Decision Logs page; no manual ID lookup required.
+    report_kind: metadata_driven
+    docx_template: reports/decision_audit_trail.docx
+    output_formats: [html, docx, pdf]
+    scope_params:
+      type: object
+      required: [decision_id]
+      properties:
+        decision_id:
+          type: string
+          description: "Set by the 'Generate Decision Audit' button on the decision detail page."
+    sort_seq: 20
+    canonical_requirements:
+      - { code: decision_explainability,        section: "Reasoning",           sort: 1 }
+      - { code: ai_transparency_descriptions,   section: "Asset Description",   sort: 2 }
+      - { code: adverse_action_explainability,  section: "Adverse-Action Notice Support", sort: 3 }
+      - { code: data_lineage_provenance,        section: "Inputs & Outputs",    sort: 4 }
+
+  - code: workflow_audit_trail
+    name: Workflow Audit Trail (one workflow)
+    description: |
+      End-to-end audit trail of every AI decision in one workflow run —
+      the chronological chain, what each step did, every HITL gate, every
+      override applied. Designed for 'walk me through this customer's
+      processing' compliance reviews. Generated from the Runs page via
+      'Generate Workflow Audit Trail' on a specific run.
+    report_kind: metadata_driven
+    docx_template: reports/workflow_audit_trail.docx
+    output_formats: [html, docx, pdf]
+    scope_params:
+      type: object
+      required: [workflow_run_id]
+      properties:
+        workflow_run_id:
+          type: string
+          description: "Set by the 'Generate Workflow Audit Trail' button on the run detail page."
+    sort_seq: 25
+    canonical_requirements:
+      - { code: decision_explainability,        section: "Decision Sequence",         sort: 1 }
+      - { code: data_lineage_provenance,        section: "Data Lineage",              sort: 2 }
+      - { code: ai_transparency_descriptions,   section: "Assets In This Workflow",   sort: 3 }
+      - { code: human_oversight_intervention,   section: "HITL Overrides",            sort: 4 }
+      - { code: adverse_action_explainability,  section: "Adverse Outcomes",          sort: 5 }
+
+  - code: fairness_validation_summary
+    name: Fairness Validation Summary
+    description: |
+      Pre-deployment fairness testing results for one or more AI assets.
+      Lists every fairness metric run against the asset's ground-truth
+      datasets, with pass/fail outcomes and disparity measurements per
+      demographic slice. Satisfies NAIC §III.E (fairness — pre-deployment),
+      CO §10-3-1104.9(4)(a) (bias testing methodology), and CAS §3 (bias
+      prevention).
+    report_kind: metadata_driven
+    docx_template: reports/fairness_validation_summary.docx
+    output_formats: [html, docx, pdf]
+    scope_params:
+      type: object
+      properties:
+        entity_type:
+          type: string
+          enum: [agent, task, prompt]
+          description: "Restrict to one entity type (optional)."
+        entity_name:
+          type: string
+          description: "Restrict to one specific asset by name (optional)."
+        as_of_date:
+          type: string
+          format: date
+          description: "Asset state as of this date (defaults to today)."
+    sort_seq: 30
+    canonical_requirements:
+      - { code: fairness_pre_deployment,    section: "Fairness Methodology",   sort: 1 }
+      - { code: bias_testing_methodology,   section: "Bias Test Methodology",  sort: 2 }
+      - { code: pre_deployment_testing,     section: "Pre-Deployment Testing", sort: 3 }
+
+  - code: naic_exhibit_c
+    name: NAIC Exhibit C — High-Risk System Deep Dive
+    description: |
+      The NAIC AI Systems Evaluation Tool's Exhibit C requires a complete
+      governance trail for one high-risk AI system. This report assembles
+      everything Verity knows about one specific entity_version: registration,
+      ownership, lifecycle, validation, every decision it has produced, every
+      override applied to those decisions. Designed to be the single artifact
+      handed to a market-conduct examiner for one model under examination.
+    report_kind: metadata_driven
+    docx_template: reports/naic_exhibit_c.docx
+    output_formats: [html, docx, pdf]
+    scope_params:
+      type: object
+      required: [entity_type, entity_name]
+      properties:
+        entity_type:
+          type: string
+          enum: [agent, task]
+          description: "REQUIRED. Type of asset."
+        entity_name:
+          type: string
+          description: "REQUIRED. Name of the specific asset."
+        version_label:
+          type: string
+          description: "Optional version (e.g. '1.0.0'). Defaults to current Champion."
+        as_of_date:
+          type: string
+          format: date
+          description: "As-of date for the snapshot."
+    sort_seq: 40
+    canonical_requirements:
+      - { code: model_inventory_registration,             section: "Asset Identification",        sort: 1 }
+      - { code: model_ownership_accountability,           section: "Ownership & Accountability",  sort: 2 }
+      - { code: model_conceptual_soundness,               section: "Conceptual Soundness",        sort: 3 }
+      - { code: change_management_versioning,             section: "Lifecycle History",           sort: 4 }
+      - { code: pre_deployment_testing,                   section: "Validation & Testing",        sort: 5 }
+      - { code: fairness_pre_deployment,                  section: "Fairness Validation",         sort: 6 }
+      - { code: ongoing_performance_monitoring,           section: "Production Monitoring",       sort: 7 }
+      - { code: decision_explainability,                  section: "Decision Sample",             sort: 8 }
+      - { code: human_oversight_intervention,             section: "HITL & Overrides",            sort: 9 }
+      - { code: data_lineage_provenance,                  section: "Data Lineage",                sort: 10 }
+      - { code: ai_transparency_descriptions,             section: "Plain-Language Description",  sort: 11 }
+      - { code: use_user_authorization_controls,          section: "Use Controls",                sort: 12 }

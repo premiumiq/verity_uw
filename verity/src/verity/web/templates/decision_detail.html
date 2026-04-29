@@ -23,6 +23,33 @@
 
 {% block content %}
 
+{% include "partials/_execution_subnav.html" %}
+
+{# In-context generate buttons — pre-fill the right scope IDs so the
+   compliance officer never has to look up a UUID. The single-decision
+   audit ALWAYS works; the workflow audit only when this decision is
+   part of a workflow group. #}
+<div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
+  <form method="post"
+        action="/admin/compliance/reports/decision_audit_trail/generate"
+        style="display: inline;">
+    <input type="hidden" name="decision_id" value="{{ decision.id }}">
+    <button type="submit" class="verity-btn verity-btn-primary verity-btn-sm">
+      ⬇ Generate Decision Audit Trail (this decision)
+    </button>
+  </form>
+  {% if decision.workflow_run_id %}
+  <form method="post"
+        action="/admin/compliance/reports/workflow_audit_trail/generate"
+        style="display: inline;">
+    <input type="hidden" name="workflow_run_id" value="{{ decision.workflow_run_id }}">
+    <button type="submit" class="verity-btn verity-btn-secondary verity-btn-sm">
+      ⬇ Generate Workflow Audit Trail (whole workflow)
+    </button>
+  </form>
+  {% endif %}
+</div>
+
 {# ── PARENT DECISION LINK (FC-1d) ──────────────────────────
    When this decision is itself a sub-agent run (parent_decision_id
    is set), surface a breadcrumb up to the parent's decision page
@@ -172,11 +199,7 @@
     {# ──────────────────────────────────────────────────────────
        Per-tool-call card. Shows which transport the call took
        (in-process Python, MCP, or Verity built-in) so the audit
-       trail makes the governance story visible at a glance. Fields
-       transport, mcp_server_name, mcp_tool_name were added in
-       Phase 4c/FC-14; verity_builtin transport + sub_decision_log_id
-       were added in FC-1b for sub-agent delegation. Older decisions
-       missing transport fall through to "in-process".
+       trail makes the governance story visible at a glance. 
     ── ────────────────────────────────────────────────────────── #}
     {% set tc_transport = tc.get('transport', 'python_inprocess') %}
     {% set tc_is_mcp = tc_transport.startswith('mcp_') %}

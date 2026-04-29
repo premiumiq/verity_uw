@@ -93,11 +93,9 @@
 
             <!-- OBSERVABILITY — execution monitoring -->
             <div class="verity-nav-section" style="margin-top: 10px;">Observability</div>
-            <a href="/admin/runs" class="verity-nav-link {% if active_page == 'runs' %}active{% endif %}">
-                <span class="verity-nav-icon">⊶</span> Runs
-            </a>
-            <a href="/admin/decisions" class="verity-nav-link {% if active_page == 'decisions' %}active{% endif %}">
-                <span class="verity-nav-icon">◉</span> Decision Logs
+            <a href="/admin/runs"
+               class="verity-nav-link {% if active_page in ['runs', 'decisions'] %}active{% endif %}">
+                <span class="verity-nav-icon">⊶</span> Runs &amp; Decisions
             </a>
             <a href="/admin/overrides" class="verity-nav-link {% if active_page == 'overrides' %}active{% endif %}">
                 <span class="verity-nav-icon">⚠</span> HITL Overrides
@@ -106,11 +104,9 @@
                 <span class="verity-nav-icon">〜</span> Drift
                 <span style="font-size: 0.55rem; opacity: 0.6; margin-left: 4px;">soon</span>
             </span>
-            <a href="/admin/usage" class="verity-nav-link {% if active_page == 'usage' %}active{% endif %}">
+            <a href="/admin/usage"
+               class="verity-nav-link {% if active_page in ['usage', 'quotas'] %}active{% endif %}">
                 <span class="verity-nav-icon">◌</span> Usage &amp; Spend
-            </a>
-            <a href="/admin/quotas" class="verity-nav-link {% if active_page == 'quotas' %}active{% endif %}">
-                <span class="verity-nav-icon">⛃</span> Quotas
             </a>
 
             <!-- GOVERNANCE — compliance, lifecycle, testing -->
@@ -132,6 +128,17 @@
             </a>
             <a href="/admin/incidents" class="verity-nav-link {% if active_page == 'incidents' %}active{% endif %}">
                 <span class="verity-nav-icon">⟁</span> Incidents
+            </a>
+
+            <!-- COMPLIANCE — regulatory metamodel review + reports -->
+            <div class="verity-nav-section" style="margin-top: 10px;">Compliance</div>
+            <a href="/admin/compliance/"
+               class="verity-nav-link {% if active_page == 'compliance' and subnav_active != 'reports' %}active{% endif %}">
+                <span class="verity-nav-icon">▩</span> Coverage
+            </a>
+            <a href="/admin/compliance/reports"
+               class="verity-nav-link {% if active_page == 'compliance' and subnav_active == 'reports' %}active{% endif %}">
+                <span class="verity-nav-icon">⎙</span> Reports
             </a>
 
         </div><!-- end sidebar-nav -->

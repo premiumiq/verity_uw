@@ -1,0 +1,268 @@
+{#
+  COMPLIANCE OVERVIEW — landing page for /admin/compliance/
+
+  Sections:
+    1. Coverage rollup (5 cards)
+    2. Three axes summary (regulatory / canonical / engineering)
+    3. Coverage matrix (canonical × framework)
+    4. Filters
+#}
+{% extends "base.html" %}
+
+{% block title %}Compliance — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/compliance/">Compliance</a>
+{% endblock %}
+
+{% block page_title %}Compliance Overview{% endblock %}
+
+{% block content %}
+
+{% include "partials/_compliance_subnav.html" %}
+
+{# ── COVERAGE ROLLUP CARDS ─────────────────────────────────── #}
+<div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 16px;">
+
+  <div class="verity-card" style="text-align: center; padding: 14px;">
+    <div style="font-size: 0.7rem; color: var(--verity-text-light); text-transform: uppercase; letter-spacing: 0.05em;">Total canonicals</div>
+    <div style="font-size: 1.8rem; font-weight: 600; margin-top: 4px;">{{ overall.canonical_count }}</div>
+    <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 2px;">across {{ overall.theme_count }} themes</div>
+  </div>
+
+  <div class="verity-card" style="text-align: center; padding: 14px; border-top: 3px solid #6BB07F;">
+    <div style="font-size: 0.7rem; color: var(--verity-text-light); text-transform: uppercase; letter-spacing: 0.05em;">Full</div>
+    <div style="font-size: 1.8rem; font-weight: 600; margin-top: 4px; color: #3E6044;">{{ coverage_counts.get('full', 0) }}</div>
+    <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 2px;">directly satisfied</div>
+  </div>
+
+  <div class="verity-card" style="text-align: center; padding: 14px; border-top: 3px solid #6E8FCC;">
+    <div style="font-size: 0.7rem; color: var(--verity-text-light); text-transform: uppercase; letter-spacing: 0.05em;">Substantial</div>
+    <div style="font-size: 1.8rem; font-weight: 600; margin-top: 4px; color: var(--verity-blue-dark);">{{ coverage_counts.get('substantial', 0) }}</div>
+    <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 2px;">core covered</div>
+  </div>
+
+  <div class="verity-card" style="text-align: center; padding: 14px; border-top: 3px solid #D4A24C;">
+    <div style="font-size: 0.7rem; color: var(--verity-text-light); text-transform: uppercase; letter-spacing: 0.05em;">Partial</div>
+    <div style="font-size: 1.8rem; font-weight: 600; margin-top: 4px; color: #816014;">{{ coverage_counts.get('partial', 0) }}</div>
+    <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 2px;">infrastructure only</div>
+  </div>
+
+  <div class="verity-card" style="text-align: center; padding: 14px; border-top: 3px solid #C97474;">
+    <div style="font-size: 0.7rem; color: var(--verity-text-light); text-transform: uppercase; letter-spacing: 0.05em;">Gap</div>
+    <div style="font-size: 1.8rem; font-weight: 600; margin-top: 4px; color: #A23838;">{{ coverage_counts.get('gap', 0) }}</div>
+    <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 2px;">not addressed</div>
+  </div>
+
+</div>
+
+{# ── THREE AXES CARDS ──────────────────────────────────────── #}
+<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px;">
+
+  <a href="/admin/compliance/frameworks" style="text-decoration: none; color: inherit;">
+    <div class="verity-card" style="padding: 16px; height: 100%;">
+      <div style="font-size: 0.7rem; color: var(--verity-text-light); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;">
+        ◧ REGULATORY TRUTH
+      </div>
+      <div style="font-size: 1.05rem; font-weight: 600; margin-bottom: 6px;">Frameworks &amp; provisions</div>
+      <div style="font-size: 0.85rem; color: var(--verity-text-light); line-height: 1.4;">
+        <strong>{{ overall.framework_count }}</strong> frameworks ·
+        <strong>{{ overall.provision_count }}</strong> provisions
+      </div>
+      <div style="font-size: 0.75rem; color: var(--verity-blue-deep); margin-top: 12px;">
+        Browse what each regulator wrote →
+      </div>
+    </div>
+  </a>
+
+  <a href="/admin/compliance/canonicals" style="text-decoration: none; color: inherit;">
+    <div class="verity-card" style="padding: 16px; height: 100%;">
+      <div style="font-size: 0.7rem; color: var(--verity-text-light); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;">
+        ◬ RATIONALIZED TRUTH
+      </div>
+      <div style="font-size: 1.05rem; font-weight: 600; margin-bottom: 6px;">Canonical requirements</div>
+      <div style="font-size: 0.85rem; color: var(--verity-text-light); line-height: 1.4;">
+        <strong>{{ overall.canonical_count }}</strong> canonicals ·
+        <strong>{{ overall.theme_count }}</strong> themes
+      </div>
+      <div style="font-size: 0.75rem; color: var(--verity-blue-deep); margin-top: 12px;">
+        Browse the rationalized vocabulary →
+      </div>
+    </div>
+  </a>
+
+  <a href="/admin/compliance/features" style="text-decoration: none; color: inherit;">
+    <div class="verity-card" style="padding: 16px; height: 100%;">
+      <div style="font-size: 0.7rem; color: var(--verity-text-light); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;">
+        ⬢ ENGINEERING TRUTH
+      </div>
+      <div style="font-size: 1.05rem; font-weight: 600; margin-bottom: 6px;">Verity features</div>
+      <div style="font-size: 0.85rem; color: var(--verity-text-light); line-height: 1.4;">
+        <strong>{{ overall.plane_count }}</strong> planes ·
+        <strong>{{ overall.capability_count }}</strong> capabilities ·
+        <strong>{{ overall.feature_count }}</strong> features
+      </div>
+      <div style="font-size: 0.75rem; color: var(--verity-blue-deep); margin-top: 12px;">
+        Browse what Verity ships →
+      </div>
+    </div>
+  </a>
+
+</div>
+
+{# ── FILTERS ───────────────────────────────────────────────── #}
+<form method="get" action="/admin/compliance/"
+      style="display: flex; gap: 12px; margin-bottom: 16px; align-items: center; flex-wrap: wrap;">
+
+  <label style="font-size: 0.85rem; color: var(--verity-text-light);">
+    Framework
+    <select name="framework" onchange="this.form.submit()"
+            style="margin-left: 6px; padding: 4px 8px; border: 1px solid var(--verity-border); border-radius: 4px; font-size: 0.85rem;">
+      <option value="">all</option>
+      {% for f in frameworks %}
+      <option value="{{ f.code }}" {% if filter_framework == f.code %}selected{% endif %}>{{ f.code }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label style="font-size: 0.85rem; color: var(--verity-text-light);">
+    Theme
+    <select name="theme" onchange="this.form.submit()"
+            style="margin-left: 6px; padding: 4px 8px; border: 1px solid var(--verity-border); border-radius: 4px; font-size: 0.85rem;">
+      <option value="">all</option>
+      {% for t in themes %}
+      <option value="{{ t.code }}" {% if filter_theme == t.code %}selected{% endif %}>{{ t.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label style="font-size: 0.85rem; color: var(--verity-text-light);">
+    Coverage
+    <select name="coverage" onchange="this.form.submit()"
+            style="margin-left: 6px; padding: 4px 8px; border: 1px solid var(--verity-border); border-radius: 4px; font-size: 0.85rem;">
+      <option value="">all</option>
+      <option value="full"        {% if filter_coverage == 'full'        %}selected{% endif %}>Full</option>
+      <option value="substantial" {% if filter_coverage == 'substantial' %}selected{% endif %}>Substantial</option>
+      <option value="partial"     {% if filter_coverage == 'partial'     %}selected{% endif %}>Partial</option>
+      <option value="gap"         {% if filter_coverage == 'gap'         %}selected{% endif %}>Gap</option>
+    </select>
+  </label>
+
+  {% if filter_framework or filter_theme or filter_coverage %}
+  <a href="/admin/compliance/" class="verity-btn verity-btn-secondary verity-btn-sm">Clear filters</a>
+  {% endif %}
+
+  <span style="margin-left: auto; font-size: 0.8rem; color: var(--verity-text-light);">
+    Showing {{ visible_canonical_count }} of {{ overall.canonical_count }} canonical requirements
+  </span>
+</form>
+
+{# ── COVERAGE MATRIX ───────────────────────────────────────── #}
+<div class="verity-card" style="padding: 0; overflow-x: auto;">
+  <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+    <thead>
+      <tr style="background: var(--verity-gray-pale); border-bottom: 2px solid var(--verity-border);">
+        <th style="text-align: left; padding: 10px 12px; font-weight: 600; min-width: 320px; position: sticky; left: 0; background: var(--verity-gray-pale); z-index: 2;">
+          Canonical Requirement
+        </th>
+        {% for f in frameworks %}
+        <th style="text-align: center; padding: 10px 8px; font-weight: 600; min-width: 80px;"
+            title="{{ f.name }}">
+          <a href="/admin/compliance/frameworks/{{ f.code }}"
+             style="color: inherit; text-decoration: none; border-bottom: 1px dotted var(--verity-border);">
+            {{ f.code }}
+          </a>
+        </th>
+        {% endfor %}
+        <th style="text-align: center; padding: 10px 12px; font-weight: 600; min-width: 110px;">Coverage</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for theme_group in matrix_groups %}
+
+      {# Theme separator row #}
+      <tr style="background: var(--verity-blue-pale);">
+        <td colspan="{{ frameworks|length + 2 }}"
+            style="padding: 6px 12px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--verity-blue-deep);">
+          ▸ {{ theme_group.theme_name }}
+          <span style="opacity: 0.55; margin-left: 6px; font-weight: 400; text-transform: none; letter-spacing: 0;">
+            ({{ theme_group.rows|length }})
+          </span>
+        </td>
+      </tr>
+
+      {% for row in theme_group.rows %}
+      <tr style="border-bottom: 1px solid var(--verity-border);">
+
+        <td style="padding: 8px 12px; position: sticky; left: 0; background: white; z-index: 1;">
+          <a href="/admin/compliance/canonicals/{{ row.canonical_code }}"
+             style="color: var(--verity-text); text-decoration: none; font-weight: 500;">
+            {{ row.canonical_title }}
+          </a>
+          <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 2px;">
+            <code>{{ row.canonical_code }}</code>
+          </div>
+        </td>
+
+        {% for f in frameworks %}
+          {% set bridge = row.bridges_by_framework.get(f.code) %}
+          <td style="text-align: center; padding: 8px 4px; vertical-align: middle;">
+            {% if bridge %}
+              {% set ms = bridge.best_match_strength %}
+              {% set color = '#3E6044' if ms >= 0.95 else ('#816014' if ms >= 0.5 else '#A23838') %}
+              {% set bg    = '#D8EBDC' if ms >= 0.95 else ('#FAEED1' if ms >= 0.5 else '#F5DCDC') %}
+              <span style="display: inline-block; min-width: 44px; padding: 3px 6px;
+                           border-radius: 10px; background: {{ bg }};
+                           color: {{ color }}; font-size: 0.78rem; font-weight: 500;"
+                    title="{{ bridge.provision_count }} provision(s) in {{ f.name }} → match {{ '%.2f'|format(ms) }}">
+                {{ '%.2f'|format(ms) }}
+              </span>
+            {% else %}
+              <span style="color: var(--verity-text-light); opacity: 0.4;">—</span>
+            {% endif %}
+          </td>
+        {% endfor %}
+
+        <td style="text-align: center; padding: 8px 12px;">
+          {% if row.coverage_level == 'full' %}
+          <span class="verity-badge" style="background: #D8EBDC; color: #3E6044;">✓ Full</span>
+          {% elif row.coverage_level == 'substantial' %}
+          <span class="verity-badge" style="background: #DDE8F8; color: var(--verity-blue-dark);">◐ Substantial</span>
+          {% elif row.coverage_level == 'partial' %}
+          <span class="verity-badge" style="background: #FAEED1; color: #816014;">◑ Partial</span>
+          {% elif row.coverage_level == 'gap' %}
+          <span class="verity-badge" style="background: #F5DCDC; color: #A23838;">✗ Gap</span>
+          {% else %}
+          <span style="color: var(--verity-text-light); font-size: 0.75rem;">—</span>
+          {% endif %}
+        </td>
+
+      </tr>
+      {% endfor %}
+
+      {% endfor %}
+
+      {% if not matrix_groups %}
+      <tr>
+        <td colspan="{{ frameworks|length + 2 }}" style="padding: 24px; text-align: center; color: var(--verity-text-light);">
+          No canonical requirements match the current filters.
+        </td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+<div style="margin-top: 16px; font-size: 0.78rem; color: var(--verity-text-light); display: flex; gap: 24px; flex-wrap: wrap;">
+  <div>
+    <strong style="color: var(--verity-text);">Cell value:</strong>
+    best <code>match_strength</code> (semantic alignment, 0–1) of any provision in that framework that bridges to this canonical. Hover for provision count.
+  </div>
+  <div>
+    <strong style="color: var(--verity-text);">Coverage:</strong>
+    Verity's capability to satisfy this canonical. Different from cell match_strength — a canonical with strong bridges from 3 frameworks may still be Gap-rated if the underlying capability isn't built.
+  </div>
+</div>
+
+{% endblock %}

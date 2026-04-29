@@ -11,16 +11,24 @@ import psycopg
 
 
 SCHEMA_FILE = Path(__file__).parent / "schema.sql"
+COMPLIANCE_SCHEMA_FILE = Path(__file__).parent / "schema_compliance.sql"
+COMPLIANCE_VIEWS_FILE = Path(__file__).parent / "schema_compliance_views.sql"
 
 
 async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
     """Apply the Verity schema to the target database.
+
+    Applies schema.sql first (operational trust DB) then
+    schema_compliance.sql (L3 compliance metamodel + L2 analytics
+    schema placeholder). See docs/architecture/compliance-stack.md.
 
     Args:
         database_url: PostgreSQL connection URL.
         drop_existing: If True, drop all tables first (destructive!).
     """
     schema_sql = SCHEMA_FILE.read_text()
+    compliance_schema_sql = COMPLIANCE_SCHEMA_FILE.read_text()
+    compliance_views_sql = COMPLIANCE_VIEWS_FILE.read_text()
 
     async with await psycopg.AsyncConnection.connect(
         database_url, autocommit=True
@@ -60,6 +68,9 @@ async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
                     END LOOP;
                 END $$;
             """)
+            # Drop compliance + analytics schemas (everything inside is dropped via CASCADE).
+            await conn.execute("DROP SCHEMA IF EXISTS verity_compliance CASCADE")
+            await conn.execute("DROP SCHEMA IF EXISTS verity_analytics CASCADE")
             print("Existing schema dropped.")
 
         print("Applying Verity schema...")
@@ -82,6 +93,38 @@ async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
                 print(f"Statement: {stmt[:200]}...")
                 raise
 
+        print("Applying Verity compliance schema (L3 metamodel + L4 reports + mart_field)...")
+        compliance_statements = _split_sql_statements(compliance_schema_sql)
+        for i, stmt in enumerate(compliance_statements, 1):
+            stmt = stmt.strip()
+            if not stmt:
+                continue
+            try:
+                await conn.execute(stmt)
+            except Exception as e:
+                err_msg = str(e)
+                if "already exists" in err_msg:
+                    continue
+                print(f"Compliance schema error on statement {i}: {err_msg}")
+                print(f"Statement: {stmt[:200]}...")
+                raise
+
+        print("Applying verity_analytics views (logical mart over L1)...")
+        view_statements = _split_sql_statements(compliance_views_sql)
+        for i, stmt in enumerate(view_statements, 1):
+            stmt = stmt.strip()
+            if not stmt:
+                continue
+            try:
+                await conn.execute(stmt)
+            except Exception as e:
+                # CREATE OR REPLACE VIEW is idempotent; only catch a missing
+                # underlying L1 table here (e.g. before main schema applied).
+                err_msg = str(e)
+                print(f"View creation error on statement {i}: {err_msg}")
+                print(f"Statement: {stmt[:200]}...")
+                raise
+
         # Verify key tables exist
         result = await conn.execute("""
             SELECT tablename FROM pg_tables
@@ -90,6 +133,18 @@ async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
         """)
         tables = [row[0] for row in await result.fetchall()]
         print(f"Schema applied. Tables: {', '.join(tables)}")
+
+        # Verify compliance schema tables
+        result = await conn.execute("""
+            SELECT tablename FROM pg_tables
+            WHERE schemaname = 'verity_compliance'
+            ORDER BY tablename
+        """)
+        compliance_tables = [row[0] for row in await result.fetchall()]
+        print(
+            f"verity_compliance tables ({len(compliance_tables)}): "
+            f"{', '.join(compliance_tables)}"
+        )
 
         # Verify pgvector extension
         result = await conn.execute(

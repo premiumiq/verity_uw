@@ -215,7 +215,21 @@
 <!-- ── ACTION BAR ────────────────────────────────────────── -->
 <div class="verity-action-bar verity-section" id="action-bar">
     {% if next_action %}
-        {% if next_action.get('method') == 'POST' %}
+        {% if next_action.get('running') %}
+        {# AI run is in flight server-side. Show a passive
+           indicator with a spinner so navigating back to the
+           page mid-run doesn't read as "Workflow Complete".
+           User refreshes (or waits and refreshes) once the run
+           is done; full async polling is a separate phase. #}
+        <span class="verity-badge verity-badge-pending"
+              style="display: inline-flex; align-items: center; gap: 6px;">
+            <span class="verity-spinner"></span>
+            {{ next_action.label }}
+        </span>
+        <span class="verity-detail-label" style="margin-left: 12px;">
+            Refresh to check progress.
+        </span>
+        {% elif next_action.get('method') == 'POST' %}
         <form method="POST" action="{{ next_action.url }}" id="pipeline-form"
               onsubmit="return handlePipelineSubmit()">
             <button type="submit" class="verity-btn verity-btn-primary" id="pipeline-btn">
@@ -295,6 +309,18 @@
 <div id="tab-content" class="verity-section">
     {% include 'partials/_tab_details.html' %}
 </div>
+
+
+<!-- ── PROVENANCE MODAL ─────────────────────────────────────
+     Single page-level <dialog>. The sparkle button on each
+     field (in _field_row.html) HTMX-fetches the provenance
+     partial for that field, swaps it into #provenance-modal-content,
+     and opens this dialog via the macro's hx-on::after-swap.
+     Close happens via either the X / Close buttons inside the
+     partial or via Escape (native <dialog> behavior). -->
+<dialog id="provenance-modal" class="verity-provenance-dialog">
+    <div id="provenance-modal-content"></div>
+</dialog>
 
 
 <script>

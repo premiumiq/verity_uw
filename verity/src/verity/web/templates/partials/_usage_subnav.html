@@ -1,0 +1,26 @@
+{#
+  USAGE & SPEND sub-nav — two pill tabs.
+  Caller passes active_page ∈ {'usage', 'quotas'}; this partial highlights
+  the corresponding tab.
+#}
+<div style="display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--verity-border);">
+  {% set tabs = [
+      ('usage',  'Usage & Spend', '/admin/usage'),
+      ('quotas', 'Quotas',        '/admin/quotas'),
+  ] %}
+  {% for code, label, url in tabs %}
+    {% if active_page == code %}
+      <a href="{{ url }}"
+         style="padding: 8px 16px; border-bottom: 2px solid var(--verity-blue-deep);
+                color: var(--verity-blue-deep); font-weight: 600; text-decoration: none;
+                font-size: 0.85rem; margin-bottom: -1px;">{{ label }}</a>
+    {% else %}
+      <a href="{{ url }}"
+         style="padding: 8px 16px; border-bottom: 2px solid transparent;
+                color: var(--verity-text-light); text-decoration: none;
+                font-size: 0.85rem; margin-bottom: -1px;"
+         onmouseover="this.style.color='var(--verity-text)'"
+         onmouseout="this.style.color='var(--verity-text-light)'">{{ label }}</a>
+    {% endif %}
+  {% endfor %}
+</div>

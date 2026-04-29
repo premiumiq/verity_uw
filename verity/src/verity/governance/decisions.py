@@ -11,7 +11,7 @@ This is one half of the core/decisions.py split:
 Why the split? The governance plane doesn't execute anything, so it never
 needs to call log_decision — that's the runtime's job. By contrast, the
 audit trail reads and override recording are compliance/UI concerns that
-belong with governance, even though record_override is technically a write.
+belong with governance.
 """
 
 import json
@@ -23,7 +23,6 @@ from verity.models.decision import (
     AuditTrailEntry,
     DecisionLog,
     DecisionLogDetail,
-    OverrideLogCreate,
 )
 
 
@@ -92,26 +91,9 @@ class DecisionsReader:
             "execution_context_id": str(execution_context_id),
         })
 
-    async def record_override(self, override: OverrideLogCreate) -> dict:
-        """Record a human override of an AI decision.
-
-        This is a write, but it's a governance-side write — it captures a
-        human's disagreement with an AI recommendation, which is compliance
-        data, not runtime execution data. The runtime never calls this.
-        """
-        params = {
-            "decision_log_id": str(override.decision_log_id),
-            "entity_type": override.entity_type.value,
-            "entity_version_id": str(override.entity_version_id),
-            "overrider_name": override.overrider_name,
-            "overrider_role": override.overrider_role,
-            "override_reason_code": override.override_reason_code,
-            "override_notes": override.override_notes,
-            "ai_recommendation": json.dumps(override.ai_recommendation) if override.ai_recommendation else None,
-            "human_decision": json.dumps(override.human_decision) if override.human_decision else None,
-        }
-        result = await self.db.execute_returning("record_override", params)
-        return {"override_id": result["id"], "created_at": result["created_at"]}
+    # Decision-level record_override and override_log retired —
+    # per-field HITL overrides go through Verity.record_hitl_override
+    # in client/inprocess.py instead.
 
 
 def _row_to_audit_entry(r: dict) -> AuditTrailEntry:

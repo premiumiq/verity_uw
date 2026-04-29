@@ -1,0 +1,110 @@
+{# Single feature drilldown — description + reverse drilldown to canonicals it satisfies. #}
+{% extends "base.html" %}
+
+{% block title %}{{ feature.code }} — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/compliance/">Compliance</a>
+    <span class="separator">›</span>
+    <a href="/admin/compliance/features">Engineering</a>
+    <span class="separator">›</span>
+    <span>{{ feature.code }}</span>
+{% endblock %}
+
+{% block page_title %}{{ feature.name }}{% endblock %}
+
+{% block content %}
+
+{% include "partials/_compliance_subnav.html" %}
+
+<div class="verity-card" style="margin-bottom: 16px;">
+  <div class="verity-detail-grid">
+    <div class="verity-detail-label">Code</div>
+    <div class="verity-detail-value"><code>{{ feature.code }}</code></div>
+
+    <div class="verity-detail-label">Plane</div>
+    <div class="verity-detail-value">
+      {{ feature.plane_name }}<span style="color: var(--verity-text-light);"> · <code>{{ feature.plane_code }}</code></span>
+    </div>
+
+    <div class="verity-detail-label">Capability</div>
+    <div class="verity-detail-value">
+      {{ feature.capability_name }}<span style="color: var(--verity-text-light);"> · <code>{{ feature.capability_code }}</code></span>
+    </div>
+
+    <div class="verity-detail-label">Status</div>
+    <div class="verity-detail-value">
+      {% if feature.status == 'shipped' %}<span class="verity-badge" style="background: #D8EBDC; color: #3E6044;">shipped</span>
+      {% elif feature.status == 'planned' %}<span class="verity-badge" style="background: #DDE8F8; color: var(--verity-blue-dark);">planned</span>
+      {% elif feature.status == 'partial' %}<span class="verity-badge" style="background: #FAEED1; color: #816014;">partial</span>
+      {% elif feature.status == 'deprecated' %}<span class="verity-badge" style="background: var(--verity-gray-dark); color: var(--verity-text-light);">deprecated</span>
+      {% else %}<span style="color: var(--verity-text-light);">{{ feature.status }}</span>
+      {% endif %}
+    </div>
+
+    {% if feature.description %}
+    <div class="verity-detail-label">Description</div>
+    <div class="verity-detail-value" style="line-height: 1.5;">{{ feature.description }}</div>
+    {% endif %}
+  </div>
+</div>
+
+{# ── REVERSE: CANONICAL REQUIREMENTS THIS FEATURE SATISFIES ── #}
+<div class="verity-card" style="padding: 0;">
+  <div class="verity-card-header" style="padding: 12px 16px; border-bottom: 1px solid var(--verity-border);">
+    Canonical Requirements supported ({{ canonicals|length }})
+    <span style="font-weight: 400; font-size: 0.78rem; color: var(--verity-text-light); margin-left: 8px;">
+      — what regulatory obligations this feature helps satisfy
+    </span>
+  </div>
+
+  <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+    <thead>
+      <tr style="background: var(--verity-gray-pale); border-bottom: 1px solid var(--verity-border);">
+        <th style="text-align: left; padding: 8px 12px; font-weight: 600; width: 130px;">Theme</th>
+        <th style="text-align: left; padding: 8px 12px; font-weight: 600;">Canonical Requirement</th>
+        <th style="text-align: center; padding: 8px 12px; font-weight: 600; width: 110px;">Coverage</th>
+        <th style="text-align: center; padding: 8px 12px; font-weight: 600; width: 100px;">Role</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in canonicals %}
+      <tr style="border-bottom: 1px solid var(--verity-border);">
+        <td style="padding: 8px 12px; color: var(--verity-text-light); font-size: 0.78rem;">{{ c.theme_name }}</td>
+        <td style="padding: 8px 12px;">
+          <a href="/admin/compliance/canonicals/{{ c.canonical_code }}"
+             style="color: var(--verity-text); text-decoration: none; font-weight: 500;">
+            {{ c.canonical_title }}
+          </a>
+          <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 2px;">
+            <code>{{ c.canonical_code }}</code>
+          </div>
+        </td>
+        <td style="text-align: center; padding: 8px 12px;">
+          {% if c.coverage_level == 'full' %}<span class="verity-badge" style="background: #D8EBDC; color: #3E6044;">✓ Full</span>
+          {% elif c.coverage_level == 'substantial' %}<span class="verity-badge" style="background: #DDE8F8; color: var(--verity-blue-dark);">◐ Subst.</span>
+          {% elif c.coverage_level == 'partial' %}<span class="verity-badge" style="background: #FAEED1; color: #816014;">◑ Partial</span>
+          {% elif c.coverage_level == 'gap' %}<span class="verity-badge" style="background: #F5DCDC; color: #A23838;">✗ Gap</span>
+          {% else %}<span style="color: var(--verity-text-light); font-size: 0.75rem;">—</span>
+          {% endif %}
+        </td>
+        <td style="text-align: center; padding: 8px 12px;">
+          {% if c.role == 'primary' %}
+          <span style="font-size: 0.78rem; color: var(--verity-blue-deep); font-weight: 500;">primary</span>
+          {% else %}
+          <span style="font-size: 0.78rem; color: var(--verity-text-light);">{{ c.role }}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      {% if not canonicals %}
+      <tr><td colspan="4" style="padding: 16px; text-align: center; color: var(--verity-text-light);">
+        This feature is not yet linked to any canonical requirement. Add a feature_link in the YAML if appropriate.
+      </td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

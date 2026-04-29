@@ -1,0 +1,77 @@
+{# REGULATORY TRUTH — list of all 5 frameworks with stats. #}
+{% extends "base.html" %}
+
+{% block title %}Regulatory Frameworks — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/compliance/">Compliance</a>
+    <span class="separator">›</span>
+    <a href="/admin/compliance/frameworks">Regulatory</a>
+{% endblock %}
+
+{% block page_title %}Regulatory Frameworks{% endblock %}
+
+{% block content %}
+
+{% include "partials/_compliance_subnav.html" %}
+
+<p style="font-size: 0.85rem; color: var(--verity-text-light); margin-bottom: 16px;">
+  The "left axis" — the literal regulations Verity tracks. Each framework groups provisions
+  (citations within the regulation). Provisions bridge through to canonical requirements.
+</p>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: 16px;">
+  {% for f in frameworks %}
+  <div class="verity-card" style="padding: 16px;">
+
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+      <div>
+        <a href="/admin/compliance/frameworks/{{ f.code }}"
+           style="color: var(--verity-text); text-decoration: none; font-size: 1rem; font-weight: 600;">
+          {{ f.name }}
+        </a>
+        <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 2px;">
+          <code>{{ f.code }}</code> · {{ f.jurisdiction }}{% if f.version %} · v{{ f.version }}{% endif %}
+        </div>
+      </div>
+      <span class="verity-badge" style="background: var(--verity-blue-pale); color: var(--verity-blue-deep);">
+        {{ f.jurisdiction }}
+      </span>
+    </div>
+
+    {% if f.description %}
+    <div style="font-size: 0.82rem; color: var(--verity-text); line-height: 1.5; margin-bottom: 10px;">
+      {{ f.description }}
+    </div>
+    {% endif %}
+
+    <div style="display: flex; gap: 16px; font-size: 0.78rem; color: var(--verity-text-light); margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--verity-border);">
+      <div>
+        <strong style="color: var(--verity-text); font-size: 0.95rem;">{{ f.provision_count }}</strong> provisions
+      </div>
+      <div>
+        <strong style="color: var(--verity-text); font-size: 0.95rem;">{{ f.canonical_count }}</strong> canonicals touched
+      </div>
+      <div style="margin-left: auto;">
+        valid {{ f.valid_from }}<span style="opacity: 0.5;"> → </span>{{ f.valid_to }}
+      </div>
+    </div>
+
+    <div style="margin-top: 10px;">
+      <a href="/admin/compliance/frameworks/{{ f.code }}" class="verity-btn verity-btn-secondary verity-btn-sm">
+        Browse provisions →
+      </a>
+      {% if f.source_url %}
+      <a href="{{ f.source_url }}" target="_blank" rel="noopener"
+         class="verity-btn verity-btn-secondary verity-btn-sm" style="margin-left: 6px;">
+        Source ↗
+      </a>
+      {% endif %}
+    </div>
+
+  </div>
+  {% endfor %}
+</div>
+
+{% endblock %}

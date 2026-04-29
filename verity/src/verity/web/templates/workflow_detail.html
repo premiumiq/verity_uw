@@ -25,6 +25,20 @@
 
 {% block content %}
 
+{% include "partials/_execution_subnav.html" %}
+
+{# In-context generate button — feeds workflow_run_id directly into the
+   Workflow Audit Trail report so the compliance officer never has to
+   look up a UUID. #}
+<form method="post"
+      action="/admin/compliance/reports/workflow_audit_trail/generate"
+      style="display: inline-block; margin-bottom: 16px;">
+  <input type="hidden" name="workflow_run_id" value="{{ workflow_run_id }}">
+  <button type="submit" class="verity-btn verity-btn-primary verity-btn-sm">
+    ⬇ Generate Workflow Audit Trail (DOCX)
+  </button>
+</form>
+
 <div class="verity-section">
     <div class="verity-detail-grid">
         <div class="verity-detail-label">Workflow run id</div>

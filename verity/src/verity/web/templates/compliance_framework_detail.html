@@ -1,0 +1,103 @@
+{# Single framework detail: metadata + all its provisions. #}
+{% extends "base.html" %}
+
+{% block title %}{{ framework.code }} — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/compliance/">Compliance</a>
+    <span class="separator">›</span>
+    <a href="/admin/compliance/frameworks">Regulatory</a>
+    <span class="separator">›</span>
+    <span>{{ framework.code }}</span>
+{% endblock %}
+
+{% block page_title %}{{ framework.name }}{% endblock %}
+
+{% block content %}
+
+{% include "partials/_compliance_subnav.html" %}
+
+{# ── METADATA ──────────────────────────────────────────────── #}
+<div class="verity-card" style="margin-bottom: 16px;">
+  <div class="verity-card-header">Framework</div>
+  <div class="verity-detail-grid">
+    <div class="verity-detail-label">Code</div>
+    <div class="verity-detail-value"><code>{{ framework.code }}</code></div>
+
+    <div class="verity-detail-label">Jurisdiction</div>
+    <div class="verity-detail-value">{{ framework.jurisdiction }}</div>
+
+    {% if framework.version %}
+    <div class="verity-detail-label">Version</div>
+    <div class="verity-detail-value">{{ framework.version }}</div>
+    {% endif %}
+
+    {% if framework.effective_date %}
+    <div class="verity-detail-label">Effective</div>
+    <div class="verity-detail-value">{{ framework.effective_date }}</div>
+    {% endif %}
+
+    <div class="verity-detail-label">Validity (Verity tracking)</div>
+    <div class="verity-detail-value">
+      {{ framework.valid_from }} → {{ framework.valid_to }}
+    </div>
+
+    {% if framework.source_url %}
+    <div class="verity-detail-label">Source</div>
+    <div class="verity-detail-value">
+      <a href="{{ framework.source_url }}" target="_blank" rel="noopener" style="color: var(--verity-blue-deep);">
+        {{ framework.source_url }} ↗
+      </a>
+    </div>
+    {% endif %}
+
+    {% if framework.description %}
+    <div class="verity-detail-label">Description</div>
+    <div class="verity-detail-value" style="white-space: pre-line;">{{ framework.description }}</div>
+    {% endif %}
+  </div>
+</div>
+
+{# ── PROVISIONS ────────────────────────────────────────────── #}
+<div class="verity-card" style="padding: 0;">
+  <div class="verity-card-header" style="padding: 12px 16px; border-bottom: 1px solid var(--verity-border);">
+    Provisions ({{ provisions|length }})
+  </div>
+
+  <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+    <thead>
+      <tr style="background: var(--verity-gray-pale); border-bottom: 1px solid var(--verity-border);">
+        <th style="text-align: left;  padding: 8px 12px; font-weight: 600; width: 38%;">Citation</th>
+        <th style="text-align: left;  padding: 8px 12px; font-weight: 600;">Title</th>
+        <th style="text-align: center; padding: 8px 12px; font-weight: 600; width: 130px;">Canonical Bridges</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in provisions %}
+      <tr style="border-bottom: 1px solid var(--verity-border);">
+        <td style="padding: 8px 12px;">
+          <a href="/admin/compliance/provisions/{{ p.id }}"
+             style="color: var(--verity-text); text-decoration: none; font-weight: 500;">
+            {{ p.citation }}
+          </a>
+        </td>
+        <td style="padding: 8px 12px; color: var(--verity-text);">
+          {{ p.title }}
+        </td>
+        <td style="text-align: center; padding: 8px 12px;">
+          {% if p.canonical_link_count > 0 %}
+          <span class="verity-badge" style="background: var(--verity-blue-pale); color: var(--verity-blue-deep);">
+            {{ p.canonical_link_count }} canonical{{ '' if p.canonical_link_count == 1 else 's' }}
+          </span>
+          {% else %}
+          <span style="color: var(--verity-text-light); font-size: 0.75rem;">unmapped</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

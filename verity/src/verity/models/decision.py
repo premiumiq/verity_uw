@@ -1,13 +1,11 @@
-"""Decision log and override models.
+"""Decision log models.
 
-DecisionLogCreate was moved to verity.contracts.decision as of Phase 1 of
-the Registry/Runtime split. It is re-exported here for backward compatibility.
+DecisionLogCreate was moved to verity.contracts.decision earlier;
+re-exported here for backward compatibility.
 
-What stays here (governance-internal DB read shapes):
+What lives here (governance-internal DB read shapes):
 - DecisionLog — list-view row for the decisions page
 - DecisionLogDetail — full detail row (with I/O data, message history)
-- OverrideLogCreate — write input for record_override()
-- OverrideLog — stored override read row
 - AuditTrailEntry — one step in a pipeline run's audit trail
 """
 
@@ -82,38 +80,6 @@ class DecisionLogDetail(DecisionLog):
     agent_display_name: Optional[str] = None
     task_name: Optional[str] = None
     task_display_name: Optional[str] = None
-
-
-class OverrideLogCreate(BaseModel):
-    """Input for recording an override.
-
-    No business keys here. The override links to decision_log_id,
-    which links to execution_context_id for business context.
-    """
-    decision_log_id: UUID
-    entity_type: EntityType
-    entity_version_id: UUID
-    overrider_name: str
-    overrider_role: Optional[str] = None
-    override_reason_code: str
-    override_notes: Optional[str] = None
-    ai_recommendation: Optional[dict[str, Any]] = None
-    human_decision: Optional[dict[str, Any]] = None
-
-
-class OverrideLog(BaseModel):
-    """Stored override read row."""
-    id: UUID
-    decision_log_id: UUID
-    entity_type: EntityType
-    entity_version_id: UUID
-    overrider_name: str
-    overrider_role: Optional[str] = None
-    override_reason_code: str
-    override_notes: Optional[str] = None
-    ai_recommendation: Optional[dict[str, Any]] = None
-    human_decision: Optional[dict[str, Any]] = None
-    created_at: Optional[datetime] = None
 
 
 class AuditTrailEntry(BaseModel):

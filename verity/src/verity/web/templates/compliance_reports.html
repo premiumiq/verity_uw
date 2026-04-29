@@ -1,0 +1,129 @@
+{# REPORTS list page. Each card → /admin/compliance/reports/{code} #}
+{% extends "base.html" %}
+
+{% block title %}Compliance Reports — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/compliance/">Compliance</a>
+    <span class="separator">›</span>
+    <a href="/admin/compliance/reports">Reports</a>
+{% endblock %}
+
+{% block page_title %}Compliance Reports{% endblock %}
+
+{% block content %}
+
+{% include "partials/_compliance_banner.html" %}
+
+<p style="font-size: 0.85rem; color: var(--verity-text-light); margin-bottom: 16px;">
+  Each report is a manifest in the metamodel — it covers one or more canonical
+  requirements and renders to DOCX (and PDF, when available) using a Word
+  template that compliance / brand owners style directly. Click a report to
+  configure scope and generate.
+</p>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 16px; margin-bottom: 24px;">
+  {% for r in reports %}
+  <div class="verity-card" style="padding: 16px;">
+
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px;">
+      <div>
+        <a href="/admin/compliance/reports/{{ r.code }}"
+           style="color: var(--verity-text); text-decoration: none; font-size: 1.05rem; font-weight: 600;">
+          {{ r.name }}
+        </a>
+        <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 2px;">
+          <code>{{ r.code }}</code> · {{ r.report_kind }}
+        </div>
+      </div>
+      <span class="verity-badge" style="background: var(--verity-blue-pale); color: var(--verity-blue-deep);">
+        {{ r.canonical_count }} canonical{{ '' if r.canonical_count == 1 else 's' }}
+      </span>
+    </div>
+
+    {% if r.description %}
+    <div style="font-size: 0.82rem; color: var(--verity-text); line-height: 1.5; margin-bottom: 12px;">
+      {{ r.description }}
+    </div>
+    {% endif %}
+
+    <div style="font-size: 0.78rem; color: var(--verity-text-light); margin-bottom: 12px;">
+      Outputs:
+      {% for fmt in r.output_formats %}
+      <span style="display: inline-block; padding: 2px 6px; margin: 0 2px;
+                   border: 1px solid var(--verity-border); border-radius: 4px;
+                   background: var(--verity-gray-pale); font-size: 0.7rem;">
+        {{ fmt|upper }}
+      </span>
+      {% endfor %}
+    </div>
+
+    <div>
+      <a href="/admin/compliance/reports/{{ r.code }}" class="verity-btn verity-btn-primary verity-btn-sm">
+        Configure & Generate →
+      </a>
+    </div>
+
+  </div>
+  {% endfor %}
+
+  {% if not reports %}
+  <div style="grid-column: 1 / -1; padding: 32px; text-align: center; color: var(--verity-text-light);">
+    No active reports defined. Add one to <code>compliance_seed_reports.yaml</code> and run <code>verity compliance seed-reports</code>.
+  </div>
+  {% endif %}
+</div>
+
+{# ── RECENT RUNS ──────────────────────────────────────────── #}
+{% if recent_runs %}
+<div class="verity-card" style="padding: 0; margin-top: 16px;">
+  <div class="verity-card-header" style="padding: 12px 16px; border-bottom: 1px solid var(--verity-border);">
+    Recent Report Runs ({{ recent_runs|length }})
+    <span style="font-weight: 400; font-size: 0.78rem; color: var(--verity-text-light); margin-left: 8px;">
+      — audit trail of generated reports
+    </span>
+  </div>
+
+  <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+    <thead>
+      <tr style="background: var(--verity-gray-pale); border-bottom: 1px solid var(--verity-border);">
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600;">Report</th>
+        <th style="text-align: center; padding: 8px 12px; font-weight: 600;">Status</th>
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600;">Scope</th>
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600;">Requested by</th>
+        <th style="text-align: right;  padding: 8px 12px; font-weight: 600;">Duration</th>
+        <th style="text-align: right;  padding: 8px 12px; font-weight: 600;">When</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for run in recent_runs %}
+      <tr style="border-bottom: 1px solid var(--verity-border);">
+        <td style="padding: 8px 12px;">
+          <a href="/admin/compliance/reports/{{ run.report_code }}" style="color: var(--verity-text); text-decoration: none; font-weight: 500;">
+            {{ run.report_name }}
+          </a>
+        </td>
+        <td style="text-align: center; padding: 8px 12px;">
+          {% if run.status == 'succeeded' %}<span class="verity-badge verity-badge-complete">{{ run.status }}</span>
+          {% elif run.status == 'failed' %}<span class="verity-badge verity-badge-failed">{{ run.status }}</span>
+          {% else %}<span class="verity-badge verity-badge-pending">{{ run.status }}</span>{% endif %}
+        </td>
+        <td style="padding: 8px 12px; font-size: 0.78rem; color: var(--verity-text-light);">
+          {% if run.scope_params %}<code>{{ run.scope_params }}</code>{% else %}—{% endif %}
+        </td>
+        <td style="padding: 8px 12px; font-size: 0.82rem;">{{ run.requested_by or '—' }}</td>
+        <td style="text-align: right; padding: 8px 12px; font-size: 0.78rem; color: var(--verity-text-light);">
+          {% if run.duration_ms %}{{ run.duration_ms }} ms{% else %}—{% endif %}
+        </td>
+        <td style="text-align: right; padding: 8px 12px; font-size: 0.78rem; color: var(--verity-text-light);">
+          {{ run.created_at.strftime('%Y-%m-%d %H:%M') if run.created_at else '—' }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% endblock %}

@@ -2334,33 +2334,44 @@ async def seed_decisions(verity, agent_versions, task_versions):
 
     print(f"  + {decision_count} decision logs (4 submissions × 4 steps)")
 
-    # Seed overrides
-    from verity.models.decision import OverrideLogCreate
-    from verity.models.lifecycle import EntityType as ET
-
+    # Demo HITL overrides — written into hitl_override (the new
+    # per-field, JSONPath-anchored table). The /admin/overrides
+    # page reads from hitl_override; these rows make the page
+    # non-empty out of the box and demonstrate the AI-vs-human
+    # value pattern.
     for override_type, decision_id, version_id, sub_id in override_decisions:
         if override_type == "triage":
-            await verity.decisions.record_override(OverrideLogCreate(
-                decision_log_id=decision_id,
-                entity_type=ET.AGENT, entity_version_id=version_id,
-                overrider_name="David Park", overrider_role="Senior Underwriter",
-                override_reason_code="risk_assessment_disagree",
-                override_notes="Regulatory investigation is routine SEC review, not enforcement action. Downgrading risk assessment from Amber to Green based on direct discussion with insured's counsel.",
-                ai_recommendation={"risk_score": "Amber", "routing": "assign_to_senior_uw"},
-                human_decision={"risk_score": "Green", "routing": "assign_to_uw"},
-            ))
+            # Senior UW disagreed with the AI's Amber → set Green.
+            await verity.record_hitl_override(
+                decision_log_id  = decision_id,
+                output_path      = "$.risk_score",
+                ai_value         = "Amber",
+                ai_found         = True,
+                hitl_value       = "Green",
+                application      = "uw_demo",
+                entity_type      = "submission",
+                entity_reference = sub_id,
+                fact_type        = "risk_score",
+                created_by       = "David Park",
+                reason           = "Regulatory investigation is routine SEC review, not enforcement action. Downgrading from Amber to Green based on direct discussion with insured's counsel.",
+            )
         elif override_type == "appetite":
-            await verity.decisions.record_override(OverrideLogCreate(
-                decision_log_id=decision_id,
-                entity_type=ET.AGENT, entity_version_id=version_id,
-                overrider_name="Lisa Wong", overrider_role="VP Underwriting",
-                override_reason_code="client_relationship",
-                override_notes="Long-standing client relationship with strong premium history. Accepting despite guideline §4.1 SIC code exclusion per management exception protocol.",
-                ai_recommendation={"determination": "outside_appetite"},
-                human_decision={"determination": "within_appetite", "exception_approved": True},
-            ))
+            # VP UW approved an exception to §4.1 SIC code exclusion.
+            await verity.record_hitl_override(
+                decision_log_id  = decision_id,
+                output_path      = "$.determination",
+                ai_value         = "outside_appetite",
+                ai_found         = True,
+                hitl_value       = "within_appetite",
+                application      = "uw_demo",
+                entity_type      = "submission",
+                entity_reference = sub_id,
+                fact_type        = "appetite_determination",
+                created_by       = "Lisa Wong",
+                reason           = "Long-standing client relationship with strong premium history. Management exception protocol applied to §4.1 SIC code exclusion.",
+            )
 
-    print(f"  + {len(override_decisions)} override logs")
+    print(f"  + {len(override_decisions)} HITL overrides (hitl_override)")
 
 
 # ══════════════════════════════════════════════════════════════
