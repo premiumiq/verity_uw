@@ -1426,6 +1426,9 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
         features = await verity.db.fetch_all(
             "list_features_for_canonical", {"canonical_code": canonical_code}
         )
+        reports = await verity.db.fetch_all(
+            "list_reports_for_canonical", {"canonical_code": canonical_code}
+        )
         return _render(
             templates, request, "compliance_canonical_detail.html",
             active_page="compliance",
@@ -1433,6 +1436,7 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             canonical=canonical,
             provisions=provisions,
             features=features,
+            reports=reports,
         )
 
     @router.get("/compliance/features", response_class=HTMLResponse)
@@ -1504,6 +1508,132 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             subnav_active="features",
             feature=feature,
             canonicals=canonicals,
+        )
+
+    @router.get("/compliance/reports", response_class=HTMLResponse)
+    async def compliance_reports_list(request: Request):
+        await verity.ensure_connected()
+        reports     = await verity.db.fetch_all("list_active_reports")
+        recent_runs = await verity.db.fetch_all("list_recent_report_runs")
+        return _render(
+            templates, request, "compliance_reports.html",
+            active_page="compliance",
+            subnav_active="reports",
+            reports=reports,
+            recent_runs=recent_runs,
+        )
+
+    @router.get("/compliance/reports/{report_code}", response_class=HTMLResponse)
+    async def compliance_report_detail(request: Request, report_code: str):
+        from verity.reporting import (
+            get_report_definition,
+            get_report_canonicals,
+            get_report_field_manifest,
+        )
+        await verity.ensure_connected()
+
+        report = await get_report_definition(verity, report_code)
+        if not report:
+            raise HTTPException(status_code=404, detail="Report not found")
+
+        canonicals = await get_report_canonicals(verity, report_code)
+        manifest   = await get_report_field_manifest(verity, report_code)
+
+        return _render(
+            templates, request, "compliance_report_detail.html",
+            active_page="compliance",
+            subnav_active="reports",
+            report=report,
+            canonicals=canonicals,
+            manifest=manifest,
+        )
+
+    @router.post("/compliance/reports/{report_code}/generate")
+    async def compliance_report_generate(request: Request, report_code: str):
+        """Resolve dataset, render DOCX, log run, stream the file."""
+        from datetime import datetime
+        from fastapi.responses import FileResponse
+        import json
+        import time
+        from verity.reporting import (
+            get_report_definition,
+            resolve_dataset,
+            render_docx,
+        )
+        await verity.ensure_connected()
+
+        report = await get_report_definition(verity, report_code)
+        if not report:
+            raise HTTPException(status_code=404, detail="Report not found")
+
+        # Build scope from form data (skipping empty fields).
+        form = await request.form()
+        scope = {k: v for k, v in form.items() if v}
+
+        # Audit row (insert as 'pending'; finalize after render).
+        row = await verity.db.fetch_one_raw(
+            """
+            INSERT INTO verity_compliance.report_run_log
+                (report_id, requested_by, scope_params, output_formats, status)
+            VALUES (%(report_id)s, %(by)s, %(scope)s::jsonb, %(formats)s, 'pending')
+            RETURNING id
+            """,
+            {
+                "report_id": str(report["id"]),
+                "by": "admin",  # TODO: real auth (rest-api-auth.md enhancement)
+                "scope": json.dumps(scope),
+                "formats": ["docx"],
+            },
+        )
+        run_id = row["id"]
+
+        t0 = time.perf_counter()
+        try:
+            dataset = await resolve_dataset(verity, report_code, scope)
+            ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+            output_path = f"/tmp/verity-reports/{report_code}__{ts}.docx"
+            saved = render_docx(
+                dataset,
+                report_code=report_code,
+                docx_template=report.get("docx_template"),
+                output_path=output_path,
+            )
+            duration_ms = int((time.perf_counter() - t0) * 1000)
+            await verity.db.execute_raw(
+                """
+                UPDATE verity_compliance.report_run_log
+                SET status = 'succeeded',
+                    artifact_uris = %(artifacts)s::jsonb,
+                    duration_ms   = %(dur)s,
+                    completed_at  = now()
+                WHERE id = %(id)s
+                """,
+                {
+                    "artifacts": json.dumps({"docx": str(saved)}),
+                    "dur":       duration_ms,
+                    "id":        str(run_id),
+                },
+            )
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - t0) * 1000)
+            await verity.db.execute_raw(
+                """
+                UPDATE verity_compliance.report_run_log
+                SET status = 'failed',
+                    error_message = %(msg)s,
+                    duration_ms   = %(dur)s,
+                    completed_at  = now()
+                WHERE id = %(id)s
+                """,
+                {"msg": str(exc), "dur": duration_ms, "id": str(run_id)},
+            )
+            raise HTTPException(status_code=500, detail=f"Report generation failed: {exc}")
+
+        download_name = f"{report_code}__{ts}.docx"
+        return FileResponse(
+            path=str(saved),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename=download_name,
         )
 
     @router.get("/compliance/bridges", response_class=HTMLResponse)

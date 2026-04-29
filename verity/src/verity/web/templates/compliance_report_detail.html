@@ -1,0 +1,187 @@
+{# Single report detail — scope form, manifest, canonicals, generate button. #}
+{% extends "base.html" %}
+
+{% block title %}{{ report.name }} — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/compliance/">Compliance</a>
+    <span class="separator">›</span>
+    <a href="/admin/compliance/reports">Reports</a>
+    <span class="separator">›</span>
+    <span>{{ report.code }}</span>
+{% endblock %}
+
+{% block page_title %}{{ report.name }}{% endblock %}
+
+{% block content %}
+
+{% include "partials/_compliance_subnav.html" %}
+
+{# ── Header card ─────────────────────────────────────────── #}
+<div class="verity-card" style="margin-bottom: 16px;">
+  <div class="verity-detail-grid">
+    <div class="verity-detail-label">Code</div>
+    <div class="verity-detail-value"><code>{{ report.code }}</code></div>
+
+    <div class="verity-detail-label">Description</div>
+    <div class="verity-detail-value" style="line-height: 1.5; white-space: pre-line;">
+      {{ report.description or '—' }}
+    </div>
+
+    <div class="verity-detail-label">Kind</div>
+    <div class="verity-detail-value">{{ report.report_kind }}</div>
+
+    <div class="verity-detail-label">Output formats</div>
+    <div class="verity-detail-value">
+      {% for fmt in report.output_formats %}
+      <span style="display: inline-block; padding: 2px 6px; margin: 0 2px 0 0;
+                   border: 1px solid var(--verity-border); border-radius: 4px;
+                   background: var(--verity-gray-pale); font-size: 0.75rem;">{{ fmt|upper }}</span>
+      {% endfor %}
+    </div>
+
+    {% if report.docx_template %}
+    <div class="verity-detail-label">DOCX template</div>
+    <div class="verity-detail-value"><code>{{ report.docx_template }}</code></div>
+    {% endif %}
+  </div>
+</div>
+
+{# ── Scope + Generate form ───────────────────────────────── #}
+<div class="verity-card" style="margin-bottom: 16px;">
+  <div class="verity-card-header">Generate Report</div>
+
+  <form method="post" action="/admin/compliance/reports/{{ report.code }}/generate"
+        style="padding: 8px 0;">
+
+    {# Scope params from JSON Schema. We render text/select/date inputs. #}
+    {% set props = (report.scope_params or {}).get('properties') or {} %}
+    {% if props %}
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 12px;">
+      {% for key, spec in props.items() %}
+      <label style="font-size: 0.85rem; color: var(--verity-text-light); display: block;">
+        <span style="display: block; margin-bottom: 4px;">{{ key }}</span>
+        {% if spec.enum %}
+          <select name="{{ key }}"
+                  style="width: 100%; padding: 6px 8px; border: 1px solid var(--verity-border);
+                         border-radius: 4px; font-size: 0.85rem;">
+            <option value="">— any —</option>
+            {% for opt in spec.enum %}
+            <option value="{{ opt }}">{{ opt }}</option>
+            {% endfor %}
+          </select>
+        {% elif spec.format == 'date' %}
+          <input type="date" name="{{ key }}"
+                 style="width: 100%; padding: 6px 8px; border: 1px solid var(--verity-border);
+                        border-radius: 4px; font-size: 0.85rem;">
+        {% else %}
+          <input type="text" name="{{ key }}"
+                 placeholder="{{ spec.description or '' }}"
+                 style="width: 100%; padding: 6px 8px; border: 1px solid var(--verity-border);
+                        border-radius: 4px; font-size: 0.85rem;">
+        {% endif %}
+        {% if spec.description %}
+        <span style="display: block; margin-top: 2px; font-size: 0.75rem; color: var(--verity-text-light);">
+          {{ spec.description }}
+        </span>
+        {% endif %}
+      </label>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p style="font-size: 0.85rem; color: var(--verity-text-light); margin-bottom: 12px;">
+      This report has no configurable scope parameters.
+    </p>
+    {% endif %}
+
+    <button type="submit" class="verity-btn verity-btn-primary">
+      Generate &amp; Download DOCX ⬇
+    </button>
+  </form>
+</div>
+
+{# ── Canonicals this report covers ─────────────────────── #}
+<div class="verity-card" style="padding: 0; margin-bottom: 16px;">
+  <div class="verity-card-header" style="padding: 12px 16px; border-bottom: 1px solid var(--verity-border);">
+    Canonical Requirements covered ({{ canonicals|length }})
+    <span style="font-weight: 400; font-size: 0.78rem; color: var(--verity-text-light); margin-left: 8px;">
+      — what regulatory obligations this report provides evidence for
+    </span>
+  </div>
+
+  <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+    <thead>
+      <tr style="background: var(--verity-gray-pale); border-bottom: 1px solid var(--verity-border);">
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600; width: 130px;">Theme</th>
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600;">Canonical</th>
+        <th style="text-align: center; padding: 8px 12px; font-weight: 600; width: 110px;">Coverage</th>
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600;">Section</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in canonicals %}
+      <tr style="border-bottom: 1px solid var(--verity-border);">
+        <td style="padding: 8px 12px; color: var(--verity-text-light); font-size: 0.78rem;">{{ c.theme_name }}</td>
+        <td style="padding: 8px 12px;">
+          <a href="/admin/compliance/canonicals/{{ c.code }}"
+             style="color: var(--verity-text); text-decoration: none; font-weight: 500;">
+            {{ c.title }}
+          </a>
+          <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 2px;">
+            <code>{{ c.code }}</code>
+          </div>
+        </td>
+        <td style="text-align: center; padding: 8px 12px;">
+          {% if c.coverage_level == 'full' %}<span class="verity-badge" style="background: #D8EBDC; color: #3E6044;">✓ Full</span>
+          {% elif c.coverage_level == 'substantial' %}<span class="verity-badge" style="background: #DDE8F8; color: var(--verity-blue-dark);">◐ Subst.</span>
+          {% elif c.coverage_level == 'partial' %}<span class="verity-badge" style="background: #FAEED1; color: #816014;">◑ Partial</span>
+          {% elif c.coverage_level == 'gap' %}<span class="verity-badge" style="background: #F5DCDC; color: #A23838;">✗ Gap</span>
+          {% endif %}
+        </td>
+        <td style="padding: 8px 12px; color: var(--verity-text-light); font-size: 0.82rem;">{{ c.section or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# ── Field manifest ────────────────────────────────────── #}
+<div class="verity-card" style="padding: 0;">
+  <div class="verity-card-header" style="padding: 12px 16px; border-bottom: 1px solid var(--verity-border);">
+    Field Manifest ({{ manifest|length }})
+    <span style="font-weight: 400; font-size: 0.78rem; color: var(--verity-text-light); margin-left: 8px;">
+      — which mart_field rows back this report (auto-resolved from canonicals)
+    </span>
+  </div>
+
+  <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+    <thead>
+      <tr style="background: var(--verity-gray-pale); border-bottom: 1px solid var(--verity-border);">
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600; width: 200px;">Source</th>
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600;">Column</th>
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600; width: 100px;">Type</th>
+        <th style="text-align: center; padding: 8px 12px; font-weight: 600; width: 100px;">Role</th>
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600;">Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in manifest %}
+      <tr style="border-bottom: 1px solid var(--verity-border);">
+        <td style="padding: 8px 12px; font-size: 0.78rem; color: var(--verity-text-light);">
+          <code>verity_analytics.{{ f.table_name }}</code>
+        </td>
+        <td style="padding: 8px 12px;">
+          <code>{{ f.column_name }}</code>
+          {% if f.is_pii %}<span class="verity-badge" style="background: #F5DCDC; color: #A23838; margin-left: 6px;">PII</span>{% endif %}
+        </td>
+        <td style="padding: 8px 12px; font-size: 0.78rem; color: var(--verity-text-light);">{{ f.semantic_type }}</td>
+        <td style="text-align: center; padding: 8px 12px; font-size: 0.78rem; color: var(--verity-blue-deep);">{{ f.role }}</td>
+        <td style="padding: 8px 12px; font-size: 0.82rem; color: var(--verity-text);">{{ f.description or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

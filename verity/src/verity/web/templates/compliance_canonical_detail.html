@@ -54,6 +54,61 @@
   </div>
 </div>
 
+{# ── REPORTS THAT EVIDENCE THIS CANONICAL ───────────────────── #}
+{% if reports %}
+<div class="verity-card" style="margin-bottom: 16px; padding: 0;">
+  <div class="verity-card-header" style="padding: 12px 16px; border-bottom: 1px solid var(--verity-border);">
+    Reports providing evidence ({{ reports|length }})
+    <span style="font-weight: 400; font-size: 0.78rem; color: var(--verity-text-light); margin-left: 8px;">
+      — generate any of these to produce regulator-ready documentation
+    </span>
+  </div>
+
+  <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+    <thead>
+      <tr style="background: var(--verity-gray-pale); border-bottom: 1px solid var(--verity-border);">
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600;">Report</th>
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600; width: 240px;">Section in report</th>
+        <th style="text-align: left;   padding: 8px 12px; font-weight: 600; width: 200px;">Outputs</th>
+        <th style="text-align: right;  padding: 8px 12px; font-weight: 600; width: 200px;">Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in reports %}
+      <tr style="border-bottom: 1px solid var(--verity-border);">
+        <td style="padding: 8px 12px;">
+          <a href="/admin/compliance/reports/{{ r.code }}"
+             style="color: var(--verity-text); text-decoration: none; font-weight: 500;">
+            {{ r.name }}
+          </a>
+          <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 2px;">
+            <code>{{ r.code }}</code>
+          </div>
+        </td>
+        <td style="padding: 8px 12px; color: var(--verity-text-light); font-size: 0.82rem;">
+          {{ r.section or '—' }}
+        </td>
+        <td style="padding: 8px 12px;">
+          {% for fmt in r.output_formats %}
+          <span style="display: inline-block; padding: 2px 6px; margin: 0 2px 0 0;
+                       border: 1px solid var(--verity-border); border-radius: 4px;
+                       background: var(--verity-gray-pale); font-size: 0.7rem;">
+            {{ fmt|upper }}
+          </span>
+          {% endfor %}
+        </td>
+        <td style="text-align: right; padding: 8px 12px;">
+          <a href="/admin/compliance/reports/{{ r.code }}" class="verity-btn verity-btn-primary verity-btn-sm">
+            Configure & Generate →
+          </a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 {# ── PROVISIONS (regulatory side) ──────────────────────────── #}
 <div class="verity-card" style="margin-bottom: 16px; padding: 0;">
   <div class="verity-card-header" style="padding: 12px 16px; border-bottom: 1px solid var(--verity-border);">

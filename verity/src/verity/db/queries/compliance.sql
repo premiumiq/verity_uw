@@ -322,6 +322,49 @@ WHERE (%(framework_code)s::text    IS NULL OR f.code  = %(framework_code)s)
 ORDER BY f.sort_seq, p.sort_seq, prm.match_strength DESC;
 
 
+-- name: list_active_reports
+-- Reports list page. Includes canonical-coverage counts per report so the
+-- card UI can show "this report evidences N canonical requirements".
+SELECT
+    rd.id, rd.code, rd.name, rd.description, rd.report_kind,
+    rd.docx_template, rd.output_formats, rd.scope_params,
+    rd.sort_seq, rd.is_active, rd.created_at,
+    (SELECT COUNT(*) FROM verity_compliance.report_requirement rr
+        WHERE rr.report_id = rd.id) AS canonical_count
+FROM verity_compliance.report_definition rd
+WHERE rd.is_active = true
+ORDER BY rd.sort_seq, rd.code;
+
+
+-- name: list_recent_report_runs
+-- Audit trail card on the report list page (most recent runs across all reports).
+SELECT
+    rrl.id, rrl.report_id, rrl.requested_by, rrl.scope_params,
+    rrl.output_formats, rrl.status, rrl.duration_ms,
+    rrl.created_at, rrl.completed_at,
+    rd.code  AS report_code,
+    rd.name  AS report_name
+FROM       verity_compliance.report_run_log rrl
+JOIN       verity_compliance.report_definition rd ON rd.id = rrl.report_id
+ORDER BY rrl.created_at DESC
+LIMIT 25;
+
+
+-- name: list_reports_for_canonical
+-- Reverse lookup: which active reports provide evidence for this canonical?
+-- Used on the canonical detail page to surface the "evidence pathway".
+SELECT
+    rd.id, rd.code, rd.name, rd.description,
+    rd.report_kind, rd.output_formats,
+    rr.section, rr.sort_seq AS requirement_sort
+FROM       verity_compliance.canonical_requirement cr
+JOIN       verity_compliance.report_requirement   rr ON rr.canonical_requirement_id = cr.id
+JOIN       verity_compliance.report_definition    rd ON rd.id = rr.report_id
+WHERE cr.code = %(canonical_code)s
+  AND rd.is_active = true
+ORDER BY rd.sort_seq, rd.code;
+
+
 -- name: list_canonical_feature_bridges
 -- Filterable table of every canonical↔feature link for the Bridges page (second tab).
 SELECT
