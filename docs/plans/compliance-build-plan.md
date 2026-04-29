@@ -13,7 +13,7 @@ This doc is the working tracker. Each sub-step is a single reviewable commit. Ar
 ## Phase status
 
 - [ ] **Phase 1** — L3 compliance metamodel + seed
-  - [x] 1.1 — Schema only (committed 9ae919b — 11 tables in `verity_compliance`, empty `verity_analytics` schema)
+  - [x] 1.1 — Schema only (committed 9ae919b — 11 tables in `compliance`, empty `analytics` schema)
   - [x] 1.2 — Static seeds — 5 frameworks, 15 themes, 4 planes, 13 capabilities, 68 features. Reviewable via `verity compliance show` (tree print) or directly in `verity/src/verity/setup/compliance_seed_static.yaml`.
   - [x] 1.2.5 — `verity/src/verity/setup/compliance_seed_data.yaml` authored: 37 canonicals across 15 themes, 48 provisions across 5 frameworks, 126 feature links, 51 provision↔canonical bridges, 37 coverage rows.
   - [x] 1.3 — Seeder extended; `verity compliance seed-data` populates all of the above; `verity compliance show` renders coverage rollup (15 Full / 15 Substantial / 6 Partial / 1 Gap).
@@ -36,8 +36,8 @@ This doc is the working tracker. Each sub-step is a single reviewable commit. Ar
 - Applied alongside existing `schema.sql` at startup; both run via the existing init path.
 - Pydantic models: `verity/src/verity/models/compliance.py` (new file)
 - Two Postgres schemas created in `verity_db`:
-  - `verity_compliance` — L3 metamodel + L4 semantic layer + L5 report definitions (this phase: L3 only)
-  - `verity_analytics` — created empty, populated in Phase 2
+  - `compliance` — L3 metamodel + L4 semantic layer + L5 report definitions (this phase: L3 only)
+  - `analytics` — created empty, populated in Phase 2
 
 **Conventions:**
 
@@ -52,13 +52,13 @@ This doc is the working tracker. Each sub-step is a single reviewable commit. Ar
 
 ```sql
 -- =========================================================================
--- verity_compliance schema — L3 metamodel
+-- compliance schema — L3 metamodel
 -- =========================================================================
-CREATE SCHEMA IF NOT EXISTS verity_compliance;
-CREATE SCHEMA IF NOT EXISTS verity_analytics;   -- empty, populated in Phase 2
+CREATE SCHEMA IF NOT EXISTS compliance;
+CREATE SCHEMA IF NOT EXISTS analytics;   -- empty, populated in Phase 2
 
 -- ---- 1. Embedding model identity ----------------------------------------
-CREATE TABLE verity_compliance.embedding_config (
+CREATE TABLE compliance.embedding_config (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     model_name      text NOT NULL,             -- 'BAAI/bge-small-en-v1.5'
     model_version   text NOT NULL,             -- 'v1.5'
@@ -69,11 +69,11 @@ CREATE TABLE verity_compliance.embedding_config (
 );
 -- Only one row should be is_current=true at a time.
 CREATE UNIQUE INDEX embedding_config_one_current
-    ON verity_compliance.embedding_config (is_current)
+    ON compliance.embedding_config (is_current)
     WHERE is_current = true;
 
 -- ---- 2. Frameworks side --------------------------------------------------
-CREATE TABLE verity_compliance.regulatory_framework (
+CREATE TABLE compliance.regulatory_framework (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     code            text NOT NULL UNIQUE,      -- 'SR_11_7', 'NAIC_AI_BULLETIN', ...
     name            text NOT NULL,
@@ -90,9 +90,9 @@ CREATE TABLE verity_compliance.regulatory_framework (
     CHECK (valid_from <= valid_to)
 );
 
-CREATE TABLE verity_compliance.regulatory_provision (
+CREATE TABLE compliance.regulatory_provision (
     id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    framework_id       uuid NOT NULL REFERENCES verity_compliance.regulatory_framework(id)
+    framework_id       uuid NOT NULL REFERENCES compliance.regulatory_framework(id)
                             ON DELETE RESTRICT,
     citation           text NOT NULL,           -- '§II.A', '§3.1', etc.
     title              text NOT NULL,
@@ -102,17 +102,17 @@ CREATE TABLE verity_compliance.regulatory_provision (
     valid_to           date NOT NULL DEFAULT DATE '2099-12-31',
     sort_seq           int NOT NULL DEFAULT 0,
     embedding          vector(384),             -- populated by Phase 1.5
-    embedding_model_id uuid REFERENCES verity_compliance.embedding_config(id),
+    embedding_model_id uuid REFERENCES compliance.embedding_config(id),
     created_at         timestamptz NOT NULL DEFAULT now(),
     updated_at         timestamptz NOT NULL DEFAULT now(),
     UNIQUE (framework_id, citation),
     CHECK (valid_from <= valid_to)
 );
-CREATE INDEX provision_framework_idx ON verity_compliance.regulatory_provision(framework_id);
+CREATE INDEX provision_framework_idx ON compliance.regulatory_provision(framework_id);
 -- IVFFlat / HNSW index on embedding deferred to Phase 1.5 (need data first).
 
 -- ---- 3. Canonical requirements side --------------------------------------
-CREATE TABLE verity_compliance.canonical_requirement_theme (
+CREATE TABLE compliance.canonical_requirement_theme (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     code            text NOT NULL UNIQUE,      -- 'governance', 'fairness', 'data_quality', ...
     name            text NOT NULL,
@@ -121,28 +121,28 @@ CREATE TABLE verity_compliance.canonical_requirement_theme (
     created_at      timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE verity_compliance.canonical_requirement (
+CREATE TABLE compliance.canonical_requirement (
     id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    theme_id           uuid NOT NULL REFERENCES verity_compliance.canonical_requirement_theme(id)
+    theme_id           uuid NOT NULL REFERENCES compliance.canonical_requirement_theme(id)
                             ON DELETE RESTRICT,
     code               text NOT NULL UNIQUE,   -- 'model_inventory', 'fairness_pre_deployment', ...
     title              text NOT NULL,
     description        text,
     sort_seq           int NOT NULL DEFAULT 0,
     embedding          vector(384),
-    embedding_model_id uuid REFERENCES verity_compliance.embedding_config(id),
+    embedding_model_id uuid REFERENCES compliance.embedding_config(id),
     created_at         timestamptz NOT NULL DEFAULT now(),
     updated_at         timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX canonical_requirement_theme_idx
-    ON verity_compliance.canonical_requirement(theme_id);
+    ON compliance.canonical_requirement(theme_id);
 
 -- ---- 4. Provision ↔ canonical bridge (M:N) -------------------------------
-CREATE TABLE verity_compliance.provision_requirement_map (
+CREATE TABLE compliance.provision_requirement_map (
     id                       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    provision_id             uuid NOT NULL REFERENCES verity_compliance.regulatory_provision(id)
+    provision_id             uuid NOT NULL REFERENCES compliance.regulatory_provision(id)
                                   ON DELETE CASCADE,
-    canonical_requirement_id uuid NOT NULL REFERENCES verity_compliance.canonical_requirement(id)
+    canonical_requirement_id uuid NOT NULL REFERENCES compliance.canonical_requirement(id)
                                   ON DELETE CASCADE,
     -- match_strength: semantic alignment of this provision to this canonical requirement.
     -- NOT coverage. Coverage lives in requirement_coverage.coverage_level.
@@ -160,12 +160,12 @@ CREATE TABLE verity_compliance.provision_requirement_map (
     UNIQUE (provision_id, canonical_requirement_id)
 );
 CREATE INDEX provision_req_map_provision_idx
-    ON verity_compliance.provision_requirement_map(provision_id);
+    ON compliance.provision_requirement_map(provision_id);
 CREATE INDEX provision_req_map_canonical_idx
-    ON verity_compliance.provision_requirement_map(canonical_requirement_id);
+    ON compliance.provision_requirement_map(canonical_requirement_id);
 
 -- ---- 5. Features hierarchy (replaces G1/G2/R1 composite codes) -----------
-CREATE TABLE verity_compliance.feature_plane (
+CREATE TABLE compliance.feature_plane (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     code            text NOT NULL UNIQUE,      -- 'governance', 'runtime', 'agents', 'studio'
     name            text NOT NULL,
@@ -174,9 +174,9 @@ CREATE TABLE verity_compliance.feature_plane (
     created_at      timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE verity_compliance.feature_capability (
+CREATE TABLE compliance.feature_capability (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    plane_id        uuid NOT NULL REFERENCES verity_compliance.feature_plane(id)
+    plane_id        uuid NOT NULL REFERENCES compliance.feature_plane(id)
                          ON DELETE RESTRICT,
     code            text NOT NULL,             -- 'asset_registry', 'lifecycle_engine', ...
     name            text NOT NULL,
@@ -186,9 +186,9 @@ CREATE TABLE verity_compliance.feature_capability (
     UNIQUE (plane_id, code)
 );
 
-CREATE TABLE verity_compliance.feature (
+CREATE TABLE compliance.feature (
     id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    capability_id      uuid NOT NULL REFERENCES verity_compliance.feature_capability(id)
+    capability_id      uuid NOT NULL REFERENCES compliance.feature_capability(id)
                             ON DELETE RESTRICT,
     code               text NOT NULL,          -- 'task_version_registration', 'agent_loop', ...
     name               text NOT NULL,
@@ -197,19 +197,19 @@ CREATE TABLE verity_compliance.feature (
                             CHECK (status IN ('shipped','planned','partial','deprecated')),
     sort_seq           int NOT NULL DEFAULT 0,
     embedding          vector(384),
-    embedding_model_id uuid REFERENCES verity_compliance.embedding_config(id),
+    embedding_model_id uuid REFERENCES compliance.embedding_config(id),
     created_at         timestamptz NOT NULL DEFAULT now(),
     updated_at         timestamptz NOT NULL DEFAULT now(),
     UNIQUE (capability_id, code)
 );
-CREATE INDEX feature_capability_idx ON verity_compliance.feature(capability_id);
+CREATE INDEX feature_capability_idx ON compliance.feature(capability_id);
 
 -- ---- 6. Requirement ↔ feature link (M:N) ---------------------------------
-CREATE TABLE verity_compliance.requirement_feature_link (
+CREATE TABLE compliance.requirement_feature_link (
     id                       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    canonical_requirement_id uuid NOT NULL REFERENCES verity_compliance.canonical_requirement(id)
+    canonical_requirement_id uuid NOT NULL REFERENCES compliance.canonical_requirement(id)
                                   ON DELETE CASCADE,
-    feature_id               uuid NOT NULL REFERENCES verity_compliance.feature(id)
+    feature_id               uuid NOT NULL REFERENCES compliance.feature(id)
                                   ON DELETE CASCADE,
     role                     text NOT NULL DEFAULT 'primary'
                                   CHECK (role IN ('primary','supporting')),
@@ -219,10 +219,10 @@ CREATE TABLE verity_compliance.requirement_feature_link (
 );
 
 -- ---- 7. Coverage ---------------------------------------------------------
-CREATE TABLE verity_compliance.requirement_coverage (
+CREATE TABLE compliance.requirement_coverage (
     id                       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     canonical_requirement_id uuid NOT NULL UNIQUE
-                                  REFERENCES verity_compliance.canonical_requirement(id)
+                                  REFERENCES compliance.canonical_requirement(id)
                                   ON DELETE CASCADE,
     coverage_level           text NOT NULL
                                   CHECK (coverage_level IN ('full','substantial','partial','gap')),
@@ -248,7 +248,7 @@ One model per table, mirror of DDL. UUID fields typed `uuid.UUID`, vector fields
 
 ### Open questions for review
 
-1. **Schema name `verity_compliance` vs `compliance`** — went with the namespaced version for symmetry with `verity_analytics`. OK?
+1. **Schema name `compliance` vs `compliance`** — went with the namespaced version for symmetry with `analytics`. OK?
 2. **`embedding_model_id` per row** — added so a row remembers which model embedded it (M8 from review). Adds a column; worth it for the staleness-aware reembed path.
 3. **`text` column on `regulatory_provision`** — full regulation language is long. `text` is unbounded; fine in PG. Acceptable?
 4. **`match_strength` and `confidence` as `numeric(3,2)`** — gives 0.00–1.00 with two decimals. Fine for cosine-similarity-derived weights.
@@ -332,7 +332,7 @@ Idempotent (UPSERT by natural key). Re-running with an updated YAML produces the
 
 | # | Question | Default if not raised |
 |---|---|---|
-| D-1 | Schema namespace name (`verity_compliance` vs `compliance`) | `verity_compliance` |
+| D-1 | Schema namespace name (`compliance` vs `compliance`) | `compliance` |
 | D-2 | `embedding_model_id` per row | yes, include |
 | D-3 | Cross-framework requirements (matrix rows 44–47) — virtual framework or duplicated provisions? | duplicated provisions on each contributing framework, single canonical_requirement |
 | D-4 | Coverage as 1:1 table vs inlined | separate table |

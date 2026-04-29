@@ -2,8 +2,8 @@
 artifacts for customer-warehouse ingest.
 
 Produces a directory of:
-    ddl/verity_analytics.sql       — recreate the views in the customer DB
-    ddl/verity_compliance.sql      — the metamodel + reports tables
+    ddl/analytics.sql       — recreate the views in the customer DB
+    ddl/compliance.sql      — the metamodel + reports tables
     metamodel.yaml                 — frameworks, provisions, canonicals,
                                      bridges, coverage, features
     reports.yaml                   — mart_field, evidence fields, report
@@ -164,7 +164,7 @@ async def _export_view_pages(
         async with conn.cursor() as cur:
             await cur.execute(
                 f"""
-                SELECT * FROM verity_analytics.{view_name}
+                SELECT * FROM analytics.{view_name}
                 WHERE (ingest_ts, COALESCE(source_pk, '')) > (%(ts)s, %(pk)s)
                   AND ingest_ts < %(until)s
                 ORDER BY ingest_ts ASC, source_pk ASC
@@ -212,43 +212,43 @@ async def _dump_metamodel(conn) -> dict[str, Any]:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "frameworks": await _fetch_dicts(
             conn,
-            "SELECT * FROM verity_compliance.regulatory_framework ORDER BY sort_seq, code",
+            "SELECT * FROM compliance.regulatory_framework ORDER BY sort_seq, code",
         ),
         "provisions": await _fetch_dicts(
             conn,
-            "SELECT * FROM verity_compliance.regulatory_provision ORDER BY framework_id, sort_seq",
+            "SELECT * FROM compliance.regulatory_provision ORDER BY framework_id, sort_seq",
         ),
         "themes": await _fetch_dicts(
             conn,
-            "SELECT * FROM verity_compliance.canonical_requirement_theme ORDER BY sort_seq, code",
+            "SELECT * FROM compliance.canonical_requirement_theme ORDER BY sort_seq, code",
         ),
         "canonical_requirements": await _fetch_dicts(
             conn,
-            "SELECT * FROM verity_compliance.canonical_requirement ORDER BY sort_seq, code",
+            "SELECT * FROM compliance.canonical_requirement ORDER BY sort_seq, code",
         ),
         "provision_requirement_map": await _fetch_dicts(
             conn,
-            "SELECT * FROM verity_compliance.provision_requirement_map",
+            "SELECT * FROM compliance.provision_requirement_map",
         ),
         "feature_planes": await _fetch_dicts(
             conn,
-            "SELECT * FROM verity_compliance.feature_plane ORDER BY sort_seq, code",
+            "SELECT * FROM compliance.feature_plane ORDER BY sort_seq, code",
         ),
         "feature_capabilities": await _fetch_dicts(
             conn,
-            "SELECT * FROM verity_compliance.feature_capability ORDER BY sort_seq, code",
+            "SELECT * FROM compliance.feature_capability ORDER BY sort_seq, code",
         ),
         "features": await _fetch_dicts(
             conn,
-            "SELECT * FROM verity_compliance.feature ORDER BY capability_id, sort_seq, code",
+            "SELECT * FROM compliance.feature ORDER BY capability_id, sort_seq, code",
         ),
         "requirement_feature_link": await _fetch_dicts(
             conn,
-            "SELECT * FROM verity_compliance.requirement_feature_link",
+            "SELECT * FROM compliance.requirement_feature_link",
         ),
         "requirement_coverage": await _fetch_dicts(
             conn,
-            "SELECT * FROM verity_compliance.requirement_coverage",
+            "SELECT * FROM compliance.requirement_coverage",
         ),
     }
 
@@ -258,19 +258,19 @@ async def _dump_reports_metadata(conn) -> dict[str, Any]:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "mart_fields": await _fetch_dicts(
             conn,
-            "SELECT * FROM verity_analytics.mart_field ORDER BY table_name, sort_seq",
+            "SELECT * FROM analytics.mart_field ORDER BY table_name, sort_seq",
         ),
         "requirement_evidence_field": await _fetch_dicts(
             conn,
-            "SELECT * FROM verity_compliance.requirement_evidence_field",
+            "SELECT * FROM compliance.requirement_evidence_field",
         ),
         "report_definitions": await _fetch_dicts(
             conn,
-            "SELECT * FROM verity_compliance.report_definition ORDER BY sort_seq, code",
+            "SELECT * FROM compliance.report_definition ORDER BY sort_seq, code",
         ),
         "report_requirements": await _fetch_dicts(
             conn,
-            "SELECT * FROM verity_compliance.report_requirement",
+            "SELECT * FROM compliance.report_requirement",
         ),
     }
 
@@ -280,7 +280,7 @@ async def _dump_feed_registry(conn) -> dict[str, Any]:
         conn,
         """
         SELECT view_name AS view, description, sort_seq, is_active
-        FROM verity_analytics.feed_view
+        FROM analytics.feed_view
         WHERE is_active = true
         ORDER BY sort_seq, view_name
         """,

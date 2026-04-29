@@ -1,9 +1,9 @@
 """Verity Reporting — metadata-driven compliance report engine.
 
 A report is rows in:
-    verity_compliance.report_definition
-    verity_compliance.report_requirement (canonicals it covers)
-    verity_compliance.requirement_evidence_field (canonical → mart_field manifest)
+    compliance.report_definition
+    compliance.report_requirement (canonicals it covers)
+    compliance.requirement_evidence_field (canonical → mart_field manifest)
 
 The engine resolves a report definition to a `dataset` dict, then renders that
 dataset through a docx template (docxtpl). Same dataset can also feed an HTML

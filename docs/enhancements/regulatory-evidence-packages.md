@@ -23,7 +23,7 @@ The replacement is a five-layer stack with a metadata-driven semantic layer. See
 
 **Goal:** the 47-requirement matrix becomes queryable data. Coverage Matrix UI reads from DB.
 
-**Schema (in a new `verity_compliance` schema or alongside Verity's existing schema — TBD with first commit):**
+**Schema (in a new `compliance` schema or alongside Verity's existing schema — TBD with first commit):**
 
 - `regulatory_framework`
 - `regulatory_provision` (with `embedding vector(384)`)
@@ -61,7 +61,7 @@ The replacement is a five-layer stack with a metadata-driven semantic layer. See
 
 ## Phase 2 — L2 Compliance Mart Minimum Slice
 
-**Goal:** universal, append-only, CDC-shaped data layer that all reports query. Live in `verity_analytics` schema, same Postgres (per [AD-CS-002](../architecture/compliance-stack.md#ad-cs-002-l2-in-same-postgres-separate-schema)).
+**Goal:** universal, append-only, CDC-shaped data layer that all reports query. Live in `analytics` schema, same Postgres (per [AD-CS-002](../architecture/compliance-stack.md#ad-cs-002-l2-in-same-postgres-separate-schema)).
 
 **Fact tables (append-only, all carry `event_ts` / `ingest_ts` / `source_lsn` / `source_pk`):**
 
@@ -155,7 +155,7 @@ Each report = INSERT report_definition + INSERT N report_requirement rows. New e
 
 - `verity export-compliance --since {ts} --out {dir}`
 - Emits:
-  - `verity_analytics.ddl.sql` — Postgres + Snowflake-compatible DDL
+  - `analytics.ddl.sql` — Postgres + Snowflake-compatible DDL
   - `mart_field.json` — field registry
   - `regulatory_mapping.yaml` — frameworks/provisions/canonical reqs/bridges/coverage
   - `report_definitions.yaml` — packaged reports as data

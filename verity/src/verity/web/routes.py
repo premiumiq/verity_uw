@@ -1798,7 +1798,7 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
         # Audit row (insert as 'pending'; finalize after render).
         row = await verity.db.fetch_one_raw(
             """
-            INSERT INTO verity_compliance.report_run_log
+            INSERT INTO compliance.report_run_log
                 (report_id, requested_by, scope_params, output_formats, status)
             VALUES (%(report_id)s, %(by)s, %(scope)s::jsonb, %(formats)s, 'pending')
             RETURNING id
@@ -1826,7 +1826,7 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             duration_ms = int((time.perf_counter() - t0) * 1000)
             await verity.db.execute_raw(
                 """
-                UPDATE verity_compliance.report_run_log
+                UPDATE compliance.report_run_log
                 SET status = 'succeeded',
                     artifact_uris = %(artifacts)s::jsonb,
                     duration_ms   = %(dur)s,
@@ -1843,7 +1843,7 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             duration_ms = int((time.perf_counter() - t0) * 1000)
             await verity.db.execute_raw(
                 """
-                UPDATE verity_compliance.report_run_log
+                UPDATE compliance.report_run_log
                 SET status = 'failed',
                     error_message = %(msg)s,
                     duration_ms   = %(dur)s,
@@ -1876,7 +1876,7 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
                     f"SELECT count(*) AS row_count, "
                     f"       min(ingest_ts) AS min_ingest_ts, "
                     f"       max(ingest_ts) AS max_ingest_ts "
-                    f"FROM verity_analytics.{v['view_name']}"
+                    f"FROM analytics.{v['view_name']}"
                 )
                 v["row_count"]     = stats["row_count"]     if stats else 0
                 v["min_ingest_ts"] = stats.get("min_ingest_ts") if stats else None
@@ -1910,7 +1910,7 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
 
         frameworks = await verity.db.fetch_all("list_compliance_frameworks_for_matrix")
         planes_rows = await verity.db.fetch_all_raw(
-            "SELECT code, name FROM verity_compliance.feature_plane ORDER BY sort_seq, code"
+            "SELECT code, name FROM compliance.feature_plane ORDER BY sort_seq, code"
         )
 
         pc_bridges: list[dict] = []

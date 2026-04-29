@@ -95,7 +95,7 @@ def build_api_router(verity) -> APIRouter:
     # Reporting — dashboard + inventory aggregates.
     router.include_router(build_reporting_router(verity))
 
-    # Feed (Phase 4 Rung 1) — incremental data pull from verity_analytics
+    # Feed (Phase 4 Rung 1) — incremental data pull from analytics
     # views with keyset pagination and a closed [since, until) window.
     router.include_router(build_feed_router(verity))
 

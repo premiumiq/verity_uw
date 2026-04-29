@@ -69,6 +69,12 @@ async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
                 END $$;
             """)
             # Drop compliance + analytics schemas (everything inside is dropped via CASCADE).
+            await conn.execute("DROP SCHEMA IF EXISTS compliance CASCADE")
+            await conn.execute("DROP SCHEMA IF EXISTS analytics CASCADE")
+            # Legacy names from before the verity_* prefix was dropped. Kept here
+            # so a developer with an old dev DB can run `--drop-existing` and
+            # reach a clean state. Safe to remove once no environment carries
+            # the legacy schemas.
             await conn.execute("DROP SCHEMA IF EXISTS verity_compliance CASCADE")
             await conn.execute("DROP SCHEMA IF EXISTS verity_analytics CASCADE")
             print("Existing schema dropped.")
@@ -109,7 +115,7 @@ async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
                 print(f"Statement: {stmt[:200]}...")
                 raise
 
-        print("Applying verity_analytics views (logical mart over L1)...")
+        print("Applying analytics views (logical mart over L1)...")
         view_statements = _split_sql_statements(compliance_views_sql)
         for i, stmt in enumerate(view_statements, 1):
             stmt = stmt.strip()
@@ -137,12 +143,12 @@ async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
         # Verify compliance schema tables
         result = await conn.execute("""
             SELECT tablename FROM pg_tables
-            WHERE schemaname = 'verity_compliance'
+            WHERE schemaname = 'compliance'
             ORDER BY tablename
         """)
         compliance_tables = [row[0] for row in await result.fetchall()]
         print(
-            f"verity_compliance tables ({len(compliance_tables)}): "
+            f"compliance tables ({len(compliance_tables)}): "
             f"{', '.join(compliance_tables)}"
         )
 

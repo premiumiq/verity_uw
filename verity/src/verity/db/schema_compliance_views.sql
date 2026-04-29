@@ -1,5 +1,5 @@
 -- ============================================================
--- VERITY_DB: verity_analytics views (logical mart over L1)
+-- VERITY_DB: analytics views (logical mart over L1)
 --
 -- Architecture: docs/architecture/compliance-stack.md
 --
@@ -18,7 +18,7 @@
 -- One row per (entity_type, entity_version) covering the three primary
 -- versioned governance entities. Used for Model Inventory, Decision
 -- Audit Trail (entity-side), Fairness Validation (entity-side).
-CREATE OR REPLACE VIEW verity_analytics.v_entity_version AS
+CREATE OR REPLACE VIEW analytics.v_entity_version AS
 WITH agent_v AS (
     SELECT
         av.id::text                         AS source_pk,
@@ -92,7 +92,7 @@ SELECT * FROM prompt_v;
 -- ── v_application_entity ─────────────────────────────────────
 -- Resolves which application owns which entity. Joins back to
 -- v_entity_version on (entity_type, entity_id).
-CREATE OR REPLACE VIEW verity_analytics.v_application_entity AS
+CREATE OR REPLACE VIEW analytics.v_application_entity AS
 SELECT
     ae.id::text                 AS source_pk,
     ae.application_id           AS application_id,
@@ -109,7 +109,7 @@ JOIN application app ON app.id = ae.application_id;
 
 -- ── v_lifecycle_event ───────────────────────────────────────
 -- State transitions from approval_record. One row per HITL approval gate.
-CREATE OR REPLACE VIEW verity_analytics.v_lifecycle_event AS
+CREATE OR REPLACE VIEW analytics.v_lifecycle_event AS
 SELECT
     ar.id::text                 AS source_pk,
     ar.entity_type::text        AS entity_type,
@@ -129,7 +129,7 @@ FROM approval_record ar;
 -- ── v_decision ───────────────────────────────────────────────
 -- One row per agent_decision_log entry. The execution-side data for
 -- Decision Audit Trail report.
-CREATE OR REPLACE VIEW verity_analytics.v_decision AS
+CREATE OR REPLACE VIEW analytics.v_decision AS
 SELECT
     adl.id::text                AS source_pk,
     adl.id                      AS decision_id,
@@ -161,7 +161,7 @@ FROM agent_decision_log adl;
 -- ── v_validation_result ──────────────────────────────────────
 -- One row per test_execution_log entry. Powers Fairness Validation
 -- Summary and the testing component of NAIC Exhibit C.
-CREATE OR REPLACE VIEW verity_analytics.v_validation_result AS
+CREATE OR REPLACE VIEW analytics.v_validation_result AS
 SELECT
     tel.id::text                AS source_pk,
     tel.id                      AS test_log_id,
@@ -185,7 +185,7 @@ FROM test_execution_log tel;
 -- ── v_override ───────────────────────────────────────────────
 -- One row per HITL override. Powers fairness production monitoring
 -- and override-rate sections of compliance reports.
-CREATE OR REPLACE VIEW verity_analytics.v_override AS
+CREATE OR REPLACE VIEW analytics.v_override AS
 SELECT
     ho.id::text                 AS source_pk,
     ho.id                       AS override_id,

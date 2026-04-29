@@ -8,7 +8,7 @@ Adding a new report:
   2. Add a composer function here.
   3. Register it in COMPOSERS at the bottom.
 
-Composers query verity_analytics.* views ONLY — they never touch L1 directly.
+Composers query analytics.* views ONLY — they never touch L1 directly.
 This is the bright line that makes the reports portable to a customer warehouse.
 """
 
@@ -95,8 +95,8 @@ async def compose_model_inventory(
               string_agg(DISTINCT ae.application_name, ', ' ORDER BY ae.application_name),
               '—'
             ) AS applications
-        FROM verity_analytics.v_entity_version ev
-        LEFT JOIN verity_analytics.v_application_entity ae
+        FROM analytics.v_entity_version ev
+        LEFT JOIN analytics.v_application_entity ae
             ON ae.entity_id   = ev.entity_id
            AND ae.entity_type = ev.entity_type
         WHERE
@@ -153,12 +153,12 @@ async def compose_model_inventory(
             COALESCE(av.entity_display_name, tv.entity_display_name, pv.entity_display_name,
                      av.entity_name, tv.entity_name, pv.entity_name, '—') AS asset_display_name,
             COALESCE(av.version_label, tv.version_label, pv.version_label, '—') AS version_label
-        FROM verity_analytics.v_lifecycle_event le
-        LEFT JOIN verity_analytics.v_entity_version av
+        FROM analytics.v_lifecycle_event le
+        LEFT JOIN analytics.v_entity_version av
                ON av.source_pk = le.entity_version_id::text AND le.entity_type = 'agent'
-        LEFT JOIN verity_analytics.v_entity_version tv
+        LEFT JOIN analytics.v_entity_version tv
                ON tv.source_pk = le.entity_version_id::text AND le.entity_type = 'task'
-        LEFT JOIN verity_analytics.v_entity_version pv
+        LEFT JOIN analytics.v_entity_version pv
                ON pv.source_pk = le.entity_version_id::text AND le.entity_type = 'prompt'
         ORDER BY le.approved_at DESC
         LIMIT 50
@@ -234,12 +234,12 @@ async def compose_decision_audit_trail(
             COALESCE(av.version_label, tv.version_label, pv.version_label, '—') AS version_label,
             COALESCE(av.materiality_tier, tv.materiality_tier, '—') AS materiality_tier,
             COALESCE(av.owner_name, tv.owner_name, '—') AS owner_name
-        FROM verity_analytics.v_decision d
-        LEFT JOIN verity_analytics.v_entity_version av
+        FROM analytics.v_decision d
+        LEFT JOIN analytics.v_entity_version av
                ON av.source_pk = d.entity_version_id::text AND d.entity_type = 'agent'
-        LEFT JOIN verity_analytics.v_entity_version tv
+        LEFT JOIN analytics.v_entity_version tv
                ON tv.source_pk = d.entity_version_id::text AND d.entity_type = 'task'
-        LEFT JOIN verity_analytics.v_entity_version pv
+        LEFT JOIN analytics.v_entity_version pv
                ON pv.source_pk = d.entity_version_id::text AND d.entity_type = 'prompt'
         WHERE d.decision_id = %(id)s::uuid
         """,
@@ -258,7 +258,7 @@ async def compose_decision_audit_trail(
                o.ai_value, o.hitl_value, o.ai_found, o.override_reason,
                o.overridden_by, o.created_at,
                o.business_entity_type, o.business_entity_reference
-        FROM verity_analytics.v_override o
+        FROM analytics.v_override o
         WHERE o.decision_id = %(id)s::uuid
         ORDER BY o.created_at
         """,
@@ -304,12 +304,12 @@ async def compose_workflow_audit_trail(
             COALESCE(av.entity_display_name, tv.entity_display_name, pv.entity_display_name,
                      av.entity_name, tv.entity_name, pv.entity_name, '—') AS asset_display_name,
             COALESCE(av.version_label, tv.version_label, pv.version_label, '—') AS version_label
-        FROM verity_analytics.v_decision d
-        LEFT JOIN verity_analytics.v_entity_version av
+        FROM analytics.v_decision d
+        LEFT JOIN analytics.v_entity_version av
                ON av.source_pk = d.entity_version_id::text AND d.entity_type = 'agent'
-        LEFT JOIN verity_analytics.v_entity_version tv
+        LEFT JOIN analytics.v_entity_version tv
                ON tv.source_pk = d.entity_version_id::text AND d.entity_type = 'task'
-        LEFT JOIN verity_analytics.v_entity_version pv
+        LEFT JOIN analytics.v_entity_version pv
                ON pv.source_pk = d.entity_version_id::text AND d.entity_type = 'prompt'
         WHERE d.workflow_run_id = %(wf)s::uuid
         ORDER BY d.created_at, d.decision_id
@@ -325,9 +325,9 @@ async def compose_workflow_audit_trail(
                o.ai_value, o.hitl_value, o.ai_found, o.override_reason,
                o.overridden_by, o.created_at,
                o.business_entity_type, o.business_entity_reference
-        FROM verity_analytics.v_override o
+        FROM analytics.v_override o
         WHERE o.decision_id IN (
-            SELECT decision_id FROM verity_analytics.v_decision
+            SELECT decision_id FROM analytics.v_decision
             WHERE workflow_run_id = %(wf)s::uuid
         )
         ORDER BY o.created_at
@@ -378,8 +378,8 @@ async def compose_fairness_validation_summary(
             vr.failure_reason, vr.channel, vr.mock_mode, vr.run_at,
             COALESCE(ev.entity_display_name, ev.entity_name, '—') AS asset_display_name,
             ev.version_label, ev.materiality_tier, ev.owner_name
-        FROM verity_analytics.v_validation_result vr
-        LEFT JOIN verity_analytics.v_entity_version ev
+        FROM analytics.v_validation_result vr
+        LEFT JOIN analytics.v_entity_version ev
                ON ev.source_pk = vr.entity_version_id::text
               AND ev.entity_type = vr.entity_type
         WHERE (%(t)s::text IS NULL OR vr.entity_type = %(t)s)
@@ -465,12 +465,12 @@ async def compose_naic_exhibit_c(
             ev.domain, ev.created_at,
             COALESCE(
               (SELECT string_agg(DISTINCT ae.application_name, ', ' ORDER BY ae.application_name)
-                 FROM verity_analytics.v_application_entity ae
+                 FROM analytics.v_application_entity ae
                 WHERE ae.entity_id   = ev.entity_id
                   AND ae.entity_type = ev.entity_type),
               '—'
             ) AS applications
-        FROM verity_analytics.v_entity_version ev
+        FROM analytics.v_entity_version ev
         WHERE ev.entity_type = %(t)s
           AND ev.entity_name = %(n)s
           AND (%(v)s::text IS NULL OR ev.version_label = %(v)s)
@@ -496,7 +496,7 @@ async def compose_naic_exhibit_c(
         SELECT le.gate_type, le.from_state, le.to_state,
                le.approver_name, le.approver_role, le.rationale,
                le.approved_at
-        FROM verity_analytics.v_lifecycle_event le
+        FROM analytics.v_lifecycle_event le
         WHERE le.entity_version_id::text = %(vid)s
           AND le.entity_type = %(t)s
         ORDER BY le.approved_at
@@ -514,7 +514,7 @@ async def compose_naic_exhibit_c(
             d.confidence_score, d.duration_ms, d.model_used,
             d.hitl_required, d.hitl_completed, d.low_confidence_flag,
             d.created_at, d.application_code, d.channel, d.run_purpose
-        FROM verity_analytics.v_decision d
+        FROM analytics.v_decision d
         WHERE d.entity_version_id::text = %(vid)s
           AND d.entity_type = %(t)s
         ORDER BY d.created_at DESC
@@ -530,7 +530,7 @@ async def compose_naic_exhibit_c(
                vr.passed, vr.metric_type, vr.metric_result,
                vr.failure_reason, vr.duration_ms, vr.run_at,
                vr.channel, vr.mock_mode
-        FROM verity_analytics.v_validation_result vr
+        FROM analytics.v_validation_result vr
         WHERE vr.entity_version_id::text = %(vid)s
           AND vr.entity_type = %(t)s
         ORDER BY vr.run_at DESC NULLS LAST
@@ -547,9 +547,9 @@ async def compose_naic_exhibit_c(
                o.ai_value, o.hitl_value, o.ai_found, o.override_reason,
                o.overridden_by, o.created_at,
                o.business_entity_type, o.business_entity_reference
-        FROM verity_analytics.v_override o
+        FROM analytics.v_override o
         WHERE o.decision_id IN (
-            SELECT decision_id FROM verity_analytics.v_decision
+            SELECT decision_id FROM analytics.v_decision
             WHERE entity_version_id::text = %(vid)s
               AND entity_type = %(t)s
         )

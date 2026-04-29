@@ -147,7 +147,7 @@ def _get_bytes(client, bucket: str, key: str) -> bytes | None:
 
 
 async def _read_view_schema(conn, view_name: str) -> list[dict[str, Any]]:
-    """Return the column shape of `verity_analytics.<view_name>` in
+    """Return the column shape of `analytics.<view_name>` in
     ordinal-position order. Each row: {name, data_type, ordinal_position,
     is_nullable}.
     """
@@ -156,7 +156,7 @@ async def _read_view_schema(conn, view_name: str) -> list[dict[str, Any]]:
             """
             SELECT column_name, data_type, ordinal_position, is_nullable
             FROM information_schema.columns
-            WHERE table_schema = 'verity_analytics'
+            WHERE table_schema = 'analytics'
               AND table_name   = %(view)s
             ORDER BY ordinal_position
             """,
@@ -217,7 +217,7 @@ async def _publish_view(
     schema_rows = await _read_view_schema(conn, view_name)
     if not schema_rows:
         raise RuntimeError(
-            f"View verity_analytics.{view_name} has no columns in "
+            f"View analytics.{view_name} has no columns in "
             f"information_schema.columns — does it exist?"
         )
     fp     = _schema_fingerprint(schema_rows)
@@ -232,7 +232,7 @@ async def _publish_view(
         async with conn.cursor() as cur:
             await cur.execute(
                 f"""
-                SELECT * FROM verity_analytics.{view_name}
+                SELECT * FROM analytics.{view_name}
                 WHERE (ingest_ts, COALESCE(source_pk, '')) > (%(ts)s, %(pk)s)
                   AND ingest_ts < %(until)s
                 ORDER BY ingest_ts ASC, source_pk ASC
@@ -360,7 +360,7 @@ async def publish_bundle(
         async with conn.cursor() as cur:
             await cur.execute(
                 """
-                SELECT view_name FROM verity_analytics.feed_view
+                SELECT view_name FROM analytics.feed_view
                 WHERE is_active = true
                 ORDER BY sort_seq, view_name
                 """

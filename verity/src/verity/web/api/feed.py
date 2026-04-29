@@ -28,7 +28,7 @@ Rules:
   - Cursor is opaque — encoded keyset (ingest_ts, source_pk).
 
 Allowlist:
-  - Only views registered in verity_analytics.feed_view are serveable.
+  - Only views registered in analytics.feed_view are serveable.
   - View name validated server-side before any SQL is built;
     the view name is parameterized into a quoted SQL identifier.
 """
@@ -71,7 +71,7 @@ def decode_cursor(s: str) -> tuple[datetime, str]:
 def _parse_iso(s: str) -> datetime:
     """Parse an ISO-8601 timestamp; tolerate trailing 'Z' for UTC.
 
-    Returns a *naive* datetime in UTC — verity_analytics views expose
+    Returns a *naive* datetime in UTC — analytics views expose
     `timestamp without time zone` columns, so we keep the API side naive
     too to avoid Python tz-aware/naive comparison errors.
     """
@@ -180,7 +180,7 @@ def build_feed_router(verity) -> APIRouter:
         # is what makes pagination loss-free across rows that share an
         # ingest_ts. View name has been validated against the active
         # feed_view allowlist above.
-        view_id = psycopg_sql.Identifier("verity_analytics", view_name)
+        view_id = psycopg_sql.Identifier("analytics", view_name)
         query = psycopg_sql.SQL(
             """
             SELECT *

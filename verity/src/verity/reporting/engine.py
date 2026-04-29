@@ -23,7 +23,7 @@ async def list_reports(verity) -> list[dict[str, Any]]:
         SELECT id, code, name, description, report_kind,
                docx_template, output_formats, scope_params,
                sort_seq, is_active, created_at
-        FROM verity_compliance.report_definition
+        FROM compliance.report_definition
         WHERE is_active = true
         ORDER BY sort_seq, code
         """
@@ -37,7 +37,7 @@ async def get_report_definition(verity, report_code: str) -> dict[str, Any] | No
         SELECT id, code, name, description, report_kind,
                docx_template, output_formats, scope_params,
                sort_seq, is_active, created_at
-        FROM verity_compliance.report_definition
+        FROM compliance.report_definition
         WHERE code = %(code)s
         """,
         {"code": report_code},
@@ -69,16 +69,16 @@ async def get_report_field_manifest(
                cr.code         AS canonical_code,
                cr.title        AS canonical_title,
                t.code          AS theme_code
-        FROM verity_compliance.report_definition         rd
-        JOIN verity_compliance.report_requirement        rr
+        FROM compliance.report_definition         rd
+        JOIN compliance.report_requirement        rr
              ON rr.report_id = rd.id
-        JOIN verity_compliance.canonical_requirement     cr
+        JOIN compliance.canonical_requirement     cr
              ON cr.id = rr.canonical_requirement_id
-        JOIN verity_compliance.canonical_requirement_theme t
+        JOIN compliance.canonical_requirement_theme t
              ON t.id = cr.theme_id
-        JOIN verity_compliance.requirement_evidence_field ref
+        JOIN compliance.requirement_evidence_field ref
              ON ref.canonical_requirement_id = cr.id
-        JOIN verity_analytics.mart_field                  mf
+        JOIN analytics.mart_field                  mf
              ON mf.id = ref.mart_field_id
         WHERE rd.code = %(code)s
         ORDER BY mf.table_name, field_sort_seq, mf.column_name
@@ -110,28 +110,28 @@ async def get_report_canonicals(
                               'framework_code', f.code,
                               'framework_name', f.name
                           ) ORDER BY f.sort_seq, p.sort_seq)
-                    FROM verity_compliance.provision_requirement_map prm
-                    JOIN verity_compliance.regulatory_provision  p ON p.id = prm.provision_id
-                    JOIN verity_compliance.regulatory_framework  f ON f.id = p.framework_id
+                    FROM compliance.provision_requirement_map prm
+                    JOIN compliance.regulatory_provision  p ON p.id = prm.provision_id
+                    JOIN compliance.regulatory_framework  f ON f.id = p.framework_id
                     WHERE prm.canonical_requirement_id = cr.id),
                    '[]'::json
                ) AS provisions,
                COALESCE(
                    (SELECT string_agg(DISTINCT f.code, ', ' ORDER BY f.code)
-                    FROM verity_compliance.provision_requirement_map prm
-                    JOIN verity_compliance.regulatory_provision  p ON p.id = prm.provision_id
-                    JOIN verity_compliance.regulatory_framework  f ON f.id = p.framework_id
+                    FROM compliance.provision_requirement_map prm
+                    JOIN compliance.regulatory_provision  p ON p.id = prm.provision_id
+                    JOIN compliance.regulatory_framework  f ON f.id = p.framework_id
                     WHERE prm.canonical_requirement_id = cr.id),
                    '—'
                ) AS frameworks_label
-        FROM verity_compliance.report_requirement       rr
-        JOIN verity_compliance.report_definition        rd
+        FROM compliance.report_requirement       rr
+        JOIN compliance.report_definition        rd
              ON rd.id = rr.report_id
-        JOIN verity_compliance.canonical_requirement    cr
+        JOIN compliance.canonical_requirement    cr
              ON cr.id = rr.canonical_requirement_id
-        JOIN verity_compliance.canonical_requirement_theme t
+        JOIN compliance.canonical_requirement_theme t
              ON t.id = cr.theme_id
-        LEFT JOIN verity_compliance.requirement_coverage cov
+        LEFT JOIN compliance.requirement_coverage cov
              ON cov.canonical_requirement_id = cr.id
         WHERE rd.code = %(code)s
         ORDER BY rr.sort_seq, cr.sort_seq
