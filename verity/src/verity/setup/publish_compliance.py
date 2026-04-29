@@ -136,11 +136,47 @@ def _get_bytes(client, bucket: str, key: str) -> bytes | None:
 # =============================================================================
 # Schema fingerprint
 # =============================================================================
+#
+# Reads the AUTHORITATIVE schema from Postgres' information_schema.columns
+# rather than inferring types from row values. This means:
+#   - the fingerprint never flaps because of all-NULL columns
+#   - the fingerprint is the same on every Verity instance for an identical
+#     view (no Python-side type-adapter drift)
+#   - schema evolution = column added/removed/reordered/retyped/nullability
+#     toggled → new fingerprint → new folder under the table
 
-def _schema_fingerprint(columns: list[tuple[str, str]]) -> str:
-    """Stable hex fingerprint of a column list. Same schema → same hash;
-    schema evolution → new hash → new folder under the table."""
-    s = ";".join(f"{name}:{ctype}" for name, ctype in columns)
+
+async def _read_view_schema(conn, view_name: str) -> list[dict[str, Any]]:
+    """Return the column shape of `verity_analytics.<view_name>` in
+    ordinal-position order. Each row: {name, data_type, ordinal_position,
+    is_nullable}.
+    """
+    async with conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT column_name, data_type, ordinal_position, is_nullable
+            FROM information_schema.columns
+            WHERE table_schema = 'verity_analytics'
+              AND table_name   = %(view)s
+            ORDER BY ordinal_position
+            """,
+            {"view": view_name},
+        )
+        cols = [d.name for d in (cur.description or [])]
+        return [dict(zip(cols, r)) for r in await cur.fetchall()]
+
+
+def _schema_fingerprint(schema_rows: list[dict[str, Any]]) -> str:
+    """Hex fingerprint over the canonical schema description.
+
+    Hash key per column: 'name:data_type:ordinal_position:is_nullable'.
+    Joined with ';' across columns; SHA-1 truncated to 16 hex chars (64-bit).
+    """
+    parts = [
+        f"{r['column_name']}:{r['data_type']}:{r['ordinal_position']}:{r['is_nullable']}"
+        for r in schema_rows
+    ]
+    s = ";".join(parts)
     return hashlib.sha1(s.encode("utf-8")).hexdigest()[:16]
 
 
@@ -174,13 +210,23 @@ async def _publish_view(
     import pyarrow as pa  # type: ignore
     import pyarrow.parquet as pq  # type: ignore
 
+    # Resolve the schema fingerprint up front from information_schema.
+    # This is independent of whether the view returns any rows — empty views
+    # still get a stable fingerprint folder, which lets customer warehouses
+    # consistently locate the table prefix.
+    schema_rows = await _read_view_schema(conn, view_name)
+    if not schema_rows:
+        raise RuntimeError(
+            f"View verity_analytics.{view_name} has no columns in "
+            f"information_schema.columns — does it exist?"
+        )
+    fp     = _schema_fingerprint(schema_rows)
+    prefix = f"compliance/{view_name}/{fp}/{batch_ts}/"
+
     keyset_ts = since_ts
     keyset_pk = ""
     page_idx  = 0
     total     = 0
-    schema:  list[tuple[str, str]] | None = None
-    fp:      str | None = None
-    prefix:  str | None = None
 
     while True:
         async with conn.cursor() as cur:
@@ -199,18 +245,6 @@ async def _publish_view(
             rows      = await cur.fetchall()
             if not rows:
                 break
-
-            # Compute fingerprint on the first page; pyarrow infers schema.
-            if schema is None:
-                first = rows[0]
-                schema = [
-                    (cols[i], type(first[i]).__name__ if first[i] is not None else "NoneType")
-                    for i in range(len(cols))
-                ]
-                fp = _schema_fingerprint(schema)
-                # Iceberg-style continuous layout — table folder lives at
-                # compliance/<view_name>/, no deployment wrapper.
-                prefix = f"compliance/{view_name}/{fp}/{batch_ts}/"
 
             # Normalise rich types and build a pyarrow Table.
             normalized = [
@@ -238,12 +272,22 @@ async def _publish_view(
 
     return {
         "view":            view_name,
-        "fingerprint":     fp or "—",
-        "schema":          [{"name": n, "py_type": t} for n, t in (schema or [])],
+        "fingerprint":     fp,
+        # Authoritative schema from information_schema — same shape on every
+        # Verity instance for an identical view.
+        "schema":          [
+            {
+                "column":            r["column_name"],
+                "data_type":         r["data_type"],
+                "ordinal_position":  r["ordinal_position"],
+                "is_nullable":       r["is_nullable"],
+            }
+            for r in schema_rows
+        ],
         "batch_timestamp": batch_ts,
         "row_count":       total,
         "page_count":      page_idx,
-        "key_prefix":      prefix or f"compliance/{view_name}/",
+        "key_prefix":      prefix,
     }
 
 
