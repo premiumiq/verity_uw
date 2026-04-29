@@ -15,6 +15,7 @@ belong with governance.
 """
 
 import json
+from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
 
@@ -36,6 +37,17 @@ class DecisionsReader:
     with an AI decision.
     """
 
+    # Universe of values for the dropdowns the Decisions UI exposes.
+    # Hardcoded rather than queried because the sets are fixed by the
+    # schema (see db/schema.sql) and adding a value requires a runtime
+    # change anyway — paying for a SELECT DISTINCT scan to recover
+    # values already known at compile time would be wasteful.
+    DECISION_STATUSES: tuple[str, ...] = ("complete", "error")
+    DECISION_LOG_DETAILS: tuple[str, ...] = (
+        "full", "standard", "summary", "metadata", "none",
+    )
+    DECISION_ENTITY_TYPES: tuple[str, ...] = ("agent", "task")
+
     def __init__(self, db: Database):
         self.db = db
 
@@ -46,15 +58,74 @@ class DecisionsReader:
             return None
         return DecisionLogDetail(**row)
 
-    async def list_decisions(self, limit: int = 50, offset: int = 0) -> list[DecisionLog]:
-        """List decisions (most recent first)."""
-        rows = await self.db.fetch_all("list_decisions", {"limit": limit, "offset": offset})
+    async def list_decisions(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        status: Optional[str] = None,
+        entity_type: Optional[str] = None,
+        decision_log_detail: Optional[str] = None,
+        application: Optional[str] = None,
+        entity_name_contains: Optional[str] = None,
+        created_after: Optional[datetime] = None,
+        created_before: Optional[datetime] = None,
+    ) -> list[DecisionLog]:
+        """List decisions (most recent first). Pass None to disable a filter.
+
+        entity_name_contains matches against the resolved display_name
+        (the column the UI shows) via ILIKE — partial substrings work.
+        created_after / created_before form an inclusive-lower /
+        exclusive-upper window.
+        """
+        rows = await self.db.fetch_all("list_decisions", {
+            "limit": limit,
+            "offset": offset,
+            "status": status,
+            "entity_type": entity_type,
+            "decision_log_detail": decision_log_detail,
+            "application": application,
+            "entity_name_contains": entity_name_contains,
+            "created_after": _iso_or_none(created_after),
+            "created_before": _iso_or_none(created_before),
+        })
         return [DecisionLog(**row) for row in rows]
 
-    async def count_decisions(self) -> int:
-        """Count total decisions."""
-        row = await self.db.fetch_one("count_decisions")
+    async def count_decisions(
+        self,
+        *,
+        status: Optional[str] = None,
+        entity_type: Optional[str] = None,
+        decision_log_detail: Optional[str] = None,
+        application: Optional[str] = None,
+        entity_name_contains: Optional[str] = None,
+        created_after: Optional[datetime] = None,
+        created_before: Optional[datetime] = None,
+    ) -> int:
+        """Count decisions matching the given filter set (drives UI pagination)."""
+        row = await self.db.fetch_one("count_decisions", {
+            "status": status,
+            "entity_type": entity_type,
+            "decision_log_detail": decision_log_detail,
+            "application": application,
+            "entity_name_contains": entity_name_contains,
+            "created_after": _iso_or_none(created_after),
+            "created_before": _iso_or_none(created_before),
+        })
         return row["total"] if row else 0
+
+    def list_filter_statuses(self) -> list[str]:
+        """Universe of decision-log status values. No DB round-trip."""
+        return list(self.DECISION_STATUSES)
+
+    def list_filter_log_details(self) -> list[str]:
+        """Universe of decision_log_detail values. No DB round-trip."""
+        return list(self.DECISION_LOG_DETAILS)
+
+    def list_filter_entity_types(self) -> list[str]:
+        """Universe of entity_type values used on the decision log
+        (constrained to agent/task by table CHECK; see db/schema.sql)."""
+        return list(self.DECISION_ENTITY_TYPES)
 
     async def list_recent_decisions(self, limit: int = 10) -> list[DecisionLog]:
         """List most recent decisions (for dashboard)."""
@@ -127,3 +198,11 @@ def _to_float(val) -> Optional[float]:
     if val is None:
         return None
     return float(val)
+
+
+def _iso_or_none(value: Optional[datetime]) -> Optional[str]:
+    """Render a datetime as an ISO-8601 string for psycopg's ::timestamptz
+    cast in SQL. Returning a string keeps the disable-via-NULL pattern
+    consistent across all filter params.
+    """
+    return None if value is None else value.isoformat()

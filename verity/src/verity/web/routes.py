@@ -68,6 +68,78 @@ def _render(templates, request, template_name, **context):
     return templates.TemplateResponse(request, template_name, context)
 
 
+def _resolve_date_preset(
+    preset: str,
+    custom_after: Optional[str],
+    custom_before: Optional[str],
+):
+    """Turn a date-range preset into a concrete (after, before) datetime
+    pair for the Runs UI submission-window filter.
+
+    Returns (None, None) when the preset is "all" or unknown — meaning
+    "no date filter." Times are computed in UTC because submitted_at is
+    a timestamptz; returning aware datetimes lets psycopg do the cast
+    without ambiguity.
+
+    Preset values mirror the dropdown in runs_list.html. "custom" uses
+    whatever the user typed in the inline datetime inputs; if either
+    side is missing, that side stays open (e.g., custom with only
+    `submitted_after` filled = "from this date forward").
+    """
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+
+    if preset == "all":
+        return None, None
+
+    if preset == "last_24h":
+        return now - timedelta(hours=24), None
+    if preset == "last_7d":
+        return now - timedelta(days=7), None
+    if preset == "last_30d":
+        return now - timedelta(days=30), None
+    if preset == "last_90d":
+        return now - timedelta(days=90), None
+
+    if preset == "current_month":
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        return start, None
+
+    if preset == "previous_month":
+        start_of_this_month = now.replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0,
+        )
+        # Step into the previous month by subtracting one second from the
+        # start of this month, then snap that back to the 1st.
+        last_day_prev = start_of_this_month - timedelta(seconds=1)
+        start_prev = last_day_prev.replace(day=1)
+        return start_prev, start_of_this_month  # exclusive upper
+
+    if preset == "year_to_date":
+        start = now.replace(
+            month=1, day=1, hour=0, minute=0, second=0, microsecond=0,
+        )
+        return start, None
+
+    if preset == "custom":
+        # ISO-8601 strings from <input type="datetime-local"> (no tz),
+        # interpreted as UTC for consistency with the timestamptz column.
+        # An empty/missing side leaves that bound open.
+        def _parse(s: Optional[str]):
+            if not s:
+                return None
+            try:
+                dt = datetime.fromisoformat(s)
+            except ValueError:
+                return None
+            return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+        return _parse(custom_after), _parse(custom_before)
+
+    # Unknown preset → treat as "all" rather than 500ing.
+    return None, None
+
+
 def create_routes(verity, templates_dir: str) -> APIRouter:
     """Create all web UI routes.
 
@@ -716,8 +788,12 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
         status: Optional[str] = None,
         entity_kind: Optional[str] = None,
         entity_name: Optional[str] = None,
+        entity_name_contains: Optional[str] = None,
         application: Optional[str] = None,
         channel: Optional[str] = None,
+        date_preset: Optional[str] = None,
+        submitted_after: Optional[str] = None,
+        submitted_before: Optional[str] = None,
         workflow_run_id: Optional[str] = None,
         execution_context_id: Optional[str] = None,
         limit: int = 50,
@@ -732,12 +808,28 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             context_uuid = UUID(execution_context_id) if execution_context_id else None
         except (ValueError, TypeError) as exc:
             raise HTTPException(status_code=400, detail=f"Invalid UUID: {exc}")
+
+        # Date-range preset resolution. A missing date_preset is treated
+        # as "current_month" so first-time visitors see a useful slice
+        # rather than every run ever. To opt out, pick "all" explicitly.
+        effective_preset = date_preset or "current_month"
+        after_dt, before_dt = _resolve_date_preset(
+            effective_preset, submitted_after, submitted_before,
+        )
+
         filters = {
             "status": status or None,
             "entity_kind": entity_kind or None,
             "entity_name": entity_name or None,
+            "entity_name_contains": entity_name_contains or None,
             "application": application or None,
             "channel": channel or None,
+            "date_preset": effective_preset,
+            # Echo back the user's typed values so the custom date inputs
+            # stay sticky. We don't echo the resolved-from-preset window
+            # because the dropdown already encodes that choice.
+            "submitted_after": submitted_after or None,
+            "submitted_before": submitted_before or None,
             "workflow_run_id": workflow_uuid,
             "execution_context_id": context_uuid,
         }
@@ -748,8 +840,11 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             status=filters["status"],
             entity_kind=filters["entity_kind"],
             entity_name=filters["entity_name"],
+            entity_name_contains=filters["entity_name_contains"],
             application=filters["application"],
             channel=filters["channel"],
+            submitted_after=after_dt,
+            submitted_before=before_dt,
             workflow_run_id=filters["workflow_run_id"],
             execution_context_id=filters["execution_context_id"],
         )
@@ -757,26 +852,40 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             status=filters["status"],
             entity_kind=filters["entity_kind"],
             entity_name=filters["entity_name"],
+            entity_name_contains=filters["entity_name_contains"],
             application=filters["application"],
             channel=filters["channel"],
+            submitted_after=after_dt,
+            submitted_before=before_dt,
             workflow_run_id=filters["workflow_run_id"],
             execution_context_id=filters["execution_context_id"],
         )
         # Build a query string that preserves every filter for the
-        # next/prev pagination links. urlencode skips None values.
+        # next/prev pagination links. urlencode skips None/empty values.
         from urllib.parse import urlencode
         filter_qs = urlencode({
             k: v for k, v in {
                 "status": status, "entity_kind": entity_kind,
-                "entity_name": entity_name, "application": application,
-                "channel": channel, "workflow_run_id": workflow_run_id,
+                "entity_name": entity_name,
+                "entity_name_contains": entity_name_contains,
+                "application": application, "channel": channel,
+                "date_preset": date_preset,
+                "submitted_after": submitted_after,
+                "submitted_before": submitted_before,
+                "workflow_run_id": workflow_run_id,
                 "execution_context_id": execution_context_id,
             }.items() if v
         })
-        # Dropdown options for the Application filter. Sourced from the
-        # runs themselves so the dropdown never offers a value that
-        # yields zero results.
+        # Dropdown options.
+        # - applications: distinct values from execution_run (deliberately
+        #   scoped to apps that have at least one run, so the dropdown
+        #   never offers zero-result values).
+        # - entity names: catalog UNION (task ∪ agent), O(catalog) — does
+        #   show entities with zero runs but the source tables are tiny.
+        # - channels: hardcoded enum universe, no DB call.
         application_options = await verity.runs_reader.list_filter_applications()
+        entity_name_options = await verity.runs_reader.list_filter_entity_names()
+        channel_options = verity.runs_reader.list_filter_channels()
         return _render(templates, request, "runs_list.html",
             active_page="runs",
             runs=runs,
@@ -786,6 +895,8 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             offset=offset,
             filter_qs=filter_qs,
             application_options=application_options,
+            entity_name_options=entity_name_options,
+            channel_options=channel_options,
         )
 
     @router.get("/runs/{run_id}", response_class=HTMLResponse)
@@ -844,14 +955,91 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
     # ── DECISION LOG ──────────────────────────────────────────
 
     @router.get("/decisions", response_class=HTMLResponse)
-    async def decisions_list(request: Request):
+    async def decisions_list(
+        request: Request,
+        status: Optional[str] = None,
+        entity_type: Optional[str] = None,
+        decision_log_detail: Optional[str] = None,
+        application: Optional[str] = None,
+        entity_name_contains: Optional[str] = None,
+        date_preset: Optional[str] = None,
+        created_after: Optional[str] = None,
+        created_before: Optional[str] = None,
+        limit: int = Query(default=100, ge=1, le=1000),
+    ):
+        """Decision-log list with the same server-side filter shape as
+        /admin/runs. Capped at 1000 to match the parquet/feed export upper
+        bound — the page is client-side searchable/sortable on top of the
+        server-filtered slice."""
         await verity.ensure_connected()
-        decisions = await verity.list_decisions(limit=100)
-        total = await verity.decisions.count_decisions()
+
+        # Date preset resolution — shared helper with runs. Default
+        # "current_month" so the page lands on a useful slice instead
+        # of every decision ever logged.
+        effective_preset = date_preset or "current_month"
+        after_dt, before_dt = _resolve_date_preset(
+            effective_preset, created_after, created_before,
+        )
+
+        filters = {
+            "status": status or None,
+            "entity_type": entity_type or None,
+            "decision_log_detail": decision_log_detail or None,
+            "application": application or None,
+            "entity_name_contains": entity_name_contains or None,
+            "date_preset": effective_preset,
+            "created_after": created_after or None,
+            "created_before": created_before or None,
+        }
+
+        # Direct call into the reader (not through the client wrapper)
+        # because the wrapper signature only takes limit/offset; going
+        # direct keeps the kwargs surface explicit and avoids growing
+        # the wrapper for a UI-specific call site.
+        decisions = await verity.decisions.list_decisions(
+            limit=limit,
+            status=filters["status"],
+            entity_type=filters["entity_type"],
+            decision_log_detail=filters["decision_log_detail"],
+            application=filters["application"],
+            entity_name_contains=filters["entity_name_contains"],
+            created_after=after_dt,
+            created_before=before_dt,
+        )
+        total = await verity.decisions.count_decisions(
+            status=filters["status"],
+            entity_type=filters["entity_type"],
+            decision_log_detail=filters["decision_log_detail"],
+            application=filters["application"],
+            entity_name_contains=filters["entity_name_contains"],
+            created_after=after_dt,
+            created_before=before_dt,
+        )
+
+        # Dropdown options.
+        # - statuses, log_details, entity_types: hardcoded universes
+        #   (see DecisionsReader.DECISION_STATUSES etc.). No DB call.
+        # - applications: every registered application (small, indexed
+        #   table). Cheaper than DISTINCT-scanning agent_decision_log.
+        # - entity names: shared with runs via the catalog UNION
+        #   (task ∪ agent), backs the <datalist> autocomplete.
+        application_options = await verity.list_applications()
+        entity_name_options = await verity.runs_reader.list_filter_entity_names()
+        status_options = verity.decisions.list_filter_statuses()
+        log_detail_options = verity.decisions.list_filter_log_details()
+        entity_type_options = verity.decisions.list_filter_entity_types()
+
         return _render(templates, request, "decisions.html",
             active_page="decisions",
             decisions=decisions,
             total=total,
+            limit=limit,
+            filters=filters,
+            application_options=application_options,
+            entity_name_options=entity_name_options,
+            status_options=status_options,
+            log_detail_options=log_detail_options,
+            entity_type_options=entity_type_options,
         )
 
     @router.get("/decisions/{decision_id}", response_class=HTMLResponse)

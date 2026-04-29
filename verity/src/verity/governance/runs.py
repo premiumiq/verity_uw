@@ -16,6 +16,7 @@ join the four lifecycle tables themselves.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
 
@@ -30,6 +31,15 @@ from verity.models.run import (
 
 class RunsReader:
     """Query the run-tracking tables for current state and history."""
+
+    # Universe of channel values, mirroring the deployment_channel enum
+    # defined in db/schema.sql. Hardcoded rather than queried because the
+    # set is fixed by the schema and adding a value requires a migration
+    # anyway — paying for a SELECT DISTINCT scan to recover values that
+    # are already known at compile time would be wasteful.
+    DEPLOYMENT_CHANNELS: tuple[str, ...] = (
+        "development", "staging", "shadow", "evaluation", "production",
+    )
 
     def __init__(self, db: Database):
         self.db = db
@@ -51,13 +61,24 @@ class RunsReader:
         workflow_run_id: Optional[UUID] = None,
         entity_kind: Optional[str] = None,
         entity_name: Optional[str] = None,
+        entity_name_contains: Optional[str] = None,
         channel: Optional[str] = None,
         application: Optional[str] = None,
         status: Optional[str] = None,
+        submitted_after: Optional[datetime] = None,
+        submitted_before: Optional[datetime] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[ExecutionRunCurrent]:
-        """List runs with the supplied filters. Pass None to disable a filter."""
+        """List runs with the supplied filters. Pass None to disable a filter.
+
+        entity_name vs entity_name_contains:
+          - entity_name: exact match (used by SDK / REST deep-links).
+          - entity_name_contains: case-insensitive substring (used by the
+            UI free-text search box).
+        submitted_after / submitted_before form an inclusive-lower /
+        exclusive-upper window on submitted_at.
+        """
         rows = await self.db.fetch_all(
             "list_runs_current",
             {
@@ -65,9 +86,12 @@ class RunsReader:
                 "workflow_run_id": _str_or_none(workflow_run_id),
                 "entity_kind": entity_kind,
                 "entity_name": entity_name,
+                "entity_name_contains": entity_name_contains,
                 "channel": channel,
                 "application": application,
                 "status": status,
+                "submitted_after": _iso_or_none(submitted_after),
+                "submitted_before": _iso_or_none(submitted_before),
                 "limit": limit,
                 "offset": offset,
             },
@@ -81,9 +105,12 @@ class RunsReader:
         workflow_run_id: Optional[UUID] = None,
         entity_kind: Optional[str] = None,
         entity_name: Optional[str] = None,
+        entity_name_contains: Optional[str] = None,
         channel: Optional[str] = None,
         application: Optional[str] = None,
         status: Optional[str] = None,
+        submitted_after: Optional[datetime] = None,
+        submitted_before: Optional[datetime] = None,
     ) -> int:
         """Total count for the given filter set (drives UI pagination)."""
         row = await self.db.fetch_one(
@@ -93,9 +120,12 @@ class RunsReader:
                 "workflow_run_id": _str_or_none(workflow_run_id),
                 "entity_kind": entity_kind,
                 "entity_name": entity_name,
+                "entity_name_contains": entity_name_contains,
                 "channel": channel,
                 "application": application,
                 "status": status,
+                "submitted_after": _iso_or_none(submitted_after),
+                "submitted_before": _iso_or_none(submitted_before),
             },
         )
         return row["total"] if row else 0
@@ -107,6 +137,23 @@ class RunsReader:
         execution_run otherwise. Sorted by display_name.
         """
         return await self.db.fetch_all("list_runs_filter_applications", {})
+
+    async def list_filter_entity_names(self) -> list[dict]:
+        """Every registered entity (task or agent) for the Runs UI Entity
+        Name autocomplete. Returns dicts of {name, display_name, entity_kind}.
+
+        Sourced from the catalog tables (task ∪ agent) rather than from
+        DISTINCT entity_name on execution_run — both source tables are
+        small and UNIQUE-indexed on name, so the cost stays O(catalog)
+        regardless of run-history size.
+        """
+        return await self.db.fetch_all("list_runs_filter_entity_names", {})
+
+    def list_filter_channels(self) -> list[str]:
+        """The deployment_channel enum universe. No DB round-trip — the
+        set is fixed by the schema (see db/schema.sql `deployment_channel`).
+        """
+        return list(self.DEPLOYMENT_CHANNELS)
 
     async def get_run_lifecycle(self, run_id: UUID) -> list[RunLifecycleEvent]:
         """Full event sequence for one run, in time order.
@@ -209,3 +256,11 @@ class RunsReader:
 
 def _str_or_none(value: Any) -> Optional[str]:
     return None if value is None else str(value)
+
+
+def _iso_or_none(value: Optional[datetime]) -> Optional[str]:
+    """Render a datetime as an ISO-8601 string for psycopg's ::timestamptz
+    cast in SQL. Returning a string keeps the disable-via-NULL pattern
+    consistent across all filter params.
+    """
+    return None if value is None else value.isoformat()

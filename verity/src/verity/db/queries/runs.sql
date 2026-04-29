@@ -164,6 +164,13 @@ WHERE erc.id = %(run_id)s;
 -- NULL for a filter disables it. Sorted by submitted_at desc by default
 -- (most recent first). Pagination via limit/offset.
 --
+-- Three filter shapes for entity_name:
+--   entity_name           — exact match (programmatic deep-links / SDK)
+--   entity_name_contains  — case-insensitive substring (UI free-text box)
+-- Submission window:
+--   submitted_after       — inclusive lower bound (submitted_at >= x)
+--   submitted_before      — exclusive upper bound (submitted_at <  x)
+--
 -- Enriched with entity_display_name (the task or agent's owner-facing
 -- display_name from task/agent tables) and application_display_name
 -- (from application.display_name). LEFT JOINs because demo data and
@@ -183,9 +190,12 @@ WHERE (%(execution_context_id)s::uuid IS NULL OR erc.execution_context_id = %(ex
   AND (%(workflow_run_id)s::uuid IS NULL OR erc.workflow_run_id = %(workflow_run_id)s::uuid)
   AND (%(entity_kind)s::text IS NULL OR erc.entity_kind = %(entity_kind)s::text)
   AND (%(entity_name)s::text IS NULL OR erc.entity_name = %(entity_name)s::text)
+  AND (%(entity_name_contains)s::text IS NULL OR erc.entity_name ILIKE '%%' || %(entity_name_contains)s || '%%')
   AND (%(channel)s::text IS NULL OR erc.channel::text = %(channel)s::text)
   AND (%(application)s::text IS NULL OR erc.application = %(application)s::text)
   AND (%(status)s::text IS NULL OR erc.current_status = %(status)s::text)
+  AND (%(submitted_after)s::timestamptz  IS NULL OR erc.submitted_at >= %(submitted_after)s::timestamptz)
+  AND (%(submitted_before)s::timestamptz IS NULL OR erc.submitted_at <  %(submitted_before)s::timestamptz)
 ORDER BY erc.submitted_at DESC
 LIMIT %(limit)s OFFSET %(offset)s;
 
@@ -198,9 +208,12 @@ WHERE (%(execution_context_id)s::uuid IS NULL OR execution_context_id = %(execut
   AND (%(workflow_run_id)s::uuid IS NULL OR workflow_run_id = %(workflow_run_id)s::uuid)
   AND (%(entity_kind)s::text IS NULL OR entity_kind = %(entity_kind)s::text)
   AND (%(entity_name)s::text IS NULL OR entity_name = %(entity_name)s::text)
+  AND (%(entity_name_contains)s::text IS NULL OR entity_name ILIKE '%%' || %(entity_name_contains)s || '%%')
   AND (%(channel)s::text IS NULL OR channel::text = %(channel)s::text)
   AND (%(application)s::text IS NULL OR application = %(application)s::text)
-  AND (%(status)s::text IS NULL OR current_status = %(status)s::text);
+  AND (%(status)s::text IS NULL OR current_status = %(status)s::text)
+  AND (%(submitted_after)s::timestamptz  IS NULL OR submitted_at >= %(submitted_after)s::timestamptz)
+  AND (%(submitted_before)s::timestamptz IS NULL OR submitted_at <  %(submitted_before)s::timestamptz);
 
 
 -- name: list_runs_filter_applications
@@ -215,6 +228,21 @@ SELECT DISTINCT
 FROM execution_run_current erc
 LEFT JOIN application app ON app.name = erc.application
 ORDER BY display_name;
+
+
+-- name: list_runs_filter_entity_names
+-- Every registered entity (task or agent) for the Runs UI Entity Name
+-- autocomplete. Sourced from the canonical task / agent tables via UNION
+-- rather than DISTINCT-scanning execution_run, because both tables are
+-- small, UNIQUE-indexed on name, and grow with the catalog rather than
+-- the run history. The dropdown therefore stays O(catalog) regardless of
+-- how many runs the system has accumulated.
+SELECT name, display_name, 'task'::text AS entity_kind
+FROM task
+UNION ALL
+SELECT name, display_name, 'agent'::text AS entity_kind
+FROM agent
+ORDER BY name;
 
 
 -- name: get_run_lifecycle
