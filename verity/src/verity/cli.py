@@ -98,6 +98,15 @@ def main():
         help="Which embedded table to search (default: canonical_requirement).",
     )
 
+    export_parser = compliance_sub.add_parser(
+        "export",
+        help="Bundle the L2 mart + L3 metamodel + L4/L5 artifacts into a directory for customer-warehouse ingest.",
+    )
+    export_parser.add_argument("--database-url", required=True)
+    export_parser.add_argument("--out", required=True, help="Output directory.")
+    export_parser.add_argument("--since", default=None, help="ISO timestamp; defaults to 1970-01-01.")
+    export_parser.add_argument("--until", default=None, help="ISO timestamp; defaults to now.")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -174,6 +183,21 @@ def main():
                     table=args.table,
                 )
             )
+        elif args.compliance_action == "export":
+            from pathlib import Path
+            from verity.setup.export_compliance import export_bundle
+            manifest = asyncio.run(
+                export_bundle(
+                    args.database_url,
+                    Path(args.out),
+                    since=args.since,
+                    until=args.until,
+                )
+            )
+            total = sum(v["row_count"] for v in manifest["views"])
+            print()
+            print(f"Done. {total} total row(s) across {len(manifest['views'])} view(s).")
+            print(f"Manifest: {Path(args.out) / 'manifest.json'}")
         else:
             compliance_parser.print_help()
             sys.exit(1)

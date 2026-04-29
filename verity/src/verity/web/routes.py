@@ -1673,6 +1673,38 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             filename=download_name,
         )
 
+    @router.get("/compliance/feeds", response_class=HTMLResponse)
+    async def compliance_feeds(request: Request):
+        """Browse the available data feeds + sample-pull links."""
+        await verity.ensure_connected()
+        feed_views = await verity.db.fetch_all("list_active_feed_views")
+
+        # Best-effort row-count + watermark range per view. Cheap because
+        # all our views have small underlying tables; fast enough for a
+        # browse page.
+        for v in feed_views:
+            try:
+                stats = await verity.db.fetch_one_raw(
+                    f"SELECT count(*) AS row_count, "
+                    f"       min(ingest_ts) AS min_ingest_ts, "
+                    f"       max(ingest_ts) AS max_ingest_ts "
+                    f"FROM verity_analytics.{v['view_name']}"
+                )
+                v["row_count"]     = stats["row_count"]     if stats else 0
+                v["min_ingest_ts"] = stats.get("min_ingest_ts") if stats else None
+                v["max_ingest_ts"] = stats.get("max_ingest_ts") if stats else None
+            except Exception:
+                v["row_count"]     = 0
+                v["min_ingest_ts"] = None
+                v["max_ingest_ts"] = None
+
+        return _render(
+            templates, request, "compliance_feeds.html",
+            active_page="compliance",
+            subnav_active="feeds",
+            feed_views=feed_views,
+        )
+
     @router.get("/compliance/bridges", response_class=HTMLResponse)
     async def compliance_bridges(
         request: Request,

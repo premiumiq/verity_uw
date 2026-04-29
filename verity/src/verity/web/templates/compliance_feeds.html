@@ -1,0 +1,104 @@
+{# Feeds admin page — list active feed views + a self-service sampler. #}
+{% extends "base.html" %}
+
+{% block title %}Compliance Feeds — Verity Admin{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/compliance/">Compliance</a>
+    <span class="separator">›</span>
+    <a href="/admin/compliance/feeds">Feeds</a>
+{% endblock %}
+
+{% block page_title %}Compliance Data Feeds{% endblock %}
+
+{% block content %}
+
+{% include "partials/_compliance_banner.html" %}
+
+<p style="font-size: 0.85rem; color: var(--verity-text-light); margin-bottom: 16px;">
+  Each view below is exposed at <code>GET /api/v1/feed/{view_name}</code> for
+  incremental ingest into a customer-owned warehouse (Snowflake, BigQuery,
+  Redshift, Iceberg). Always-ascending <code>ingest_ts</code> watermark with
+  keyset pagination on <code>(ingest_ts, source_pk)</code> — same-timestamp
+  rows never split or lose data across pages.
+</p>
+
+<div class="verity-card" style="margin-bottom: 16px; border-left: 3px solid #6E8FCC; background: var(--verity-blue-pale);">
+  <div style="padding: 8px 4px; font-size: 0.85rem; line-height: 1.6;">
+    <strong style="color: var(--verity-blue-deep);">Pull contract</strong><br>
+    Caller passes <code>since</code> (ISO timestamp on first call, opaque cursor on subsequent), optional <code>until</code> (defaults to now), and <code>limit</code> (max 5000; default 1000).<br>
+    Response: <code>{"view","since","until","row_count","complete","next_since","rows"}</code>. When <code>complete=true</code> the window is fully drained.<br>
+    For closed-window cross-table snapshots, pass the same <code>[since, until)</code> to every view and wait ~5 min past <code>until</code> (wall clock) before treating the window as final.
+  </div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 16px; margin-bottom: 24px;">
+  {% for v in feed_views %}
+  <div class="verity-card" style="padding: 16px;">
+
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px;">
+      <div>
+        <span style="color: var(--verity-text); font-size: 1rem; font-weight: 600;">
+          <code>{{ v.view_name }}</code>
+        </span>
+        <div style="font-size: 0.7rem; color: var(--verity-text-light); margin-top: 2px;">
+          GET /api/v1/feed/{{ v.view_name }}
+        </div>
+      </div>
+      <span class="verity-badge" style="background: var(--verity-blue-pale); color: var(--verity-blue-deep);">
+        {{ v.row_count }} row{{ '' if v.row_count == 1 else 's' }}
+      </span>
+    </div>
+
+    {% if v.description %}
+    <div style="font-size: 0.82rem; color: var(--verity-text); line-height: 1.5; margin-bottom: 12px;">
+      {{ v.description }}
+    </div>
+    {% endif %}
+
+    <div style="font-size: 0.75rem; color: var(--verity-text-light); padding-top: 8px; border-top: 1px solid var(--verity-border);">
+      Watermark range:
+      <strong>{{ v.min_ingest_ts.strftime('%Y-%m-%d %H:%M') if v.min_ingest_ts else '—' }}</strong>
+      <span style="opacity: 0.5;"> → </span>
+      <strong>{{ v.max_ingest_ts.strftime('%Y-%m-%d %H:%M') if v.max_ingest_ts else '—' }}</strong>
+    </div>
+
+    <div style="margin-top: 10px;">
+      <a href="/api/v1/feed/{{ v.view_name }}?since=2020-01-01T00:00:00Z&limit=10"
+         target="_blank" rel="noopener"
+         class="verity-btn verity-btn-secondary verity-btn-sm">
+        Sample first 10 rows ↗
+      </a>
+    </div>
+
+  </div>
+  {% endfor %}
+
+  {% if not feed_views %}
+  <div style="grid-column: 1 / -1; padding: 32px; text-align: center; color: var(--verity-text-light);">
+    No feed views registered. Add to <code>compliance_seed_reports.yaml</code> and run <code>verity compliance seed-reports</code>.
+  </div>
+  {% endif %}
+</div>
+
+<div class="verity-card" style="padding: 16px;">
+  <div class="verity-card-header">Customer-side ingest recipe</div>
+  <pre style="background: var(--verity-gray-pale); padding: 12px; border-radius: 4px; font-size: 0.78rem; line-height: 1.5; overflow-x: auto;">
+# Pull v_decision incrementally into your warehouse:
+
+since = "2020-01-01T00:00:00Z"        # first call uses ISO; later calls use the cursor
+until = "2026-04-29T00:00:00Z"        # closed upper bound for the window
+
+while True:
+    r = http.get(f"{verity}/api/v1/feed/v_decision",
+                 params={"since": since, "until": until, "limit": 1000})
+    rows = r.json()["rows"]
+    warehouse.copy_into("verity_decision", rows)   # stage + COPY into target table
+    if r.json()["complete"]:
+        break
+    since = r.json()["next_since"]                  # opaque cursor
+  </pre>
+</div>
+
+{% endblock %}
