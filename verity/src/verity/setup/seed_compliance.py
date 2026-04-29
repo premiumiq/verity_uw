@@ -14,6 +14,7 @@ Build plan:   docs/plans/compliance-build-plan.md
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ import yaml
 
 STATIC_SEED_FILE = Path(__file__).parent / "compliance_seed_static.yaml"
 DATA_SEED_FILE = Path(__file__).parent / "compliance_seed_data.yaml"
+REPORTS_SEED_FILE = Path(__file__).parent / "compliance_seed_reports.yaml"
 
 
 # =============================================================================
@@ -500,6 +502,186 @@ async def _refresh_provision_canonical_links(
         )
         n += 1
     return n
+
+
+# =============================================================================
+# Phase 2.2 — Reports seeder (mart_field, requirement_evidence_field,
+#             report_definition, report_requirement)
+# =============================================================================
+
+
+async def seed_reports(database_url: str) -> dict[str, int]:
+    """Seed mart_field rows + requirement_evidence_field bridges + report
+    definitions + their canonical-requirement bridges from
+    compliance_seed_reports.yaml.
+
+    Pre-requisite: seed_static + seed_data must have run first (canonical
+    requirements must exist; this seeder looks them up by code).
+
+    Idempotent — UPSERTs by natural keys. Bridge rows
+    (requirement_evidence_field, report_requirement) are recomputed:
+    delete-and-replace per parent on every run, so removing a row from
+    YAML actually removes it from DB.
+    """
+    data = yaml.safe_load(REPORTS_SEED_FILE.read_text())
+
+    counts = {
+        "mart_fields":               0,
+        "requirement_evidence_fields": 0,
+        "report_definitions":        0,
+        "report_requirements":       0,
+    }
+
+    async with await psycopg.AsyncConnection.connect(
+        database_url, autocommit=False
+    ) as conn:
+        async with conn.cursor() as cur:
+            # ---- mart_field UPSERT ------------------------------------
+            for mf in data.get("mart_fields", []):
+                await cur.execute(
+                    """
+                    INSERT INTO verity_analytics.mart_field
+                        (table_name, column_name, semantic_type, description,
+                         is_pii, sort_seq)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (table_name, column_name) DO UPDATE SET
+                        semantic_type = EXCLUDED.semantic_type,
+                        description   = EXCLUDED.description,
+                        is_pii        = EXCLUDED.is_pii,
+                        sort_seq      = EXCLUDED.sort_seq,
+                        updated_at    = now()
+                    """,
+                    (
+                        mf["table"],
+                        mf["column"],
+                        mf["type"],
+                        mf.get("description"),
+                        bool(mf.get("is_pii", False)),
+                        int(mf.get("sort", 0)),
+                    ),
+                )
+                counts["mart_fields"] += 1
+
+            # Build (table, column) -> mart_field_id lookup.
+            await cur.execute(
+                "SELECT table_name, column_name, id FROM verity_analytics.mart_field"
+            )
+            mart_lookup: dict[tuple[str, str], str] = {
+                (row[0], row[1]): row[2] for row in await cur.fetchall()
+            }
+
+            # Build canonical_code -> id lookup.
+            await cur.execute(
+                "SELECT code, id FROM verity_compliance.canonical_requirement"
+            )
+            canonical_lookup: dict[str, str] = {
+                row[0]: row[1] for row in await cur.fetchall()
+            }
+
+            # ---- requirement_evidence_field bridges (delete + replace) ---
+            for cr in data.get("requirement_evidence_fields", []):
+                cr_code = cr["canonical"]
+                if cr_code not in canonical_lookup:
+                    raise ValueError(
+                        f"requirement_evidence_field references unknown "
+                        f"canonical {cr_code!r}"
+                    )
+                cr_id = canonical_lookup[cr_code]
+
+                await cur.execute(
+                    "DELETE FROM verity_compliance.requirement_evidence_field "
+                    "WHERE canonical_requirement_id = %s",
+                    (cr_id,),
+                )
+                for f in cr.get("fields", []):
+                    key = (f["table"], f["column"])
+                    if key not in mart_lookup:
+                        raise ValueError(
+                            f"requirement_evidence_field {cr_code!r} "
+                            f"references unregistered mart_field {key!r}"
+                        )
+                    await cur.execute(
+                        """
+                        INSERT INTO verity_compliance.requirement_evidence_field
+                            (canonical_requirement_id, mart_field_id,
+                             role, aggregation, sort_seq, notes)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            cr_id,
+                            mart_lookup[key],
+                            f.get("role", "dimension"),
+                            f.get("aggregation"),
+                            int(f.get("sort", 0)),
+                            f.get("notes"),
+                        ),
+                    )
+                    counts["requirement_evidence_fields"] += 1
+
+            # ---- report_definition UPSERT + report_requirement (replace) ---
+            for rep in data.get("reports", []):
+                await cur.execute(
+                    """
+                    INSERT INTO verity_compliance.report_definition
+                        (code, name, description, report_kind, docx_template,
+                         output_formats, scope_params, sort_seq, is_active)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s, true)
+                    ON CONFLICT (code) DO UPDATE SET
+                        name           = EXCLUDED.name,
+                        description    = EXCLUDED.description,
+                        report_kind    = EXCLUDED.report_kind,
+                        docx_template  = EXCLUDED.docx_template,
+                        output_formats = EXCLUDED.output_formats,
+                        scope_params   = EXCLUDED.scope_params,
+                        sort_seq       = EXCLUDED.sort_seq,
+                        updated_at     = now()
+                    RETURNING id
+                    """,
+                    (
+                        rep["code"],
+                        rep["name"],
+                        rep.get("description"),
+                        rep.get("report_kind", "metadata_driven"),
+                        rep.get("docx_template"),
+                        rep.get("output_formats", ["html", "docx", "pdf"]),
+                        json.dumps(rep.get("scope_params", {})),
+                        int(rep.get("sort_seq", 0)),
+                    ),
+                )
+                report_id = (await cur.fetchone())[0]
+                counts["report_definitions"] += 1
+
+                await cur.execute(
+                    "DELETE FROM verity_compliance.report_requirement "
+                    "WHERE report_id = %s",
+                    (report_id,),
+                )
+                for rr in rep.get("canonical_requirements", []):
+                    cr_code = rr["code"]
+                    if cr_code not in canonical_lookup:
+                        raise ValueError(
+                            f"report {rep['code']!r} references unknown "
+                            f"canonical {cr_code!r}"
+                        )
+                    await cur.execute(
+                        """
+                        INSERT INTO verity_compliance.report_requirement
+                            (report_id, canonical_requirement_id, section, sort_seq, notes)
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (
+                            report_id,
+                            canonical_lookup[cr_code],
+                            rr.get("section"),
+                            int(rr.get("sort", 0)),
+                            rr.get("notes"),
+                        ),
+                    )
+                    counts["report_requirements"] += 1
+
+        await conn.commit()
+
+    return counts
 
 
 # =============================================================================

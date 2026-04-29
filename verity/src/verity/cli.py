@@ -61,6 +61,12 @@ def main():
     )
     seed_data_parser.add_argument("--database-url", required=True)
 
+    seed_reports_parser = compliance_sub.add_parser(
+        "seed-reports",
+        help="Seed mart_field rows + requirement_evidence_field bridges + report definitions from compliance_seed_reports.yaml",
+    )
+    seed_reports_parser.add_argument("--database-url", required=True)
+
     show_parser = compliance_sub.add_parser(
         "show", help="Print seeded compliance data (frameworks, themes, features, canonicals, provisions) as a tree"
     )
@@ -145,6 +151,11 @@ def main():
             print("Compliance data seed complete:")
             for k, v in counts.items():
                 print(f"  {k:<28} {v}")
+        elif args.compliance_action == "seed-reports":
+            counts = asyncio.run(seed_compliance.seed_reports(args.database_url))
+            print("Reports seed complete:")
+            for k, v in counts.items():
+                print(f"  {k:<32} {v}")
         elif args.compliance_action == "show":
             asyncio.run(seed_compliance.show(args.database_url))
         elif args.compliance_action == "reembed":

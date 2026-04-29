@@ -1,0 +1,137 @@
+# =============================================================================
+# Verity Compliance — Reports + mart_field Seed
+# =============================================================================
+# Source of truth for:
+#   verity_analytics.mart_field
+#   verity_compliance.requirement_evidence_field
+#   verity_compliance.report_definition
+#   verity_compliance.report_requirement
+#
+# Edit freely; re-running `verity compliance seed-reports` UPSERTs by
+# (table_name, column_name) for mart_field and by code for reports.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# mart_field — every column reachable from a report.
+# Columns are grouped by view; each entry must match an actual column in
+# verity_analytics.<view>.  semantic_type drives downstream rendering.
+# -----------------------------------------------------------------------------
+mart_fields:
+
+  # ---- v_entity_version --------------------------------------------------
+  - { table: v_entity_version, column: entity_type,         type: category,   description: "agent | task | prompt", sort: 1 }
+  - { table: v_entity_version, column: entity_name,         type: text,       description: "Entity registered code name",   sort: 2 }
+  - { table: v_entity_version, column: entity_display_name, type: text,       description: "Human-readable display name",   sort: 3 }
+  - { table: v_entity_version, column: entity_description,  type: text,       description: "Plain-language purpose",        sort: 4 }
+  - { table: v_entity_version, column: version_label,       type: text,       description: "Three-part version (e.g. 1.0.0)", sort: 5 }
+  - { table: v_entity_version, column: lifecycle_state,     type: category,   description: "draft|candidate|staging|shadow|challenger|champion|deprecated", sort: 6 }
+  - { table: v_entity_version, column: channel,             type: category,   description: "Deployment channel of this version", sort: 7 }
+  - { table: v_entity_version, column: materiality_tier,    type: category,   description: "high|medium|low — risk classification", sort: 8 }
+  - { table: v_entity_version, column: owner_name,          type: text,       description: "Named owner of the entity", is_pii: true, sort: 9 }
+  - { table: v_entity_version, column: owner_email,         type: text,       description: "Owner email", is_pii: true, sort: 10 }
+  - { table: v_entity_version, column: domain,              type: category,   description: "Business domain", sort: 11 }
+  - { table: v_entity_version, column: created_at,          type: date,       description: "When this version was registered", sort: 12 }
+
+  # ---- v_application_entity ---------------------------------------------
+  - { table: v_application_entity, column: application_name,         type: identifier, description: "Application registry name", sort: 1 }
+  - { table: v_application_entity, column: application_display_name, type: text,       description: "Application display label", sort: 2 }
+  - { table: v_application_entity, column: entity_type,              type: category,   description: "agent|task|prompt|tool|mcp_server", sort: 3 }
+  - { table: v_application_entity, column: entity_id,                type: identifier, description: "FK to v_entity_version.entity_id", sort: 4 }
+
+  # ---- v_lifecycle_event ------------------------------------------------
+  - { table: v_lifecycle_event, column: entity_type,        type: category,   description: "agent|task|prompt|tool|mcp_server", sort: 1 }
+  - { table: v_lifecycle_event, column: entity_version_id,  type: identifier, description: "Which entity_version was promoted/transitioned", sort: 2 }
+  - { table: v_lifecycle_event, column: gate_type,          type: category,   description: "Type of gate (e.g. 'staging_promotion')", sort: 3 }
+  - { table: v_lifecycle_event, column: from_state,         type: category,   description: "Lifecycle state before transition", sort: 4 }
+  - { table: v_lifecycle_event, column: to_state,           type: category,   description: "Lifecycle state after transition",  sort: 5 }
+  - { table: v_lifecycle_event, column: approver_name,      type: text,       description: "Who approved this transition", is_pii: true, sort: 6 }
+  - { table: v_lifecycle_event, column: approver_role,      type: category,   description: "Approver role/title", sort: 7 }
+  - { table: v_lifecycle_event, column: rationale,          type: text,       description: "Approval rationale narrative", sort: 8 }
+  - { table: v_lifecycle_event, column: approved_at,        type: date,       description: "When the gate was approved", sort: 9 }
+
+
+# -----------------------------------------------------------------------------
+# requirement_evidence_field — for each canonical_requirement, declare which
+# mart_fields are required to evidence it. Reports inherit these from the
+# canonicals they cover.
+#
+# Field references are by (table, column).  role ∈ {key, measure, dimension,
+# filter, context}.
+# -----------------------------------------------------------------------------
+requirement_evidence_fields:
+
+  # canonical: model_inventory_registration
+  - canonical: model_inventory_registration
+    fields:
+      - { table: v_entity_version, column: entity_type,         role: dimension, sort: 1 }
+      - { table: v_entity_version, column: entity_name,         role: key,       sort: 2 }
+      - { table: v_entity_version, column: entity_display_name, role: dimension, sort: 3 }
+      - { table: v_entity_version, column: entity_description,  role: context,   sort: 4 }
+      - { table: v_entity_version, column: version_label,       role: dimension, sort: 5 }
+      - { table: v_entity_version, column: lifecycle_state,     role: dimension, sort: 6 }
+      - { table: v_entity_version, column: materiality_tier,    role: dimension, sort: 7 }
+      - { table: v_application_entity, column: application_name, role: dimension, sort: 8 }
+
+  # canonical: model_ownership_accountability
+  - canonical: model_ownership_accountability
+    fields:
+      - { table: v_entity_version, column: entity_name,    role: key,       sort: 1 }
+      - { table: v_entity_version, column: owner_name,     role: dimension, sort: 2 }
+      - { table: v_entity_version, column: owner_email,    role: context,   sort: 3 }
+      - { table: v_lifecycle_event, column: approver_name, role: dimension, sort: 4 }
+      - { table: v_lifecycle_event, column: approver_role, role: dimension, sort: 5 }
+
+  # canonical: change_management_versioning
+  - canonical: change_management_versioning
+    fields:
+      - { table: v_entity_version, column: entity_name,    role: key,       sort: 1 }
+      - { table: v_entity_version, column: version_label,  role: dimension, sort: 2 }
+      - { table: v_lifecycle_event, column: gate_type,     role: dimension, sort: 3 }
+      - { table: v_lifecycle_event, column: from_state,    role: dimension, sort: 4 }
+      - { table: v_lifecycle_event, column: to_state,      role: dimension, sort: 5 }
+      - { table: v_lifecycle_event, column: approved_at,   role: dimension, sort: 6 }
+
+  # canonical: model_risk_identification_classification
+  - canonical: model_risk_identification_classification
+    fields:
+      - { table: v_entity_version, column: entity_name,         role: key,       sort: 1 }
+      - { table: v_entity_version, column: materiality_tier,    role: dimension, sort: 2 }
+      - { table: v_entity_version, column: domain,              role: dimension, sort: 3 }
+
+
+# -----------------------------------------------------------------------------
+# report_definition + report_requirement — reports as data.
+# -----------------------------------------------------------------------------
+reports:
+
+  - code: model_inventory
+    name: Model Inventory Report
+    description: |
+      Enumerates every AI model (agent / task / prompt) registered to Verity,
+      with its current version, lifecycle state, materiality tier, named owner,
+      and the application(s) it serves. Satisfies SR 11-7 §I (model inventory),
+      NAIC §3.1 (enterprise AI inventory), and CAS §2 (AI accountability &
+      ownership) in a single document.
+    report_kind: metadata_driven
+    docx_template: reports/model_inventory.docx
+    output_formats: [html, docx, pdf]
+    scope_params:
+      type: object
+      properties:
+        application_code:
+          type: string
+          description: "Filter to one application (optional)"
+        materiality_tier:
+          type: string
+          enum: [high, medium, low]
+          description: "Filter to one materiality tier (optional)"
+        as_of_date:
+          type: string
+          format: date
+          description: "Inventory as-of date (defaults to today)"
+    sort_seq: 10
+    canonical_requirements:
+      - { code: model_inventory_registration,            section: "Inventory Table",   sort: 1 }
+      - { code: model_ownership_accountability,          section: "Ownership Summary", sort: 2 }
+      - { code: change_management_versioning,            section: "Recent Changes",    sort: 3 }
+      - { code: model_risk_identification_classification, section: "Materiality Distribution", sort: 4 }
