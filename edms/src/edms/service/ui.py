@@ -21,6 +21,104 @@ from edms.core.text_extractor import extract_text_from_bytes
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
+# ── DOCUMENT PREVIEW HELPERS ──────────────────────────────────
+#
+# The document-detail page can render an inline preview for three
+# kinds of files:
+#   - "pdf"  -> embedded via <iframe> hitting /documents/{id}/content
+#   - "text" -> raw UTF-8 bytes shown in a <pre> block
+#   - "docx" -> converted to HTML server-side via the `mammoth` lib
+# Anything else falls back to "none" (no preview, just metadata +
+# extracted-text + download link).
+
+# Filename extensions we treat as previewable plain text.
+_TEXT_EXTENSIONS = {
+    ".txt", ".csv", ".tsv", ".json", ".md", ".log",
+    ".xml", ".yaml", ".yml", ".ini", ".cfg",
+}
+
+# Hard cap on text-preview size to keep the page responsive.
+# Larger files still get a "Download original" link.
+_TEXT_PREVIEW_MAX_BYTES = 512 * 1024  # 512 KB
+
+
+def _preview_kind(content_type: Optional[str], filename: Optional[str]) -> str:
+    """Decide which preview branch to render for a document.
+
+    Detection order: MIME type first (most reliable when set
+    correctly), then file extension as a fallback (because uploads
+    often arrive with content_type="application/octet-stream").
+    """
+    ct = (content_type or "").lower().split(";")[0].strip()
+    suffix = Path(filename or "").suffix.lower()
+
+    # PDF
+    if ct == "application/pdf" or suffix == ".pdf":
+        return "pdf"
+
+    # DOCX (modern Word; we deliberately do not handle legacy .doc —
+    # mammoth supports docx only, and old .doc would need LibreOffice).
+    if ct == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        return "docx"
+    if suffix == ".docx":
+        return "docx"
+
+    # Plain text — anything text/* MIME plus the extension allowlist.
+    if ct.startswith("text/") or suffix in _TEXT_EXTENSIONS:
+        return "text"
+
+    return "none"
+
+
+def _load_preview_payload(
+    storage: StorageClient,
+    bucket: str,
+    storage_key: str,
+    kind: str,
+) -> Optional[str]:
+    """Fetch + transform the file bytes for the chosen preview kind.
+
+    Returns:
+        - "text" kind: decoded UTF-8 string (truncated at the cap)
+        - "docx" kind: HTML string produced by mammoth
+        - "pdf"  kind: None (the template embeds /content directly)
+        - "none" kind: None
+        - On any failure: a short error string starting with "[preview error: ...]"
+          so the template can show it without 500-ing the whole page.
+    """
+    if kind in ("pdf", "none"):
+        return None
+
+    try:
+        raw = storage.download_bytes(bucket, storage_key)
+    except Exception as e:
+        return f"[preview error: failed to fetch from storage — {e}]"
+
+    if kind == "text":
+        # decode with errors='replace' so a single bad byte doesn't 500.
+        # Truncate large files; the user can still click "Download original".
+        truncated = raw[:_TEXT_PREVIEW_MAX_BYTES]
+        text = truncated.decode("utf-8", errors="replace")
+        if len(raw) > _TEXT_PREVIEW_MAX_BYTES:
+            text += f"\n\n[... truncated — showing first {_TEXT_PREVIEW_MAX_BYTES // 1024} KB of {len(raw) // 1024} KB ...]"
+        return text
+
+    if kind == "docx":
+        # mammoth returns a Result with .value (HTML) and .messages
+        # (warnings about unsupported styles). We surface only the HTML;
+        # warnings are expected on richly-styled documents and not worth
+        # showing in the UI.
+        try:
+            import io
+            import mammoth
+            result = mammoth.convert_to_html(io.BytesIO(raw))
+            return result.value
+        except Exception as e:
+            return f"[preview error: docx conversion failed — {e}]"
+
+    return None
+
+
 def create_ui_routes(
     db: EdmsDatabase,
     storage: StorageClient,
@@ -114,6 +212,11 @@ def create_ui_routes(
             except Exception:
                 extracted_text = None
 
+        # Preview is lazy-loaded into a modal on demand — see the
+        # Preview button + dialog at the bottom of document_detail.html
+        # and the GET /ui/documents/{id}/preview fragment route below.
+        # We deliberately do NOT fetch from MinIO or run mammoth here.
+
         # Lineage: parent (upstream) and children (downstream)
         parent_doc = await db.get_parent(document_id)
         children = await db.get_children(document_id)
@@ -135,6 +238,41 @@ def create_ui_routes(
             children=children,
             tasks=tasks,
             all_folders=all_folders,
+        )
+
+    # ── DOCUMENT PREVIEW (modal fragment, lazy-loaded by HTMX) ─
+
+    @router.get("/documents/{document_id}/preview", response_class=HTMLResponse)
+    async def document_preview_fragment(request: Request, document_id: UUID):
+        """Return the modal-body HTML for a document preview.
+
+        Loaded by the Preview button on the document-detail page via
+        HTMX (hx-trigger="click once"), so the MinIO fetch + DOCX
+        conversion only happen if the user actually opens the preview,
+        and only the first time per page-load.
+
+        Branches on _preview_kind() to decide whether to embed a PDF,
+        render text, run mammoth, or show a "not previewable" notice.
+        """
+        doc = await db.get_document(document_id)
+        if not doc:
+            return HTMLResponse("<div>Document not found</div>", status_code=404)
+
+        kind = _preview_kind(doc.get("content_type"), doc.get("filename"))
+        payload = None
+        if kind != "none":
+            try:
+                bucket = await _get_bucket(doc["collection_id"])
+                payload = _load_preview_payload(
+                    storage, bucket, doc["storage_key"], kind,
+                )
+            except Exception as e:
+                payload = f"[preview error: {e}]"
+
+        return _render(request, "_preview_fragment.html",
+            doc=doc,
+            preview_kind=kind,
+            preview_payload=payload,
         )
 
     # ── UPLOAD PAGE ───────────────────────────────────────────

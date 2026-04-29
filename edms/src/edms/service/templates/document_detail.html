@@ -12,6 +12,19 @@
 {% block page_title %}{{ doc.filename }}{% endblock %}
 
 {% block header_actions %}
+    {# Preview button: opens the modal AND lazy-loads the preview
+       fragment via HTMX. hx-trigger="click once" means we only
+       fetch the first time — re-opening the modal reuses the
+       already-swapped content. #}
+    <button type="button"
+            class="verity-btn verity-btn-secondary verity-btn-sm"
+            hx-get="/ui/documents/{{ doc.id }}/preview"
+            hx-target="#preview-modal-body"
+            hx-swap="innerHTML"
+            hx-trigger="click once"
+            onclick="document.getElementById('preview-modal').showModal()">
+        Preview
+    </button>
     <button type="button" class="verity-btn verity-btn-danger verity-btn-sm"
             onclick="document.getElementById('delete-doc-modal').showModal()">
         Delete
@@ -327,6 +340,35 @@
         });
     });
 </script>
+
+
+{# ── DaisyUI MODAL: document preview (lazy-loaded by HTMX) ── #}
+<dialog id="preview-modal" class="modal">
+    <div class="modal-box"
+         style="max-width: 90vw; width: 1100px; max-height: 90vh;">
+        <h3 class="font-bold" style="font-size: 1rem;">
+            Preview: {{ doc.filename }}
+        </h3>
+
+        {# HTMX swaps preview content into this div the first time
+           the Preview button is clicked. Initial state is a small
+           placeholder so the modal isn't empty during the fetch. #}
+        <div id="preview-modal-body" style="margin-top: 12px;">
+            <div style="text-align: center; padding: 40px;
+                        color: var(--verity-text-light); font-size: 0.9rem;">
+                Loading preview…
+            </div>
+        </div>
+
+        <div class="modal-action" style="margin-top: 16px;">
+            <button type="button" class="verity-btn verity-btn-secondary"
+                    onclick="document.getElementById('preview-modal').close()">
+                Close
+            </button>
+        </div>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+</dialog>
 
 
 {# ── DaisyUI MODAL: top-level delete confirmation ─────────── #}
