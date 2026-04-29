@@ -237,3 +237,163 @@ CREATE TABLE IF NOT EXISTS verity_compliance.requirement_coverage (
     created_at               timestamptz NOT NULL DEFAULT now(),
     updated_at               timestamptz NOT NULL DEFAULT now()
 );
+
+
+-- =========================================================================
+-- L2 (verity_analytics) — mart_field registry
+-- =========================================================================
+-- The catalog of every column reachable from a report. Reports reference
+-- mart_field rows via L4's requirement_evidence_field; SQL planning walks
+-- these to know what columns to project. Each mart_field row points at a
+-- table-or-view + column that exists in verity_analytics.
+--
+-- Phase 2: views over L1 (logical mart). Phase 5+: physical fact/dim tables
+-- replace the views; mart_field rows continue pointing at the same
+-- (table_name, column_name) identifiers — reports keep working unchanged.
+
+CREATE TABLE IF NOT EXISTS verity_analytics.mart_field (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    table_name      text NOT NULL,           -- e.g. 'v_entity_version' (no schema prefix)
+    column_name     text NOT NULL,
+    semantic_type   text NOT NULL
+                         CHECK (semantic_type IN ('identifier',
+                                                  'measure',
+                                                  'date',
+                                                  'category',
+                                                  'text',
+                                                  'json')),
+    description     text,
+    is_pii          boolean NOT NULL DEFAULT false,
+    embedding       vector(384),             -- populated by Phase 1.5 reembed CLI
+    embedding_model_id uuid REFERENCES verity_compliance.embedding_config(id),
+    sort_seq        int NOT NULL DEFAULT 0,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT mart_field_unique UNIQUE (table_name, column_name)
+);
+
+CREATE INDEX IF NOT EXISTS mart_field_table_idx
+    ON verity_analytics.mart_field(table_name);
+
+
+-- =========================================================================
+-- L4 (semantic layer) — canonical_requirement → mart_field manifest
+-- =========================================================================
+-- Says: "to evidence canonical X, project these mart_fields in these roles."
+-- Reports inherit the field manifest from the canonicals they cover.
+
+CREATE TABLE IF NOT EXISTS verity_compliance.requirement_evidence_field (
+    id                       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    canonical_requirement_id uuid NOT NULL
+                                  REFERENCES verity_compliance.canonical_requirement(id)
+                                  ON DELETE CASCADE,
+    mart_field_id            uuid NOT NULL
+                                  REFERENCES verity_analytics.mart_field(id)
+                                  ON DELETE RESTRICT,
+    role                     text NOT NULL DEFAULT 'dimension'
+                                  CHECK (role IN ('key','measure','dimension','filter','context')),
+    aggregation              text
+                                  CHECK (aggregation IS NULL OR
+                                         aggregation IN ('count','sum','avg','min','max','distinct_count')),
+    sort_seq                 int NOT NULL DEFAULT 0,
+    notes                    text,
+    created_at               timestamptz NOT NULL DEFAULT now(),
+    updated_at               timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT requirement_evidence_field_unique
+        UNIQUE (canonical_requirement_id, mart_field_id)
+);
+
+CREATE INDEX IF NOT EXISTS req_evidence_field_canonical_idx
+    ON verity_compliance.requirement_evidence_field(canonical_requirement_id);
+
+CREATE INDEX IF NOT EXISTS req_evidence_field_mart_idx
+    ON verity_compliance.requirement_evidence_field(mart_field_id);
+
+
+-- =========================================================================
+-- L5 (reports) — reports as data
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS verity_compliance.report_definition (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    code            text NOT NULL UNIQUE,    -- 'model_inventory', 'decision_audit_trail', ...
+    name            text NOT NULL,
+    description     text,
+    report_kind     text NOT NULL DEFAULT 'metadata_driven'
+                         CHECK (report_kind IN ('metadata_driven','template_driven')),
+    docx_template   text,                    -- relative path to .docx template under verity package
+    output_formats  text[] NOT NULL DEFAULT ARRAY['html','docx','pdf'],
+    scope_params    jsonb NOT NULL DEFAULT '{}',
+    sort_seq        int NOT NULL DEFAULT 0,
+    is_active       boolean NOT NULL DEFAULT true,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+
+CREATE TABLE IF NOT EXISTS verity_compliance.report_requirement (
+    id                       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    report_id                uuid NOT NULL
+                                  REFERENCES verity_compliance.report_definition(id)
+                                  ON DELETE CASCADE,
+    canonical_requirement_id uuid NOT NULL
+                                  REFERENCES verity_compliance.canonical_requirement(id)
+                                  ON DELETE RESTRICT,
+    section                  text,
+    sort_seq                 int NOT NULL DEFAULT 0,
+    notes                    text,
+    created_at               timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT report_requirement_unique
+        UNIQUE (report_id, canonical_requirement_id)
+);
+
+CREATE INDEX IF NOT EXISTS report_requirement_report_idx
+    ON verity_compliance.report_requirement(report_id);
+
+
+-- Optional per-report tweaks to a mart_field's role/aggregation/sort.
+CREATE TABLE IF NOT EXISTS verity_compliance.report_field_override (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    report_id       uuid NOT NULL REFERENCES verity_compliance.report_definition(id) ON DELETE CASCADE,
+    mart_field_id   uuid NOT NULL REFERENCES verity_analytics.mart_field(id) ON DELETE RESTRICT,
+    role_override   text CHECK (role_override IN ('key','measure','dimension','filter','context')),
+    aggregation_override text CHECK (aggregation_override IS NULL OR
+                                     aggregation_override IN ('count','sum','avg','min','max','distinct_count')),
+    sort_seq_override int,
+    notes           text,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT report_field_override_unique UNIQUE (report_id, mart_field_id)
+);
+
+
+-- BYO-SQL escape hatch (AD-CS-008). Optional. One row per template_driven report.
+CREATE TABLE IF NOT EXISTS verity_compliance.report_sql_template (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    report_id       uuid NOT NULL UNIQUE REFERENCES verity_compliance.report_definition(id) ON DELETE CASCADE,
+    sql_text        text NOT NULL,
+    parameter_schema jsonb NOT NULL DEFAULT '{}',
+    referenced_mart_fields uuid[] NOT NULL DEFAULT '{}',
+    notes           text,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+
+-- Audit trail of generated reports.
+CREATE TABLE IF NOT EXISTS verity_compliance.report_run_log (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    report_id       uuid NOT NULL REFERENCES verity_compliance.report_definition(id) ON DELETE RESTRICT,
+    requested_by    text,
+    scope_params    jsonb NOT NULL DEFAULT '{}',
+    output_formats  text[] NOT NULL DEFAULT '{}',
+    status          text NOT NULL DEFAULT 'pending'
+                         CHECK (status IN ('pending','succeeded','failed')),
+    error_message   text,
+    artifact_uris   jsonb NOT NULL DEFAULT '{}',  -- {"docx": "/.../*.docx", "pdf": "/.../*.pdf", ...}
+    duration_ms     int,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    completed_at    timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS report_run_log_report_idx
+    ON verity_compliance.report_run_log(report_id, created_at DESC);

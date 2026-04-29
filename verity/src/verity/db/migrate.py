@@ -12,6 +12,7 @@ import psycopg
 
 SCHEMA_FILE = Path(__file__).parent / "schema.sql"
 COMPLIANCE_SCHEMA_FILE = Path(__file__).parent / "schema_compliance.sql"
+COMPLIANCE_VIEWS_FILE = Path(__file__).parent / "schema_compliance_views.sql"
 
 
 async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
@@ -27,6 +28,7 @@ async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
     """
     schema_sql = SCHEMA_FILE.read_text()
     compliance_schema_sql = COMPLIANCE_SCHEMA_FILE.read_text()
+    compliance_views_sql = COMPLIANCE_VIEWS_FILE.read_text()
 
     async with await psycopg.AsyncConnection.connect(
         database_url, autocommit=True
@@ -91,7 +93,7 @@ async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
                 print(f"Statement: {stmt[:200]}...")
                 raise
 
-        print("Applying Verity compliance schema (L3 metamodel + L2 placeholder)...")
+        print("Applying Verity compliance schema (L3 metamodel + L4 reports + mart_field)...")
         compliance_statements = _split_sql_statements(compliance_schema_sql)
         for i, stmt in enumerate(compliance_statements, 1):
             stmt = stmt.strip()
@@ -104,6 +106,22 @@ async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
                 if "already exists" in err_msg:
                     continue
                 print(f"Compliance schema error on statement {i}: {err_msg}")
+                print(f"Statement: {stmt[:200]}...")
+                raise
+
+        print("Applying verity_analytics views (logical mart over L1)...")
+        view_statements = _split_sql_statements(compliance_views_sql)
+        for i, stmt in enumerate(view_statements, 1):
+            stmt = stmt.strip()
+            if not stmt:
+                continue
+            try:
+                await conn.execute(stmt)
+            except Exception as e:
+                # CREATE OR REPLACE VIEW is idempotent; only catch a missing
+                # underlying L1 table here (e.g. before main schema applied).
+                err_msg = str(e)
+                print(f"View creation error on statement {i}: {err_msg}")
                 print(f"Statement: {stmt[:200]}...")
                 raise
 
