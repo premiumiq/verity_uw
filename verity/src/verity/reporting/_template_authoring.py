@@ -534,8 +534,748 @@ def author_model_inventory() -> Path:
 # Dispatcher
 # =============================================================================
 
+# =============================================================================
+# Decision Audit Trail
+# =============================================================================
+
+def author_workflow_audit_trail() -> Path:
+    """End-to-end audit trail for one workflow_run_id."""
+    doc = Document()
+    _set_normal_style(doc)
+    _setup_section(doc)
+
+    # ── COVER ──
+    for _ in range(8):
+        doc.add_paragraph()
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("VERITY"); _set_run_font(run, name=HEADING_FONT, size=14, bold=True, color=BRAND_BLUE_LIGHT)
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(4); p.paragraph_format.space_after = Pt(4)
+    run = p.add_run("Compliance Report"); _set_run_font(run, name=HEADING_FONT, size=11, color=MUTED_GRAY)
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(28); p.paragraph_format.space_after = Pt(8)
+    run = p.add_run("{{ report_title }}")
+    _set_run_font(run, name=HEADING_FONT, size=32, bold=True, color=BRAND_BLUE)
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(20)
+    run = p.add_run("Generated {{ generated_at_str }}")
+    _set_run_font(run, name=BODY_FONT, size=12, color=BODY_GRAY)
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("Workflow: {{ workflow_run_id }}")
+    _set_run_font(run, name=BODY_FONT, size=10, italic=True, color=MUTED_GRAY)
+    _add_page_break(doc)
+
+    # ── PURPOSE ──
+    _add_heading(doc, "Purpose", level=1)
+    _add_styled_para(doc, "{{ report_description }}", space_after=12)
+    _add_styled_para(
+        doc,
+        "This report covers one workflow execution, identified by the "
+        "execution_context_id above. Every decision the workflow produced is "
+        "listed in chronological order, with full reasoning, confidence "
+        "scores, HITL gate status, and any human overrides applied.",
+        space_after=10,
+    )
+    _add_page_break(doc)
+
+    # ── EXECUTIVE SUMMARY ──
+    _add_heading(doc, "Executive Summary", level=1)
+    _add_styled_para(
+        doc,
+        "{{ decision_count }} decision(s) were produced by {{ distinct_assets }} "
+        "distinct asset(s) over a total runtime of {{ total_duration_ms }} ms. "
+        "The mean reported confidence across decisions was "
+        "{{ '%.2f'|format(avg_confidence) if avg_confidence is not none else 'n/a' }}. "
+        "{{ hitl_required_count }} decision(s) required HITL approval; "
+        "{{ override_count }} override(s) were recorded.",
+    )
+    _add_page_break(doc)
+
+    # ── DECISION SEQUENCE ──
+    _add_heading(doc, "Decision Sequence", level=1)
+    _add_styled_para(
+        doc,
+        "Each card below is one decision, ordered chronologically. The card "
+        "shows the asset that produced it, the workflow step, the LLM used, "
+        "duration, confidence, HITL state, and the reasoning text the model "
+        "produced.",
+        space_after=10,
+    )
+
+    # Decision cards table — single-column shaded cell per decision.
+    table = doc.add_table(rows=3, cols=1)
+    table.autofit = False
+    table.columns[0].width = Inches(6.5)
+
+    table.rows[0].cells[0].text = ""
+    table.rows[0].cells[0].paragraphs[0].add_run("{%tr for d in decisions %}")
+
+    body = table.rows[1].cells[0]
+    body.width = Inches(6.5)
+    _shade_cell(body, CARD_SHADE_HEX)
+    _set_cell_borders(body, color="C5CDDC")
+    body._tc.remove(body.paragraphs[0]._p)
+
+    p = body.add_paragraph()
+    p.paragraph_format.space_before = Pt(8); p.paragraph_format.space_after = Pt(2)
+    run = p.add_run("Step: {{ d.step_name or '—' }}")
+    _set_run_font(run, name=BODY_FONT, size=12, bold=True, color=BRAND_BLUE)
+    run = p.add_run("    ·    ")
+    _set_run_font(run, name=BODY_FONT, size=11, color=MUTED_GRAY)
+    run = p.add_run("{{ d.asset_type_display }}: {{ d.asset_display_name }} v{{ d.version_label }}")
+    _set_run_font(run, name=BODY_FONT, size=11, color=BODY_GRAY)
+
+    p = body.add_paragraph()
+    p.paragraph_format.space_before = Pt(0); p.paragraph_format.space_after = Pt(2)
+    run = p.add_run("{{ d.created_at.strftime('%Y-%m-%d %H:%M:%S') if d.created_at else '—' }}")
+    _set_run_font(run, name=BODY_FONT, size=9, italic=True, color=MUTED_GRAY)
+    run = p.add_run("    ·    Model: {{ d.model_used or '—' }}    ·    Duration: {{ d.duration_ms or 0 }} ms    ·    Confidence: {{ '%.2f'|format(d.confidence_score|float) if d.confidence_score is not none else '—' }}")
+    _set_run_font(run, name=BODY_FONT, size=9, color=MUTED_GRAY)
+
+    p = body.add_paragraph()
+    p.paragraph_format.space_before = Pt(4)
+    run = p.add_run("Input: ")
+    _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BODY_GRAY)
+    run = p.add_run("{{ d.input_summary or '—' }}")
+    _set_run_font(run, name=BODY_FONT, size=10, color=BODY_GRAY)
+
+    p = body.add_paragraph()
+    run = p.add_run("Output: ")
+    _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BODY_GRAY)
+    run = p.add_run("{{ d.output_summary or '—' }}")
+    _set_run_font(run, name=BODY_FONT, size=10, color=BODY_GRAY)
+
+    p = body.add_paragraph()
+    p.paragraph_format.space_after = Pt(8)
+    run = p.add_run("Reasoning: ")
+    _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BODY_GRAY)
+    run = p.add_run("{{ d.reasoning_text or '—' }}")
+    _set_run_font(run, name=BODY_FONT, size=10, italic=True, color=BODY_GRAY)
+
+    table.rows[2].cells[0].text = "{%tr endfor %}"
+
+    _add_page_break(doc)
+
+    # ── HITL OVERRIDES ──
+    _add_heading(doc, "HITL Overrides", level=1)
+    _add_styled_para(
+        doc,
+        "{{ override_count }} override(s) were applied to decisions in this "
+        "workflow. Each override represents a named reviewer correcting an "
+        "AI-produced value before it became binding.",
+        space_after=10,
+    )
+    ov_table = doc.add_table(rows=4, cols=5)
+    ov_table.style = "Light Grid Accent 1"
+    headers = ["Fact", "AI Value", "Human Value", "Reviewer", "When"]
+    for i, h in enumerate(headers):
+        cell = ov_table.rows[0].cells[i]; cell.text = ""
+        run = cell.paragraphs[0].add_run(h)
+        _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BRAND_BLUE)
+    ov_table.rows[1].cells[0].text = "{%tr for o in overrides %}"
+    ov_table.rows[1].cells[0].merge(ov_table.rows[1].cells[4])
+    body = ov_table.rows[2].cells
+    cells_text = [
+        "{{ o.fact_type }}",
+        "{{ o.ai_value or '—' }}",
+        "{{ o.hitl_value }}",
+        "{{ o.overridden_by }}",
+        "{{ o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at else '—' }}",
+    ]
+    for i, txt in enumerate(cells_text):
+        body[i].text = ""
+        run = body[i].paragraphs[0].add_run(txt)
+        _set_run_font(run, name=BODY_FONT, size=10, color=BODY_GRAY)
+    ov_table.rows[3].cells[0].text = "{%tr endfor %}"
+    ov_table.rows[3].cells[0].merge(ov_table.rows[3].cells[4])
+
+    _add_page_break(doc)
+
+    # ── REGULATORY COVERAGE ──
+    _add_heading(doc, "Regulatory Coverage", level=1)
+    _add_canonicals_table(doc)
+
+    out = TEMPLATES_DIR / "workflow_audit_trail.docx"
+    doc.save(out)
+    return out
+
+
+# =============================================================================
+# Decision Audit Trail — single-decision deep-dive
+# =============================================================================
+
+def author_decision_audit_trail() -> Path:
+    """Single-decision report. Required scope: decision_id."""
+    doc = Document()
+    _set_normal_style(doc)
+    _setup_section(doc)
+
+    # ── COVER ──
+    for _ in range(8):
+        doc.add_paragraph()
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("VERITY"); _set_run_font(run, name=HEADING_FONT, size=14, bold=True, color=BRAND_BLUE_LIGHT)
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(4)
+    run = p.add_run("Compliance Report"); _set_run_font(run, name=HEADING_FONT, size=11, color=MUTED_GRAY)
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(28)
+    run = p.add_run("{{ report_title }}")
+    _set_run_font(run, name=HEADING_FONT, size=30, bold=True, color=BRAND_BLUE)
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(20)
+    run = p.add_run("{{ decision.asset_type_display }}: {{ decision.asset_display_name }} v{{ decision.version_label }}")
+    _set_run_font(run, name=HEADING_FONT, size=15, bold=True, color=BRAND_BLUE_LIGHT)
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("Decision rendered {{ decision.created_at.strftime('%Y-%m-%d %H:%M:%S') if decision.created_at else '—' }}")
+    _set_run_font(run, name=BODY_FONT, size=11, color=BODY_GRAY)
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(20)
+    run = p.add_run("Generated {{ generated_at_str }}")
+    _set_run_font(run, name=BODY_FONT, size=10, italic=True, color=MUTED_GRAY)
+    _add_page_break(doc)
+
+    # ── PURPOSE ──
+    _add_heading(doc, "Purpose", level=1)
+    _add_styled_para(doc, "{{ report_description }}", space_after=12)
+    _add_page_break(doc)
+
+    # ── DECISION CONTEXT ──
+    _add_heading(doc, "Decision Context", level=1)
+    grid = doc.add_table(rows=10, cols=2)
+    grid.style = "Light Grid Accent 1"
+    rows = [
+        ("Asset",           "{{ decision.asset_type_display }}: {{ decision.asset_display_name }}"),
+        ("Version",         "v{{ decision.version_label }}"),
+        ("Owner",           "{{ decision.owner_name }}"),
+        ("Materiality",     "{{ decision.materiality_display }}"),
+        ("Workflow step",   "{{ decision.step_name or '—' }}"),
+        ("Application",     "{{ decision.application_code or '—' }}"),
+        ("Channel",         "{{ decision.channel or '—' }}"),
+        ("Run purpose",     "{{ decision.run_purpose or '—' }}"),
+        ("LLM used",        "{{ decision.model_used or '—' }}"),
+        ("Decision ID",     "{{ decision.decision_id }}"),
+    ]
+    for i, (k, v) in enumerate(rows):
+        c0 = grid.rows[i].cells[0]; c1 = grid.rows[i].cells[1]
+        c0.text = ""; run = c0.paragraphs[0].add_run(k)
+        _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BRAND_BLUE)
+        c1.text = ""; run = c1.paragraphs[0].add_run(v)
+        _set_run_font(run, name=BODY_FONT, size=10, color=BODY_GRAY)
+    _add_styled_para(doc, "", space_before=8)
+    _add_styled_para(doc, "Asset description", font=HEADING_FONT, size=12, bold=True,
+                     color=BRAND_BLUE, space_before=10, space_after=2)
+    _add_styled_para(doc, "{{ decision.asset_description or '—' }}",
+                     italic=True, color=MUTED_GRAY)
+    _add_page_break(doc)
+
+    # ── REASONING ──
+    _add_heading(doc, "Reasoning", level=1)
+    _add_styled_para(
+        doc,
+        "Below is the model-emitted reasoning for this decision, exactly as "
+        "produced at runtime. This is the substantive justification a "
+        "regulator or affected consumer is entitled to see.",
+        space_after=10,
+    )
+    _add_styled_para(doc, "Input summary", font=HEADING_FONT, size=12, bold=True,
+                     color=BRAND_BLUE, space_before=6, space_after=2)
+    _add_styled_para(doc, "{{ decision.input_summary or '—' }}", color=BODY_GRAY)
+
+    _add_styled_para(doc, "Output summary", font=HEADING_FONT, size=12, bold=True,
+                     color=BRAND_BLUE, space_before=14, space_after=2)
+    _add_styled_para(doc, "{{ decision.output_summary or '—' }}", color=BODY_GRAY)
+
+    _add_styled_para(doc, "Reasoning", font=HEADING_FONT, size=12, bold=True,
+                     color=BRAND_BLUE, space_before=14, space_after=2)
+    _add_styled_para(doc, "{{ decision.reasoning_text or '—' }}",
+                     italic=True, color=BODY_GRAY)
+    _add_page_break(doc)
+
+    # ── METRICS ──
+    _add_heading(doc, "Confidence & Performance", level=1)
+    grid = doc.add_table(rows=4, cols=2)
+    grid.style = "Light Grid Accent 1"
+    rows = [
+        ("Confidence",        "{{ '%.2f'|format(decision.confidence_score|float) if decision.confidence_score is not none else '—' }}"),
+        ("Duration",          "{{ decision.duration_ms or 0 }} ms"),
+        ("Tokens (in/out)",   "{{ decision.input_tokens or 0 }} / {{ decision.output_tokens or 0 }}"),
+        ("HITL gate",         "{% if decision.hitl_required %}required{% if decision.hitl_completed %} (completed){% endif %}{% else %}not required{% endif %}"),
+    ]
+    for i, (k, v) in enumerate(rows):
+        c0 = grid.rows[i].cells[0]; c1 = grid.rows[i].cells[1]
+        c0.text = ""; run = c0.paragraphs[0].add_run(k)
+        _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BRAND_BLUE)
+        c1.text = ""; run = c1.paragraphs[0].add_run(v)
+        _set_run_font(run, name=BODY_FONT, size=10, color=BODY_GRAY)
+    _add_page_break(doc)
+
+    # ── OVERRIDES ──
+    _add_heading(doc, "Human Overrides", level=1)
+    _add_styled_para(
+        doc,
+        "{{ override_count }} human override(s) applied to this specific decision. "
+        "Each row records a named reviewer correcting an AI-produced value.",
+        space_after=10,
+    )
+    ov = doc.add_table(rows=4, cols=5)
+    ov.style = "Light Grid Accent 1"
+    headers = ["Fact", "AI Value", "Human Value", "Reviewer", "When"]
+    for i, h in enumerate(headers):
+        cell = ov.rows[0].cells[i]; cell.text = ""
+        run = cell.paragraphs[0].add_run(h)
+        _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BRAND_BLUE)
+    ov.rows[1].cells[0].text = "{%tr for o in overrides %}"
+    ov.rows[1].cells[0].merge(ov.rows[1].cells[4])
+    body = ov.rows[2].cells
+    cells_text = [
+        "{{ o.fact_type }}",
+        "{{ o.ai_value or '—' }}",
+        "{{ o.hitl_value }}",
+        "{{ o.overridden_by }}",
+        "{{ o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at else '—' }}",
+    ]
+    for i, txt in enumerate(cells_text):
+        body[i].text = ""
+        run = body[i].paragraphs[0].add_run(txt)
+        _set_run_font(run, name=BODY_FONT, size=10, color=BODY_GRAY)
+    ov.rows[3].cells[0].text = "{%tr endfor %}"
+    ov.rows[3].cells[0].merge(ov.rows[3].cells[4])
+    _add_page_break(doc)
+
+    # ── REGULATORY COVERAGE ──
+    _add_heading(doc, "Regulatory Coverage", level=1)
+    _add_canonicals_table(doc)
+
+    out = TEMPLATES_DIR / "decision_audit_trail.docx"
+    doc.save(out)
+    return out
+
+
+# =============================================================================
+# Fairness Validation Summary
+# =============================================================================
+
+def author_fairness_validation_summary() -> Path:
+    doc = Document()
+    _set_normal_style(doc)
+    _setup_section(doc)
+
+    # ── COVER ──
+    for _ in range(8):
+        doc.add_paragraph()
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("VERITY"); _set_run_font(run, name=HEADING_FONT, size=14, bold=True, color=BRAND_BLUE_LIGHT)
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(4)
+    run = p.add_run("Compliance Report"); _set_run_font(run, name=HEADING_FONT, size=11, color=MUTED_GRAY)
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(28)
+    run = p.add_run("{{ report_title }}")
+    _set_run_font(run, name=HEADING_FONT, size=32, bold=True, color=BRAND_BLUE)
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(20)
+    run = p.add_run("Generated {{ generated_at_str }}")
+    _set_run_font(run, name=BODY_FONT, size=12, color=BODY_GRAY)
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("Scope: {{ scope_summary }}")
+    _set_run_font(run, name=BODY_FONT, size=10, italic=True, color=MUTED_GRAY)
+    _add_page_break(doc)
+
+    # ── PURPOSE ──
+    _add_heading(doc, "Purpose", level=1)
+    _add_styled_para(doc, "{{ report_description }}", space_after=12)
+    _add_page_break(doc)
+
+    # ── EXECUTIVE SUMMARY ──
+    _add_heading(doc, "Executive Summary", level=1)
+    _add_styled_para(
+        doc,
+        "{{ result_count }} validation result(s) recorded across {{ asset_count }} "
+        "asset(s). {{ pass_count }} passed, {{ fail_count }} failed.",
+    )
+    _add_page_break(doc)
+
+    # ── PER-ASSET VALIDATION ──
+    _add_heading(doc, "Validation by Asset", level=1)
+    _add_styled_para(
+        doc,
+        "Each asset is summarized below with its registered metadata and the "
+        "list of validation results recorded against it.",
+        space_after=10,
+    )
+
+    table = doc.add_table(rows=3, cols=1)
+    table.autofit = False
+    table.columns[0].width = Inches(6.5)
+
+    table.rows[0].cells[0].text = "{%tr for asset in asset_summaries %}"
+
+    body = table.rows[1].cells[0]
+    _shade_cell(body, CARD_SHADE_HEX)
+    _set_cell_borders(body, color="C5CDDC")
+    body._tc.remove(body.paragraphs[0]._p)
+
+    p = body.add_paragraph()
+    p.paragraph_format.space_before = Pt(8); p.paragraph_format.space_after = Pt(2)
+    run = p.add_run("{{ asset.asset_type_display }}: {{ asset.asset_display_name }} v{{ asset.version_label }}")
+    _set_run_font(run, name=BODY_FONT, size=12, bold=True, color=BRAND_BLUE)
+
+    p = body.add_paragraph()
+    p.paragraph_format.space_after = Pt(4)
+    run = p.add_run("Materiality: {{ asset.materiality_display }}    ·    Owner: {{ asset.owner_name }}    ·    {{ asset.pass_count }} passed, {{ asset.fail_count }} failed")
+    _set_run_font(run, name=BODY_FONT, size=10, color=MUTED_GRAY)
+
+    # Inner: per-result details (run inside the same shaded cell)
+    p = body.add_paragraph()
+    p.paragraph_format.space_after = Pt(8)
+    run = p.add_run("{% for r in asset.results %}{{ r.metric_type }} — {{ r.passed_display }} (run {{ r.run_at.strftime('%Y-%m-%d') if r.run_at else '—' }}){% if not loop.last %}; {% endif %}{% endfor %}")
+    _set_run_font(run, name=BODY_FONT, size=9, italic=True, color=BODY_GRAY)
+
+    table.rows[2].cells[0].text = "{%tr endfor %}"
+
+    _add_page_break(doc)
+
+    # ── DETAILED RESULTS ──
+    _add_heading(doc, "Detailed Results", level=1)
+    _add_styled_para(
+        doc,
+        "Every individual validation row, in reverse-chronological order.",
+        space_after=10,
+    )
+    rows_table = doc.add_table(rows=4, cols=6)
+    rows_table.style = "Light Grid Accent 1"
+    headers = ["Asset", "Suite", "Metric", "Result", "When", "Channel"]
+    for i, h in enumerate(headers):
+        cell = rows_table.rows[0].cells[i]; cell.text = ""
+        run = cell.paragraphs[0].add_run(h)
+        _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BRAND_BLUE)
+    rows_table.rows[1].cells[0].text = "{%tr for r in validation_results %}"
+    rows_table.rows[1].cells[0].merge(rows_table.rows[1].cells[5])
+    body = rows_table.rows[2].cells
+    cells_text = [
+        "{{ r.asset_display_name }}",
+        "{{ r.suite_id }}",
+        "{{ r.metric_type or '—' }}",
+        "{{ r.passed_display }}",
+        "{{ r.run_at.strftime('%Y-%m-%d %H:%M') if r.run_at else '—' }}",
+        "{{ r.channel or '—' }}",
+    ]
+    for i, txt in enumerate(cells_text):
+        body[i].text = ""
+        run = body[i].paragraphs[0].add_run(txt)
+        _set_run_font(run, name=BODY_FONT, size=9, color=BODY_GRAY)
+    rows_table.rows[3].cells[0].text = "{%tr endfor %}"
+    rows_table.rows[3].cells[0].merge(rows_table.rows[3].cells[5])
+
+    _add_page_break(doc)
+    _add_heading(doc, "Regulatory Coverage", level=1)
+    _add_canonicals_table(doc)
+
+    out = TEMPLATES_DIR / "fairness_validation_summary.docx"
+    doc.save(out)
+    return out
+
+
+# =============================================================================
+# NAIC Exhibit C — High-Risk System Deep Dive
+# =============================================================================
+
+def author_naic_exhibit_c() -> Path:
+    doc = Document()
+    _set_normal_style(doc)
+    _setup_section(doc)
+
+    # ── COVER ──
+    for _ in range(8):
+        doc.add_paragraph()
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("VERITY"); _set_run_font(run, name=HEADING_FONT, size=14, bold=True, color=BRAND_BLUE_LIGHT)
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(4)
+    run = p.add_run("Regulatory Examination Exhibit"); _set_run_font(run, name=HEADING_FONT, size=11, color=MUTED_GRAY)
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(28)
+    run = p.add_run("{{ report_title }}")
+    _set_run_font(run, name=HEADING_FONT, size=28, bold=True, color=BRAND_BLUE)
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(28)
+    run = p.add_run("{{ target.asset_type_display }}: {{ target.display_name }}")
+    _set_run_font(run, name=HEADING_FONT, size=18, bold=True, color=BRAND_BLUE_LIGHT)
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("Version {{ target.version_label }}    ·    {{ target.lifecycle_state_display }}")
+    _set_run_font(run, name=BODY_FONT, size=12, color=BODY_GRAY)
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(20)
+    run = p.add_run("Generated {{ generated_at_str }}")
+    _set_run_font(run, name=BODY_FONT, size=11, color=BODY_GRAY)
+    _add_page_break(doc)
+
+    # ── PURPOSE ──
+    _add_heading(doc, "Purpose and Audience", level=1)
+    _add_styled_para(doc, "{{ report_description }}", space_after=12)
+    _add_styled_para(
+        doc,
+        "This exhibit assembles the complete governance trail for one "
+        "high-risk AI system — registration, ownership, lifecycle, validation, "
+        "every decision the asset has made in production, and every override "
+        "applied to those decisions. Designed to be the single document handed "
+        "to a market-conduct examiner.",
+    )
+    _add_page_break(doc)
+
+    # ── ASSET IDENTIFICATION ──
+    _add_heading(doc, "Asset Identification", level=1)
+    grid = doc.add_table(rows=8, cols=2)
+    grid.style = "Light Grid Accent 1"
+    rows = [
+        ("Type",          "{{ target.asset_type_display }}"),
+        ("Display name",  "{{ target.display_name }}"),
+        ("Code name",     "{{ target.entity_name }}"),
+        ("Version",       "v{{ target.version_label }}"),
+        ("Lifecycle",     "{{ target.lifecycle_state_display }}"),
+        ("Materiality",   "{{ target.materiality_display }}"),
+        ("Domain",        "{{ target.domain or '—' }}"),
+        ("Application(s)", "{{ target.applications }}"),
+    ]
+    for i, (k, v) in enumerate(rows):
+        c0 = grid.rows[i].cells[0]; c1 = grid.rows[i].cells[1]
+        c0.text = ""; run = c0.paragraphs[0].add_run(k)
+        _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BRAND_BLUE)
+        c1.text = ""; run = c1.paragraphs[0].add_run(v)
+        _set_run_font(run, name=BODY_FONT, size=10, color=BODY_GRAY)
+    _add_styled_para(doc, "", space_before=8)
+    _add_styled_para(doc, "Description", font=HEADING_FONT, size=12, bold=True, color=BRAND_BLUE, space_before=10, space_after=2)
+    _add_styled_para(doc, "{{ target.entity_description or '—' }}", italic=True, color=MUTED_GRAY)
+    _add_page_break(doc)
+
+    # ── OWNERSHIP & ACCOUNTABILITY ──
+    _add_heading(doc, "Ownership & Accountability", level=1)
+    grid = doc.add_table(rows=2, cols=2)
+    grid.style = "Light Grid Accent 1"
+    rows = [
+        ("Owner name",  "{{ target.owner_name or '—' }}"),
+        ("Owner email", "{{ target.owner_email or '—' }}"),
+    ]
+    for i, (k, v) in enumerate(rows):
+        c0 = grid.rows[i].cells[0]; c1 = grid.rows[i].cells[1]
+        c0.text = ""; run = c0.paragraphs[0].add_run(k)
+        _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BRAND_BLUE)
+        c1.text = ""; run = c1.paragraphs[0].add_run(v)
+        _set_run_font(run, name=BODY_FONT, size=10, color=BODY_GRAY)
+    _add_page_break(doc)
+
+    # ── LIFECYCLE HISTORY ──
+    _add_heading(doc, "Lifecycle History", level=1)
+    _add_styled_para(
+        doc,
+        "{{ lifecycle_count }} HITL approval gate(s) recorded for this asset.",
+        space_after=8,
+    )
+    lc_table = doc.add_table(rows=4, cols=5)
+    lc_table.style = "Light Grid Accent 1"
+    headers = ["Gate", "Transition", "Approver", "Role", "When"]
+    for i, h in enumerate(headers):
+        cell = lc_table.rows[0].cells[i]; cell.text = ""
+        run = cell.paragraphs[0].add_run(h)
+        _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BRAND_BLUE)
+    lc_table.rows[1].cells[0].text = "{%tr for ev in lifecycle_events %}"
+    lc_table.rows[1].cells[0].merge(lc_table.rows[1].cells[4])
+    body = lc_table.rows[2].cells
+    cells_text = [
+        "{{ ev.gate_type or '—' }}",
+        "{{ ev.from_state_display }} → {{ ev.to_state_display }}",
+        "{{ ev.approver_name or '—' }}",
+        "{{ ev.approver_role or '—' }}",
+        "{{ ev.approved_at.strftime('%Y-%m-%d %H:%M') if ev.approved_at else '—' }}",
+    ]
+    for i, txt in enumerate(cells_text):
+        body[i].text = ""
+        run = body[i].paragraphs[0].add_run(txt)
+        _set_run_font(run, name=BODY_FONT, size=10, color=BODY_GRAY)
+    lc_table.rows[3].cells[0].text = "{%tr endfor %}"
+    lc_table.rows[3].cells[0].merge(lc_table.rows[3].cells[4])
+    _add_page_break(doc)
+
+    # ── VALIDATION & TESTING ──
+    _add_heading(doc, "Validation & Testing", level=1)
+    _add_styled_para(
+        doc,
+        "{{ validation_count }} validation result(s) recorded. "
+        "{{ validation_pass_count }} passed, {{ validation_fail_count }} failed.",
+        space_after=8,
+    )
+    vt = doc.add_table(rows=4, cols=5)
+    vt.style = "Light Grid Accent 1"
+    headers = ["Suite", "Metric", "Result", "When", "Channel"]
+    for i, h in enumerate(headers):
+        cell = vt.rows[0].cells[i]; cell.text = ""
+        run = cell.paragraphs[0].add_run(h)
+        _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BRAND_BLUE)
+    vt.rows[1].cells[0].text = "{%tr for v in validation_results %}"
+    vt.rows[1].cells[0].merge(vt.rows[1].cells[4])
+    body = vt.rows[2].cells
+    cells_text = [
+        "{{ v.suite_id }}",
+        "{{ v.metric_type or '—' }}",
+        "{{ v.passed_display }}",
+        "{{ v.run_at.strftime('%Y-%m-%d %H:%M') if v.run_at else '—' }}",
+        "{{ v.channel or '—' }}",
+    ]
+    for i, txt in enumerate(cells_text):
+        body[i].text = ""
+        run = body[i].paragraphs[0].add_run(txt)
+        _set_run_font(run, name=BODY_FONT, size=10, color=BODY_GRAY)
+    vt.rows[3].cells[0].text = "{%tr endfor %}"
+    vt.rows[3].cells[0].merge(vt.rows[3].cells[4])
+    _add_page_break(doc)
+
+    # ── DECISIONS & PRODUCTION MONITORING ──
+    _add_heading(doc, "Production Decisions", level=1)
+    _add_styled_para(
+        doc,
+        "{{ decision_count }} most recent decision(s) produced by this asset. "
+        "Mean confidence: {{ '%.2f'|format(avg_confidence) if avg_confidence is not none else 'n/a' }}.",
+        space_after=8,
+    )
+    dt = doc.add_table(rows=4, cols=6)
+    dt.style = "Light Grid Accent 1"
+    headers = ["When", "Step", "Model", "Confidence", "Duration (ms)", "HITL"]
+    for i, h in enumerate(headers):
+        cell = dt.rows[0].cells[i]; cell.text = ""
+        run = cell.paragraphs[0].add_run(h)
+        _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BRAND_BLUE)
+    dt.rows[1].cells[0].text = "{%tr for d in decisions %}"
+    dt.rows[1].cells[0].merge(dt.rows[1].cells[5])
+    body = dt.rows[2].cells
+    cells_text = [
+        "{{ d.created_at.strftime('%Y-%m-%d %H:%M') if d.created_at else '—' }}",
+        "{{ d.step_name or '—' }}",
+        "{{ d.model_used or '—' }}",
+        "{{ '%.2f'|format(d.confidence_score|float) if d.confidence_score is not none else '—' }}",
+        "{{ d.duration_ms or 0 }}",
+        "{% if d.hitl_required %}required{% if d.hitl_completed %} (done){% endif %}{% else %}—{% endif %}",
+    ]
+    for i, txt in enumerate(cells_text):
+        body[i].text = ""
+        run = body[i].paragraphs[0].add_run(txt)
+        _set_run_font(run, name=BODY_FONT, size=9, color=BODY_GRAY)
+    dt.rows[3].cells[0].text = "{%tr endfor %}"
+    dt.rows[3].cells[0].merge(dt.rows[3].cells[5])
+    _add_page_break(doc)
+
+    # ── HITL OVERRIDES ──
+    _add_heading(doc, "HITL & Overrides", level=1)
+    _add_styled_para(
+        doc,
+        "{{ override_count }} human override(s) recorded against this asset's "
+        "decisions.",
+        space_after=8,
+    )
+    ot = doc.add_table(rows=4, cols=5)
+    ot.style = "Light Grid Accent 1"
+    headers = ["Fact", "AI Value", "Human Value", "Reviewer", "When"]
+    for i, h in enumerate(headers):
+        cell = ot.rows[0].cells[i]; cell.text = ""
+        run = cell.paragraphs[0].add_run(h)
+        _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BRAND_BLUE)
+    ot.rows[1].cells[0].text = "{%tr for o in overrides %}"
+    ot.rows[1].cells[0].merge(ot.rows[1].cells[4])
+    body = ot.rows[2].cells
+    cells_text = [
+        "{{ o.fact_type }}",
+        "{{ o.ai_value or '—' }}",
+        "{{ o.hitl_value }}",
+        "{{ o.overridden_by }}",
+        "{{ o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at else '—' }}",
+    ]
+    for i, txt in enumerate(cells_text):
+        body[i].text = ""
+        run = body[i].paragraphs[0].add_run(txt)
+        _set_run_font(run, name=BODY_FONT, size=10, color=BODY_GRAY)
+    ot.rows[3].cells[0].text = "{%tr endfor %}"
+    ot.rows[3].cells[0].merge(ot.rows[3].cells[4])
+    _add_page_break(doc)
+
+    # ── REGULATORY COVERAGE ──
+    _add_heading(doc, "Regulatory Coverage", level=1)
+    _add_canonicals_table(doc)
+
+    out = TEMPLATES_DIR / "naic_exhibit_c.docx"
+    doc.save(out)
+    return out
+
+
+# =============================================================================
+# Shared helpers extracted for the new templates
+# =============================================================================
+
+def _set_normal_style(doc):
+    normal = doc.styles["Normal"]
+    normal.font.name = BODY_FONT
+    normal.font.size = Pt(11)
+    rPr = normal.element.get_or_add_rPr()
+    existing = rPr.find(qn("w:rFonts"))
+    if existing is not None:
+        rPr.remove(existing)
+    rFonts = OxmlElement("w:rFonts")
+    rFonts.set(qn("w:ascii"), BODY_FONT)
+    rFonts.set(qn("w:hAnsi"), BODY_FONT)
+    rFonts.set(qn("w:cs"),    BODY_FONT)
+    rFonts.set(qn("w:eastAsia"), BODY_FONT)
+    rPr.append(rFonts)
+
+
+def _setup_section(doc):
+    section = doc.sections[0]
+    section.top_margin    = Inches(0.85)
+    section.bottom_margin = Inches(0.85)
+    section.left_margin   = Inches(0.9)
+    section.right_margin  = Inches(0.9)
+    _enable_different_first_page_header_footer(section)
+    fp_header = section.first_page_header; fp_header.is_linked_to_previous = False
+    fp_header.paragraphs[0].text = ""
+    fp_footer = section.first_page_footer; fp_footer.is_linked_to_previous = False
+    fp_footer.paragraphs[0].text = ""
+    header_p = section.header.paragraphs[0]; header_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    run = header_p.add_run("VERITY · {{ report_title }}")
+    _set_run_font(run, name=HEADING_FONT, size=9, bold=True, color=BRAND_BLUE)
+    footer_p = section.footer.paragraphs[0]; footer_p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    run = footer_p.add_run("{{ report_title }}  ·  Generated {{ generated_at_str }}")
+    _set_run_font(run, name=BODY_FONT, size=8, color=MUTED_GRAY)
+
+
+def _add_canonicals_table(doc):
+    can_table = doc.add_table(rows=4, cols=4)
+    can_table.style = "Light Grid Accent 1"
+    headers = ["Theme", "Canonical Requirement", "Coverage", "Section"]
+    for i, h in enumerate(headers):
+        cell = can_table.rows[0].cells[i]; cell.text = ""
+        run = cell.paragraphs[0].add_run(h)
+        _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BRAND_BLUE)
+    can_table.rows[1].cells[0].text = "{%tr for c in canonicals %}"
+    can_table.rows[1].cells[0].merge(can_table.rows[1].cells[3])
+    body = can_table.rows[2].cells
+    cells_text = [
+        "{{ c.theme_name }}",
+        "{{ c.title }}",
+        "{{ c.coverage_level or '—' }}",
+        "{{ c.section or '—' }}",
+    ]
+    for i, txt in enumerate(cells_text):
+        body[i].text = ""
+        run = body[i].paragraphs[0].add_run(txt)
+        _set_run_font(run, name=BODY_FONT, size=10, color=BODY_GRAY)
+    can_table.rows[3].cells[0].text = "{%tr endfor %}"
+    can_table.rows[3].cells[0].merge(can_table.rows[3].cells[3])
+
+
 AUTHORS = {
-    "model_inventory": author_model_inventory,
+    "model_inventory":             author_model_inventory,
+    "decision_audit_trail":        author_decision_audit_trail,    # single decision
+    "workflow_audit_trail":        author_workflow_audit_trail,    # one workflow
+    "fairness_validation_summary": author_fairness_validation_summary,
+    "naic_exhibit_c":              author_naic_exhibit_c,
 }
 
 

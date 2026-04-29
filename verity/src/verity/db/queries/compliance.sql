@@ -350,6 +350,33 @@ ORDER BY rrl.created_at DESC
 LIMIT 25;
 
 
+-- name: list_recent_execution_contexts_for_picker
+-- For the Decision Audit Trail report's scope picker.
+-- One row per workflow context, ordered most recent first, with a
+-- human-readable label so the compliance officer can pick by description
+-- instead of by raw UUID.
+SELECT
+    d.execution_context_id::text                   AS id,
+    MIN(d.created_at)                              AS started_at,
+    COALESCE(MIN(d.application_code), '—')          AS application_code,
+    string_agg(
+        DISTINCT
+        COALESCE(av.entity_display_name, tv.entity_display_name,
+                 av.entity_name, tv.entity_name, '—'),
+        ', '
+    )                                              AS asset_label,
+    COUNT(*)                                       AS decision_count
+FROM       verity_analytics.v_decision d
+LEFT JOIN  verity_analytics.v_entity_version av
+       ON  av.source_pk = d.entity_version_id::text AND d.entity_type = 'agent'
+LEFT JOIN  verity_analytics.v_entity_version tv
+       ON  tv.source_pk = d.entity_version_id::text AND d.entity_type = 'task'
+WHERE d.execution_context_id IS NOT NULL
+GROUP BY d.execution_context_id
+ORDER BY started_at DESC
+LIMIT 50;
+
+
 -- name: list_reports_for_canonical
 -- Reverse lookup: which active reports provide evidence for this canonical?
 -- Used on the canonical detail page to surface the "evidence pathway".

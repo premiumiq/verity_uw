@@ -1524,7 +1524,12 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
         )
 
     @router.get("/compliance/reports/{report_code}", response_class=HTMLResponse)
-    async def compliance_report_detail(request: Request, report_code: str):
+    async def compliance_report_detail(
+        request: Request,
+        report_code: str,
+        error: Optional[str] = Query(None),
+    ):
+        from datetime import date
         from verity.reporting import (
             get_report_definition,
             get_report_canonicals,
@@ -1539,6 +1544,17 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
         canonicals = await get_report_canonicals(verity, report_code)
         manifest   = await get_report_field_manifest(verity, report_code)
 
+        # Pre-resolve picker option lists for known fields so the form can
+        # render a <select> instead of a free-text input. Keys match the
+        # JSON-Schema property names in scope_params.
+        picker_options: dict[str, list[dict]] = {}
+        if "execution_context_id" in (
+            (report.get("scope_params") or {}).get("properties") or {}
+        ):
+            picker_options["execution_context_id"] = await verity.db.fetch_all(
+                "list_recent_execution_contexts_for_picker"
+            )
+
         return _render(
             templates, request, "compliance_report_detail.html",
             active_page="compliance",
@@ -1546,13 +1562,17 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             report=report,
             canonicals=canonicals,
             manifest=manifest,
+            picker_options=picker_options,
+            today_iso=date.today().isoformat(),
+            error_message=error,
         )
 
     @router.post("/compliance/reports/{report_code}/generate")
     async def compliance_report_generate(request: Request, report_code: str):
         """Resolve dataset, render DOCX, log run, stream the file."""
         from datetime import datetime
-        from fastapi.responses import FileResponse
+        from urllib.parse import urlencode
+        from fastapi.responses import FileResponse, RedirectResponse
         import json
         import time
         from verity.reporting import (
@@ -1566,9 +1586,26 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
         if not report:
             raise HTTPException(status_code=404, detail="Report not found")
 
-        # Build scope from form data (skipping empty fields).
+        # Build scope from form data. Strip whitespace defensively — hidden
+        # input values rendered through templates can pick up surrounding
+        # whitespace from Jinja's default whitespace handling.
         form = await request.form()
-        scope = {k: v for k, v in form.items() if v}
+        scope = {
+            k: (v.strip() if isinstance(v, str) else v)
+            for k, v in form.items()
+            if v and (not isinstance(v, str) or v.strip())
+        }
+
+        # Server-side required-field validation. JSON Schema's `required`
+        # array lists property names that must be present and non-empty.
+        required = (report.get("scope_params") or {}).get("required") or []
+        missing = [name for name in required if not scope.get(name)]
+        if missing:
+            err = f"Missing required field(s): {', '.join(missing)}"
+            return RedirectResponse(
+                url=f"/admin/compliance/reports/{report_code}?{urlencode({'error': err})}",
+                status_code=303,
+            )
 
         # Audit row (insert as 'pending'; finalize after render).
         row = await verity.db.fetch_one_raw(

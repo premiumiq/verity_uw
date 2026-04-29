@@ -90,13 +90,40 @@ async def get_report_field_manifest(
 async def get_report_canonicals(
     verity, report_code: str
 ) -> list[dict[str, Any]]:
-    """Return the canonical requirements this report covers, in section order."""
+    """Return the canonical requirements this report covers, in section order.
+
+    Each row also carries:
+      - `provisions`: list of {citation, title, framework_code, framework_name}
+      - `frameworks`: list of distinct framework codes citing this canonical
+      - `frameworks_label`: comma-separated framework codes for inline display
+    """
     return await verity.db.fetch_all_raw(
         """
         SELECT cr.code, cr.title, cr.description,
                t.code AS theme_code, t.name AS theme_name,
                cov.coverage_level,
-               rr.section, rr.sort_seq, rr.notes
+               rr.section, rr.sort_seq, rr.notes,
+               COALESCE(
+                   (SELECT json_agg(json_build_object(
+                              'citation',       p.citation,
+                              'title',          p.title,
+                              'framework_code', f.code,
+                              'framework_name', f.name
+                          ) ORDER BY f.sort_seq, p.sort_seq)
+                    FROM verity_compliance.provision_requirement_map prm
+                    JOIN verity_compliance.regulatory_provision  p ON p.id = prm.provision_id
+                    JOIN verity_compliance.regulatory_framework  f ON f.id = p.framework_id
+                    WHERE prm.canonical_requirement_id = cr.id),
+                   '[]'::json
+               ) AS provisions,
+               COALESCE(
+                   (SELECT string_agg(DISTINCT f.code, ', ' ORDER BY f.code)
+                    FROM verity_compliance.provision_requirement_map prm
+                    JOIN verity_compliance.regulatory_provision  p ON p.id = prm.provision_id
+                    JOIN verity_compliance.regulatory_framework  f ON f.id = p.framework_id
+                    WHERE prm.canonical_requirement_id = cr.id),
+                   '—'
+               ) AS frameworks_label
         FROM verity_compliance.report_requirement       rr
         JOIN verity_compliance.report_definition        rd
              ON rd.id = rr.report_id
