@@ -109,13 +109,12 @@ def main():
 
     publish_parser = compliance_sub.add_parser(
         "publish",
-        help="Publish the L2 mart to MinIO in Guidewire-CDA-style layout (bucket/compliance/<deployment>/data/<view>/<fingerprint>/<batch>/*.parquet).",
+        help="Publish the L2 mart to MinIO in Iceberg-style continuous layout (bucket/compliance/<view>/<fingerprint>/<batch_ts>/*.parquet).",
     )
     publish_parser.add_argument("--database-url", required=True)
     publish_parser.add_argument("--bucket", default=None, help="Override bucket name (default: $VERITY_DATA_HUB_BUCKET or verity-data-hub).")
     publish_parser.add_argument("--since", default=None)
     publish_parser.add_argument("--until", default=None)
-    publish_parser.add_argument("--new-deployment", action="store_true", help="Mint a fresh deployment_id instead of reusing the persisted one.")
 
     args = parser.parse_args()
 
@@ -210,15 +209,12 @@ def main():
             print(f"Manifest: {Path(args.out) / 'manifest.json'}")
         elif args.compliance_action == "publish":
             from verity.setup.publish_compliance import publish_bundle
-            kwargs = dict(
-                since=args.since, until=args.until,
-                new_deployment=args.new_deployment,
-            )
+            kwargs = dict(since=args.since, until=args.until)
             if args.bucket:
                 kwargs["bucket"] = args.bucket
             result = asyncio.run(publish_bundle(args.database_url, **kwargs))
             print()
-            print(f"Done. deployment_id={result['deployment_id']}  batch_ts={result['batch_ts']}")
+            print(f"Done. batch_ts={result['batch_ts']}")
             print(f"Manifest: s3://{result['bucket']}/{result['manifest_key']}")
         else:
             compliance_parser.print_help()
