@@ -134,10 +134,15 @@
                 <span class="verity-nav-icon">⟁</span> Incidents
             </a>
 
-            <!-- COMPLIANCE — regulatory metamodel review -->
+            <!-- COMPLIANCE — regulatory metamodel review + reports -->
             <div class="verity-nav-section" style="margin-top: 10px;">Compliance</div>
-            <a href="/admin/compliance/" class="verity-nav-link {% if active_page == 'compliance' %}active{% endif %}">
+            <a href="/admin/compliance/"
+               class="verity-nav-link {% if active_page == 'compliance' and subnav_active != 'reports' %}active{% endif %}">
                 <span class="verity-nav-icon">▩</span> Coverage
+            </a>
+            <a href="/admin/compliance/reports"
+               class="verity-nav-link {% if active_page == 'compliance' and subnav_active == 'reports' %}active{% endif %}">
+                <span class="verity-nav-icon">⎙</span> Reports
             </a>
 
         </div><!-- end sidebar-nav -->
