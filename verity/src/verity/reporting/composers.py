@@ -14,8 +14,48 @@ This is the bright line that makes the reports portable to a customer warehouse.
 
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict
 from typing import Any
+
+
+# =============================================================================
+# Display-name maps — used by every report's composer to humanize codes.
+# The DOCX template uses `_display` fields exclusively; raw codes are kept
+# only for filtering/grouping.
+# =============================================================================
+
+ASSET_TYPE_DISPLAY = {"agent": "Agent", "task": "Task", "prompt": "Prompt"}
+ASSET_TYPE_PLURAL  = {"agent": "Agents", "task": "Tasks", "prompt": "Prompts"}
+LIFECYCLE_DISPLAY  = {
+    "draft":      "Draft",
+    "candidate":  "Candidate",
+    "staging":    "Staging",
+    "shadow":     "Shadow",
+    "challenger": "Challenger",
+    "champion":   "Champion",
+    "deprecated": "Deprecated",
+}
+MATERIALITY_DISPLAY = {"high": "High", "medium": "Medium", "low": "Low"}
+
+
+def _humanize_asset(row: dict[str, Any]) -> dict[str, Any]:
+    """Add `_display` fields to a v_entity_version row for the docx template."""
+    r = dict(row)
+    r["asset_type_display"]      = ASSET_TYPE_DISPLAY.get(r.get("entity_type"), r.get("entity_type") or "—")
+    r["lifecycle_state_display"] = LIFECYCLE_DISPLAY.get(r.get("lifecycle_state"), r.get("lifecycle_state") or "—")
+    r["materiality_display"]     = MATERIALITY_DISPLAY.get(r.get("materiality_tier"), r.get("materiality_tier") or "—")
+    # Prefer display name; fall back to code when display name is missing.
+    r["display_name"]            = r.get("entity_display_name") or r.get("entity_name") or "—"
+    return r
+
+
+def _humanize_event(row: dict[str, Any]) -> dict[str, Any]:
+    """Add `_display` fields to a v_lifecycle_event row."""
+    r = dict(row)
+    r["asset_type_display"] = ASSET_TYPE_DISPLAY.get(r.get("entity_type"), r.get("entity_type") or "—")
+    r["from_state_display"] = LIFECYCLE_DISPLAY.get(r.get("from_state"), r.get("from_state") or "draft")
+    r["to_state_display"]   = LIFECYCLE_DISPLAY.get(r.get("to_state"),   r.get("to_state")   or "—")
+    return r
 
 
 # =============================================================================
@@ -81,19 +121,25 @@ async def compose_model_inventory(
         },
     )
 
+    # Humanize + group by asset type so the template can sub-section.
+    inventory_rows = [_humanize_asset(r) for r in inventory_rows]
+    by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for r in inventory_rows:
+        by_type[r["entity_type"]].append(r)
+
     # Aggregate counts for the executive summary.
     materiality_counter = Counter(
-        (r["materiality_tier"] or "—") for r in inventory_rows
+        (r.get("materiality_tier") or "—") for r in inventory_rows
     )
     state_counter       = Counter(
-        (r["lifecycle_state"] or "—") for r in inventory_rows
+        (r.get("lifecycle_state") or "—") for r in inventory_rows
     )
     type_counter        = Counter(
-        (r["entity_type"] or "—") for r in inventory_rows
+        (r.get("entity_type") or "—") for r in inventory_rows
     )
 
     # Recent state transitions (the change-management evidence section).
-    recent_events = await verity.db.fetch_all_raw(
+    recent_events_raw = await verity.db.fetch_all_raw(
         """
         SELECT
             le.entity_type,
@@ -104,7 +150,8 @@ async def compose_model_inventory(
             le.approver_role,
             le.rationale,
             le.approved_at,
-            COALESCE(av.entity_name, tv.entity_name, pv.entity_name, '—') AS entity_name,
+            COALESCE(av.entity_display_name, tv.entity_display_name, pv.entity_display_name,
+                     av.entity_name, tv.entity_name, pv.entity_name, '—') AS asset_display_name,
             COALESCE(av.version_label, tv.version_label, pv.version_label, '—') AS version_label
         FROM verity_analytics.v_lifecycle_event le
         LEFT JOIN verity_analytics.v_entity_version av
@@ -114,22 +161,42 @@ async def compose_model_inventory(
         LEFT JOIN verity_analytics.v_entity_version pv
                ON pv.source_pk = le.entity_version_id::text AND le.entity_type = 'prompt'
         ORDER BY le.approved_at DESC
-        LIMIT 25
+        LIMIT 50
         """
     )
+    recent_events = [_humanize_event(e) for e in recent_events_raw]
+
+    events_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for e in recent_events:
+        events_by_type[e["entity_type"]].append(e)
 
     return {
-        "inventory_rows":     inventory_rows,
-        "inventory_count":    len(inventory_rows),
+        # Inventory grouped by asset type — the docx template iterates
+        # over the named slots, not a generic loop, so each type can be
+        # sub-sectioned with its own heading.
+        "agents":  by_type.get("agent",  []),
+        "tasks":   by_type.get("task",   []),
+        "prompts": by_type.get("prompt", []),
+
+        "agent_count":  len(by_type.get("agent",  [])),
+        "task_count":   len(by_type.get("task",   [])),
+        "prompt_count": len(by_type.get("prompt", [])),
+
+        # Lifecycle events sub-sectioned by asset type.
+        "lifecycle_agents":  events_by_type.get("agent",  []),
+        "lifecycle_tasks":   events_by_type.get("task",   []),
+        "lifecycle_prompts": events_by_type.get("prompt", []),
+
+        # Aggregates for the executive summary.
         "by_materiality":     dict(materiality_counter),
         "by_lifecycle_state": dict(state_counter),
         "by_entity_type":     dict(type_counter),
-        "recent_lifecycle_events": recent_events,
-        # Convenience counts for the executive summary template:
+
         "high_count":   materiality_counter.get("high", 0),
         "medium_count": materiality_counter.get("medium", 0),
         "low_count":    materiality_counter.get("low", 0),
         "total_count":  len(inventory_rows),
+        "lifecycle_events_total": len(recent_events),
     }
 
 

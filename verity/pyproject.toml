@@ -33,6 +33,11 @@ dependencies = [
     # Powers `verity compliance reembed` + `similarity-search`. Bundles the
     # BGE-small-en-v1.5 model on first use; ~30 MB ONNX file. No torch deps.
     "fastembed>=0.3,<1",
+    # docxtpl: Jinja2-style placeholders inside Word templates. Designers
+    # author .docx templates in Word; the renderer fills them from dataset
+    # dicts produced by verity/reporting/.
+    "docxtpl>=0.16,<1",
+    "python-docx>=1.1,<2",
 ]
 
 [project.optional-dependencies]

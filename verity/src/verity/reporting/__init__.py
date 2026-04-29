@@ -20,6 +20,7 @@ from verity.reporting.engine import (
     resolve_dataset,
 )
 from verity.reporting.composers import COMPOSERS
+from verity.reporting.render import render_docx
 
 __all__ = [
     "list_reports",
@@ -27,5 +28,6 @@ __all__ = [
     "get_report_field_manifest",
     "get_report_canonicals",
     "resolve_dataset",
+    "render_docx",
     "COMPOSERS",
 ]
