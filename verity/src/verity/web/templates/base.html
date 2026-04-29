@@ -106,11 +106,9 @@
                 <span class="verity-nav-icon">〜</span> Drift
                 <span style="font-size: 0.55rem; opacity: 0.6; margin-left: 4px;">soon</span>
             </span>
-            <a href="/admin/usage" class="verity-nav-link {% if active_page == 'usage' %}active{% endif %}">
+            <a href="/admin/usage"
+               class="verity-nav-link {% if active_page in ['usage', 'quotas'] %}active{% endif %}">
                 <span class="verity-nav-icon">◌</span> Usage &amp; Spend
-            </a>
-            <a href="/admin/quotas" class="verity-nav-link {% if active_page == 'quotas' %}active{% endif %}">
-                <span class="verity-nav-icon">⛃</span> Quotas
             </a>
 
             <!-- GOVERNANCE — compliance, lifecycle, testing -->
