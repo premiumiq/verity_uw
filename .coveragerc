@@ -1,0 +1,44 @@
+# Coverage.py configuration. Read by pytest-cov when --cov is passed
+# (either explicitly or by VSCode's "Run with Coverage" button).
+
+[run]
+# Measure the Verity package source. As edms/insurance_docgen/uw_demo
+# grow tests, append their src dirs here.
+source =
+    verity/src/verity
+
+# Branch coverage in addition to line coverage — flags `if/else` branches
+# that were never exercised even though both lines were touched.
+branch = True
+
+# Don't measure files we don't author or that are noise:
+#   tests/*           — test code itself shouldn't count toward coverage
+#   __pycache__/*     — bytecode artifacts
+#   *_pb2.py          — generated protobuf (none today; future-proofing)
+omit =
+    */tests/*
+    */__pycache__/*
+    */_pb2.py
+
+[report]
+# Show which lines are missing on the per-file table.
+show_missing = True
+
+# Display files at 100% coverage too — easier to scan progress when most
+# files are partially covered.
+skip_covered = False
+
+# Round percentages to one decimal place.
+precision = 1
+
+# Lines/blocks to ignore when computing coverage — alongside the default
+# `pragma: no cover`, exclude common non-executable patterns:
+exclude_also =
+    raise NotImplementedError
+    if TYPE_CHECKING:
+    if __name__ == .__main__.:
+    \.\.\.
+
+[html]
+# `pytest --cov --cov-report=html` writes to this directory.
+directory = htmlcov

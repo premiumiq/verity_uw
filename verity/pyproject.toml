@@ -70,9 +70,21 @@ runtime = [
 ]
 
 # Developer tooling — tests, linters, type-checkers.
+#
+# Pytest configuration itself lives at the repo root in `pytest.ini` so
+# VSCode's Python Testing UI discovers it automatically when the workspace
+# is opened. Tests run against the live verity_postgres container from
+# docker-compose; no ephemeral container library (e.g. testcontainers) is
+# needed. The fixture in tests/conftest.py creates a per-session template
+# DB and per-test clones inside that instance. CI is expected to spin up
+# an equivalent compose stack before invoking pytest and pass
+# VERITY_TEST_DATABASE_URL.
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    # pytest-cov powers `pytest --cov` and VSCode's "Run with Coverage"
+    # button. Coverage settings live in the workspace-root .coveragerc.
+    "pytest-cov>=5.0",
 ]
 
 [project.scripts]
