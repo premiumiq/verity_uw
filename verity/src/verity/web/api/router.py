@@ -20,6 +20,7 @@ from verity.web.api.applications import build_applications_router
 from verity.web.api.authoring import build_authoring_router
 from verity.web.api.decisions import build_decisions_router
 from verity.web.api.draft_edit import build_draft_edit_router
+from verity.web.api.feed import build_feed_router
 from verity.web.api.lifecycle import build_lifecycle_router
 from verity.web.api.models import build_models_router
 from verity.web.api.quotas import build_quotas_router
@@ -92,5 +93,9 @@ def build_api_router(verity) -> APIRouter:
 
     # Reporting — dashboard + inventory aggregates.
     router.include_router(build_reporting_router(verity))
+
+    # Feed (Phase 4 Rung 1) — incremental data pull from verity_analytics
+    # views with keyset pagination and a closed [since, until) window.
+    router.include_router(build_feed_router(verity))
 
     return router

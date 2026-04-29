@@ -536,6 +536,27 @@ async def seed_reports(database_url: str) -> dict[str, int]:
         database_url, autocommit=False
     ) as conn:
         async with conn.cursor() as cur:
+            # ---- feed_view registry UPSERT ---------------------------
+            for fv in data.get("feed_views", []):
+                await cur.execute(
+                    """
+                    INSERT INTO verity_analytics.feed_view
+                        (view_name, description, is_active, sort_seq)
+                    VALUES (%s, %s, true, %s)
+                    ON CONFLICT (view_name) DO UPDATE SET
+                        description = EXCLUDED.description,
+                        is_active   = EXCLUDED.is_active,
+                        sort_seq    = EXCLUDED.sort_seq
+                    """,
+                    (
+                        fv["view"],
+                        fv.get("description"),
+                        int(fv.get("sort", 0)),
+                    ),
+                )
+            counts.setdefault("feed_views", 0)
+            counts["feed_views"] = len(data.get("feed_views", []))
+
             # ---- mart_field UPSERT ------------------------------------
             for mf in data.get("mart_fields", []):
                 await cur.execute(

@@ -36,7 +36,7 @@ WITH agent_v AS (
         a.domain                            AS domain,
         av.created_at                       AS event_ts,
         av.created_at                       AS created_at,
-        now()                               AS ingest_ts
+        av.created_at                       AS ingest_ts
     FROM agent_version av
     JOIN agent a ON a.id = av.agent_id
 ),
@@ -57,7 +57,7 @@ task_v AS (
         t.domain                            AS domain,
         tv.created_at                       AS event_ts,
         tv.created_at                       AS created_at,
-        now()                               AS ingest_ts
+        tv.created_at                       AS ingest_ts
     FROM task_version tv
     JOIN task t ON t.id = tv.task_id
 ),
@@ -78,7 +78,7 @@ prompt_v AS (
         NULL::text                          AS domain,
         pv.created_at                       AS event_ts,
         pv.created_at                       AS created_at,
-        now()                               AS ingest_ts
+        pv.created_at                       AS ingest_ts
     FROM prompt_version pv
     JOIN prompt p ON p.id = pv.prompt_id
 )
@@ -102,7 +102,7 @@ SELECT
     ae.entity_id                AS entity_id,
     ae.created_at               AS event_ts,
     ae.created_at               AS created_at,
-    now()                       AS ingest_ts
+    ae.created_at               AS ingest_ts
 FROM application_entity ae
 JOIN application app ON app.id = ae.application_id;
 
@@ -122,7 +122,7 @@ SELECT
     ar.rationale                AS rationale,
     ar.approved_at              AS event_ts,
     ar.approved_at              AS approved_at,
-    now()                       AS ingest_ts
+    ar.approved_at              AS ingest_ts
 FROM approval_record ar;
 
 
@@ -142,7 +142,7 @@ SELECT
     adl.run_purpose::text       AS run_purpose,
     adl.created_at              AS event_ts,
     adl.created_at              AS created_at,
-    now()                       AS ingest_ts,
+    adl.created_at              AS ingest_ts,
     adl.input_summary           AS input_summary,
     adl.output_summary          AS output_summary,
     adl.reasoning_text          AS reasoning_text,
@@ -171,7 +171,7 @@ SELECT
     tel.test_case_id            AS test_case_id,
     tel.run_at                  AS event_ts,
     tel.run_at                  AS run_at,
-    now()                       AS ingest_ts,
+    tel.run_at                  AS ingest_ts,
     tel.passed                  AS passed,
     tel.duration_ms             AS duration_ms,
     tel.metric_type::text       AS metric_type,
@@ -202,5 +202,5 @@ SELECT
     ho.created_by               AS overridden_by,
     ho.created_at               AS event_ts,
     ho.created_at               AS created_at,
-    now()                       AS ingest_ts
+    ho.created_at               AS ingest_ts
 FROM hitl_override ho;

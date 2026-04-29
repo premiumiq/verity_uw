@@ -277,6 +277,25 @@ CREATE INDEX IF NOT EXISTS mart_field_table_idx
 
 
 -- =========================================================================
+-- Feed registry — allowlist of verity_analytics views exposed via Rung 1
+-- =========================================================================
+-- Every row in this table corresponds to a view in verity_analytics.* that
+-- meets the L2 contract: ascending ingest_ts watermark, source_pk tiebreaker,
+-- append-only semantics. The /api/v1/feed/{view_name} endpoint validates the
+-- requested view against this allowlist before issuing any SQL — protects
+-- against arbitrary table reads through the public API.
+
+CREATE TABLE IF NOT EXISTS verity_analytics.feed_view (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    view_name       text NOT NULL UNIQUE,        -- e.g. 'v_decision'
+    description     text,
+    is_active       boolean NOT NULL DEFAULT true,
+    sort_seq        int NOT NULL DEFAULT 0,
+    created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+
+-- =========================================================================
 -- L4 (semantic layer) — canonical_requirement → mart_field manifest
 -- =========================================================================
 -- Says: "to evidence canonical X, project these mart_fields in these roles."

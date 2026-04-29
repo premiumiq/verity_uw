@@ -392,6 +392,22 @@ WHERE cr.code = %(canonical_code)s
 ORDER BY rd.sort_seq, rd.code;
 
 
+-- name: list_active_feed_views
+-- Allowlist of verity_analytics.* views the public feed endpoint may serve.
+SELECT id, view_name, description, sort_seq, is_active
+FROM verity_analytics.feed_view
+WHERE is_active = true
+ORDER BY sort_seq, view_name;
+
+
+-- name: get_active_feed_view
+-- Lookup one feed view by name (must be active to be feedable).
+SELECT id, view_name, description, sort_seq, is_active
+FROM verity_analytics.feed_view
+WHERE view_name = %(view_name)s
+  AND is_active = true;
+
+
 -- name: list_canonical_feature_bridges
 -- Filterable table of every canonical↔feature link for the Bridges page (second tab).
 SELECT
