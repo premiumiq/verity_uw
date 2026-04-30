@@ -85,6 +85,11 @@ dev = [
     # pytest-cov powers `pytest --cov` and VSCode's "Run with Coverage"
     # button. Coverage settings live in the workspace-root .coveragerc.
     "pytest-cov>=5.0",
+    # syrupy: snapshot testing. Used sparingly — only for genuinely-large
+    # stable outputs (engine decision_log shape, resolved report dataset,
+    # export bundle manifest). Inline asserts for everything else.
+    # Snapshot files live next to the test file in __snapshots__/.
+    "syrupy>=4.0",
 ]
 
 [project.scripts]

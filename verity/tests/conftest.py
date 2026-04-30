@@ -144,6 +144,46 @@ def pytest_configure(config: pytest.Config) -> None:
         )
 
 
+# ── Auto-marker hook ────────────────────────────────────────────────────────
+#
+# Apply layer + domain markers based on each test file's path so individual
+# tests don't need decorators sprinkled everywhere. The filesystem layout IS
+# the marker source.
+#
+# Layout convention:
+#     tests/<layer>/<domain>/test_*.py
+#         layer  ∈ unit | integration | e2e
+#         domain ∈ db, models, contracts, engine, governance, validation,
+#                  compliance, api, web, cli, cross_cutting
+#
+# A test at tests/integration/engine/test_run_agent.py automatically gets
+# `integration`, `database`, and `engine` markers. Manual @pytest.mark.slow /
+# @pytest.mark.flaky / @pytest.mark.security still go on individual tests.
+
+_LAYER_MARKERS = {"unit", "integration", "e2e"}
+_DOMAIN_MARKERS = {
+    "db", "models", "contracts", "engine", "governance",
+    "validation", "compliance", "api", "web", "cli", "cross_cutting",
+}
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Auto-apply markers based on each test file's directory path."""
+    for item in items:
+        for part in item.path.parts:
+            if part in _LAYER_MARKERS:
+                item.add_marker(getattr(pytest.mark, part))
+                # Integration tests need a live Postgres — tag them so a
+                # developer can `pytest -m 'not database'` to skip them
+                # when Postgres isn't running.
+                if part == "integration":
+                    item.add_marker(pytest.mark.database)
+            elif part in _DOMAIN_MARKERS:
+                item.add_marker(getattr(pytest.mark, part))
+
+
 # ── Template lifecycle ──────────────────────────────────────────────────────
 
 async def _setup_template() -> None:
