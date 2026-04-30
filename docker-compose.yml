@@ -50,6 +50,7 @@ services:
       mc mb --ignore-existing local/submissions;
       mc mb --ignore-existing local/uw-guidelines;
       mc mb --ignore-existing local/ground-truth-datasets;
+      mc mb --ignore-existing local/verity-data-hub;
       echo 'MinIO buckets created';
       "
 

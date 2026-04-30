@@ -829,3 +829,63 @@ a:hover {
 .htmx-request.htmx-indicator {
     display: inline-block;
 }
+
+
+/* ── CLIENT-SIDE SORT + SEARCH ───────────────────────────────
+   Drives the sortable_table.js helper. Tables opt in by adding
+   the `sortable-table` class and giving each sortable <th> the
+   `sortable` class + onclick="sortTable('id', N)" handler.
+   No column-filter UI here — per-column filtering happens
+   server-side; the search box does free-text on the rendered
+   slice.
+*/
+
+/* Search input that sits above a table. */
+.table-search {
+    width: 100%;
+    max-width: 360px;
+    padding: 6px 10px;
+    border: 1px solid var(--verity-border);
+    border-radius: 4px;
+    font-size: 0.85rem;
+    margin-bottom: 8px;
+}
+
+/* "Showing N of M" caption above tables that load a capped slice. */
+.table-hint {
+    font-size: 0.8rem;
+    color: var(--verity-text-light);
+    font-style: italic;
+    margin-bottom: 10px;
+}
+
+/* Sortable column headers — pointer cursor + room for the
+   indicator glyph rendered by ::after. */
+.verity-table thead th.sortable {
+    cursor: pointer;
+    padding-right: 22px;
+    position: relative;
+    user-select: none;
+}
+.verity-table thead th.sortable:hover {
+    color: var(--verity-blue-deep);
+}
+.verity-table thead th.sortable::after {
+    content: "\2195";        /* ↕ — neutral, dimmed */
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.7rem;
+    opacity: 0.35;
+}
+.verity-table thead th.sort-asc::after {
+    content: "\25B2";        /* ▲ */
+    opacity: 1;
+    color: var(--verity-blue-deep);
+}
+.verity-table thead th.sort-desc::after {
+    content: "\25BC";        /* ▼ */
+    opacity: 1;
+    color: var(--verity-blue-deep);
+}

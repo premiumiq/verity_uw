@@ -1,5 +1,5 @@
 -- ============================================================
--- VERITY_DB: verity_analytics views (logical mart over L1)
+-- VERITY_DB: analytics views (logical mart over L1)
 --
 -- Architecture: docs/architecture/compliance-stack.md
 --
@@ -18,7 +18,7 @@
 -- One row per (entity_type, entity_version) covering the three primary
 -- versioned governance entities. Used for Model Inventory, Decision
 -- Audit Trail (entity-side), Fairness Validation (entity-side).
-CREATE OR REPLACE VIEW verity_analytics.v_entity_version AS
+CREATE OR REPLACE VIEW analytics.v_entity_version AS
 WITH agent_v AS (
     SELECT
         av.id::text                         AS source_pk,
@@ -36,9 +36,9 @@ WITH agent_v AS (
         a.domain                            AS domain,
         av.created_at                       AS event_ts,
         av.created_at                       AS created_at,
-        now()                               AS ingest_ts
-    FROM agent_version av
-    JOIN agent a ON a.id = av.agent_id
+        av.created_at                       AS ingest_ts
+    FROM governance.agent_version av
+    JOIN governance.agent a ON a.id = av.agent_id
 ),
 task_v AS (
     SELECT
@@ -57,9 +57,9 @@ task_v AS (
         t.domain                            AS domain,
         tv.created_at                       AS event_ts,
         tv.created_at                       AS created_at,
-        now()                               AS ingest_ts
-    FROM task_version tv
-    JOIN task t ON t.id = tv.task_id
+        tv.created_at                       AS ingest_ts
+    FROM governance.task_version tv
+    JOIN governance.task t ON t.id = tv.task_id
 ),
 prompt_v AS (
     SELECT
@@ -78,9 +78,9 @@ prompt_v AS (
         NULL::text                          AS domain,
         pv.created_at                       AS event_ts,
         pv.created_at                       AS created_at,
-        now()                               AS ingest_ts
-    FROM prompt_version pv
-    JOIN prompt p ON p.id = pv.prompt_id
+        pv.created_at                       AS ingest_ts
+    FROM governance.prompt_version pv
+    JOIN governance.prompt p ON p.id = pv.prompt_id
 )
 SELECT * FROM agent_v
 UNION ALL
@@ -92,7 +92,7 @@ SELECT * FROM prompt_v;
 -- ── v_application_entity ─────────────────────────────────────
 -- Resolves which application owns which entity. Joins back to
 -- v_entity_version on (entity_type, entity_id).
-CREATE OR REPLACE VIEW verity_analytics.v_application_entity AS
+CREATE OR REPLACE VIEW analytics.v_application_entity AS
 SELECT
     ae.id::text                 AS source_pk,
     ae.application_id           AS application_id,
@@ -102,14 +102,14 @@ SELECT
     ae.entity_id                AS entity_id,
     ae.created_at               AS event_ts,
     ae.created_at               AS created_at,
-    now()                       AS ingest_ts
-FROM application_entity ae
-JOIN application app ON app.id = ae.application_id;
+    ae.created_at               AS ingest_ts
+FROM governance.application_entity ae
+JOIN governance.application app ON app.id = ae.application_id;
 
 
 -- ── v_lifecycle_event ───────────────────────────────────────
 -- State transitions from approval_record. One row per HITL approval gate.
-CREATE OR REPLACE VIEW verity_analytics.v_lifecycle_event AS
+CREATE OR REPLACE VIEW analytics.v_lifecycle_event AS
 SELECT
     ar.id::text                 AS source_pk,
     ar.entity_type::text        AS entity_type,
@@ -122,14 +122,14 @@ SELECT
     ar.rationale                AS rationale,
     ar.approved_at              AS event_ts,
     ar.approved_at              AS approved_at,
-    now()                       AS ingest_ts
-FROM approval_record ar;
+    ar.approved_at              AS ingest_ts
+FROM governance.approval_record ar;
 
 
 -- ── v_decision ───────────────────────────────────────────────
 -- One row per agent_decision_log entry. The execution-side data for
 -- Decision Audit Trail report.
-CREATE OR REPLACE VIEW verity_analytics.v_decision AS
+CREATE OR REPLACE VIEW analytics.v_decision AS
 SELECT
     adl.id::text                AS source_pk,
     adl.id                      AS decision_id,
@@ -142,7 +142,7 @@ SELECT
     adl.run_purpose::text       AS run_purpose,
     adl.created_at              AS event_ts,
     adl.created_at              AS created_at,
-    now()                       AS ingest_ts,
+    adl.created_at              AS ingest_ts,
     adl.input_summary           AS input_summary,
     adl.output_summary          AS output_summary,
     adl.reasoning_text          AS reasoning_text,
@@ -155,13 +155,13 @@ SELECT
     adl.hitl_required           AS hitl_required,
     adl.hitl_completed          AS hitl_completed,
     adl.low_confidence_flag     AS low_confidence_flag
-FROM agent_decision_log adl;
+FROM runtime.agent_decision_log adl;
 
 
 -- ── v_validation_result ──────────────────────────────────────
 -- One row per test_execution_log entry. Powers Fairness Validation
 -- Summary and the testing component of NAIC Exhibit C.
-CREATE OR REPLACE VIEW verity_analytics.v_validation_result AS
+CREATE OR REPLACE VIEW analytics.v_validation_result AS
 SELECT
     tel.id::text                AS source_pk,
     tel.id                      AS test_log_id,
@@ -171,7 +171,7 @@ SELECT
     tel.test_case_id            AS test_case_id,
     tel.run_at                  AS event_ts,
     tel.run_at                  AS run_at,
-    now()                       AS ingest_ts,
+    tel.run_at                  AS ingest_ts,
     tel.passed                  AS passed,
     tel.duration_ms             AS duration_ms,
     tel.metric_type::text       AS metric_type,
@@ -179,13 +179,13 @@ SELECT
     tel.failure_reason          AS failure_reason,
     tel.channel::text           AS channel,
     tel.mock_mode               AS mock_mode
-FROM test_execution_log tel;
+FROM governance.test_execution_log tel;
 
 
 -- ── v_override ───────────────────────────────────────────────
 -- One row per HITL override. Powers fairness production monitoring
 -- and override-rate sections of compliance reports.
-CREATE OR REPLACE VIEW verity_analytics.v_override AS
+CREATE OR REPLACE VIEW analytics.v_override AS
 SELECT
     ho.id::text                 AS source_pk,
     ho.id                       AS override_id,
@@ -202,5 +202,5 @@ SELECT
     ho.created_by               AS overridden_by,
     ho.created_at               AS event_ts,
     ho.created_at               AS created_at,
-    now()                       AS ingest_ts
-FROM hitl_override ho;
+    ho.created_at               AS ingest_ts
+FROM runtime.hitl_override ho;

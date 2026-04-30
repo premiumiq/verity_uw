@@ -140,6 +140,10 @@
                class="verity-nav-link {% if active_page == 'compliance' and subnav_active == 'reports' %}active{% endif %}">
                 <span class="verity-nav-icon">⎙</span> Reports
             </a>
+            <a href="/admin/compliance/feeds"
+               class="verity-nav-link {% if active_page == 'compliance' and subnav_active == 'feeds' %}active{% endif %}">
+                <span class="verity-nav-icon">⇲</span> Feeds
+            </a>
 
         </div><!-- end sidebar-nav -->
 
@@ -191,6 +195,11 @@
     </main><!-- end main -->
 
 </div><!-- end layout -->
+
+<!-- Client-side sort / search / filter for tables.
+     See docs/enhancements/gui-sort-search-filter.md.
+     Tables opt in via the .sortable-table class + sortable headers. -->
+<script src="/admin/static/sortable_table.js"></script>
 
 </body>
 </html>

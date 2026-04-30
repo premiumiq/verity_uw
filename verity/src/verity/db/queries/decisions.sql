@@ -64,7 +64,17 @@ WHERE adl.id = %(decision_id)s;
 
 
 -- name: list_decisions
--- Paginated list of all decisions with entity names and execution context reference.
+-- Paginated list of all decisions with entity names and execution
+-- context reference. All filters are optional; passing NULL disables
+-- a filter. Sorted most-recent first.
+--
+-- entity_name_contains matches against the resolved display_name (the
+-- column the user actually sees in the table) — using COALESCE means
+-- a substring of either an agent or task name is found regardless of
+-- which kind backs the row.
+--
+-- created_after / created_before form an inclusive-lower / exclusive-
+-- upper window on created_at, mirroring the runs filter shape.
 SELECT
     adl.id,
     adl.entity_type,
@@ -99,12 +109,35 @@ LEFT JOIN agent a ON a.id = av.agent_id
 LEFT JOIN task_version tv ON tv.id = adl.entity_version_id AND adl.entity_type = 'task'
 LEFT JOIN task t ON t.id = tv.task_id
 LEFT JOIN execution_context ec ON ec.id = adl.execution_context_id
+WHERE (%(status)s::text IS NULL OR adl.status = %(status)s::text)
+  AND (%(entity_type)s::text IS NULL OR adl.entity_type::text = %(entity_type)s::text)
+  AND (%(decision_log_detail)s::text IS NULL OR adl.decision_log_detail = %(decision_log_detail)s::text)
+  AND (%(application)s::text IS NULL OR adl.application = %(application)s::text)
+  AND (%(entity_name_contains)s::text IS NULL
+       OR COALESCE(a.display_name, t.display_name) ILIKE '%%' || %(entity_name_contains)s || '%%')
+  AND (%(created_after)s::timestamptz  IS NULL OR adl.created_at >= %(created_after)s::timestamptz)
+  AND (%(created_before)s::timestamptz IS NULL OR adl.created_at <  %(created_before)s::timestamptz)
 ORDER BY adl.created_at DESC
 LIMIT %(limit)s OFFSET %(offset)s;
 
 
 -- name: count_decisions
-SELECT COUNT(*) AS total FROM agent_decision_log;
+-- Total count for the given filter set (drives UI pagination).
+-- Same filter shape as list_decisions; NULL disables a filter.
+SELECT COUNT(*) AS total
+FROM agent_decision_log adl
+LEFT JOIN agent_version av ON av.id = adl.entity_version_id AND adl.entity_type = 'agent'
+LEFT JOIN agent a ON a.id = av.agent_id
+LEFT JOIN task_version tv ON tv.id = adl.entity_version_id AND adl.entity_type = 'task'
+LEFT JOIN task t ON t.id = tv.task_id
+WHERE (%(status)s::text IS NULL OR adl.status = %(status)s::text)
+  AND (%(entity_type)s::text IS NULL OR adl.entity_type::text = %(entity_type)s::text)
+  AND (%(decision_log_detail)s::text IS NULL OR adl.decision_log_detail = %(decision_log_detail)s::text)
+  AND (%(application)s::text IS NULL OR adl.application = %(application)s::text)
+  AND (%(entity_name_contains)s::text IS NULL
+       OR COALESCE(a.display_name, t.display_name) ILIKE '%%' || %(entity_name_contains)s || '%%')
+  AND (%(created_after)s::timestamptz  IS NULL OR adl.created_at >= %(created_after)s::timestamptz)
+  AND (%(created_before)s::timestamptz IS NULL OR adl.created_at <  %(created_before)s::timestamptz);
 
 
 -- name: list_decisions_by_execution_context

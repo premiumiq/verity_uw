@@ -229,7 +229,7 @@ Coverage level for a canonical_requirement is editable directly. The `verity_fea
 
 ## L2 — Compliance Mart
 
-Separate Postgres schema `verity_analytics` in the same database (AD-CS-002 below). Star schema. Append-only facts. SCD2 dims.
+Separate Postgres schema `analytics` in the same database (AD-CS-002 below). Star schema. Append-only facts. SCD2 dims.
 
 ### Fact tables (append-only)
 
@@ -356,7 +356,7 @@ For edge or custom regulatory needs that don't fit the metadata-driven shape —
 1. Resolve `report_definition` (`report_kind='template_driven'`) → `report_sql_template`.
 2. Validate user-supplied params against `parameter_schema`.
 3. Bind params into the stored `sql_text` (named-param substitution; never string concatenation — SQL injection is rejected at validation time).
-4. Execute against `verity_analytics`. Render the dataset through `render_template`.
+4. Execute against `analytics`. Render the dataset through `render_template`.
 
 **Constraint:** `referenced_mart_fields` must be a non-empty subset of registered `mart_field` rows. The catalog still knows what fields the report touches, even though it doesn't generate the SQL. The integrity contract is preserved.
 
@@ -387,7 +387,7 @@ Rung 1 is sufficient for the demo and for early customers. Rungs 2 and 3 are non
 
 The export bundle command (`verity export-compliance --since {ts}`) emits:
 
-- `verity_analytics.ddl.sql` — table DDL targetable at Postgres or Snowflake
+- `analytics.ddl.sql` — table DDL targetable at Postgres or Snowflake
 - `mart_field.json` — the field registry
 - `regulatory_mapping.yaml` — frameworks, provisions, canonical requirements, bridges, coverage
 - `report_definitions.yaml` — packaged report manifests
@@ -424,8 +424,8 @@ This differs from runtime entities (agent/task/prompt embeddings at `vector(1536
 **Rationale:** Reports never read L1. Customer warehouses receive L2+L3+L4+L5 and can rebuild the stack with their own data.
 
 ### AD-CS-002: L2 in same Postgres, separate schema
-**Decision:** `verity_analytics` schema in `verity_db`. Not a separate database.
-**Rationale:** Ships immediately. No new ops surface. Same backup, same connection, same auth. Future promotion to a dedicated DB or external warehouse is a `pg_dump --schema=verity_analytics` away. The schema namespace makes the export boundary explicit and enforceable.
+**Decision:** `analytics` schema in `verity_db`. Not a separate database.
+**Rationale:** Ships immediately. No new ops surface. Same backup, same connection, same auth. Future promotion to a dedicated DB or external warehouse is a `pg_dump --schema=analytics` away. The schema namespace makes the export boundary explicit and enforceable.
 
 ### AD-CS-003: SCD Type 2 dimensions
 **Decision:** All dims are SCD2 with sentinel `valid_to` and `is_current` boolean. No frozen-snapshot dim shortcut.

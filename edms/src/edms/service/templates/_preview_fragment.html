@@ -1,0 +1,54 @@
+{#
+    PREVIEW MODAL FRAGMENT — loaded by HTMX into #preview-modal-body.
+
+    Rendered by GET /ui/documents/{id}/preview in ui.py. Intentionally
+    has no {% extends %} — this is just the inner HTML that HTMX swaps
+    into the modal's body via hx-target.
+
+    Branches on preview_kind ∈ {"pdf", "text", "docx", "none"}:
+      - pdf  : <iframe> hitting /documents/{id}/content
+      - text : raw UTF-8 in a <pre>-styled div
+      - docx : mammoth-converted HTML
+      - none : "not previewable" notice + download link
+#}
+
+{% if preview_kind == 'pdf' %}
+    <iframe src="/documents/{{ doc.id }}/content"
+            title="PDF preview of {{ doc.filename }}"
+            style="width: 100%; height: 75vh; border: 1px solid var(--verity-border); border-radius: 4px;">
+    </iframe>
+
+{% elif preview_kind == 'text' %}
+    <div class="verity-code"
+         style="max-height: 75vh; overflow: auto; white-space: pre-wrap;">{{ preview_payload }}</div>
+
+{% elif preview_kind == 'docx' %}
+    {# mammoth produces sanitized HTML from a DOCX we control,
+       so | safe is appropriate. The wrapper constrains height
+       and gives the doc its own white background so it reads
+       like a page. #}
+    <div class="verity-docx-preview"
+         style="max-height: 75vh; overflow: auto; padding: 16px;
+                border: 1px solid var(--verity-border); border-radius: 4px;
+                background: white; line-height: 1.5;">
+        {{ preview_payload | safe }}
+    </div>
+
+{% else %}
+    <div style="color: var(--verity-text-light); font-size: 0.9rem;
+                padding: 32px; text-align: center;">
+        <div style="font-weight: 600; margin-bottom: 6px;">No inline preview available</div>
+        <div style="font-size: 0.82rem;">
+            File type: {{ doc.content_type or 'unknown' }}
+        </div>
+    </div>
+{% endif %}
+
+<div style="margin-top: 12px; display: flex; gap: 8px; align-items: center;">
+    <a href="/documents/{{ doc.id }}/content"
+       class="verity-btn verity-btn-secondary verity-btn-sm"
+       download="{{ doc.filename }}">Download original</a>
+    <span style="font-size: 0.75rem; color: var(--verity-text-light);">
+        {{ doc.filename }}{% if doc.file_size_bytes %} — {{ "%.1f"|format(doc.file_size_bytes / 1024) }} KB{% endif %}
+    </span>
+</div>

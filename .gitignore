@@ -14,11 +14,21 @@ logs/
 venv/
 env/
 
-# IDE
-.vscode/
+# IDE — keep shared editor config (settings, extensions, launch) but
+# ignore per-developer state (workspace, history, cache).
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
 .idea/
 *.swp
 *.swo
+
+# Test coverage artifacts
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
 
 # Environment
 .env

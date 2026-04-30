@@ -1,13 +1,26 @@
-<!--
+{#
   DECISION LOG PAGE — All AI invocations
 
-  Every Claude call (agent or task) creates a decision log entry.
-  Shows entity, step, run ID, context, application, status, and timing.
+  Every Claude call (agent or task) creates a decision log entry. Mirrors
+  the Runs page architecture: a server-side filter card narrows the
+  dataset, then client-side search + sort refines the rendered slice.
 
   DATA PASSED BY ROUTE:
-  - decisions: list of DecisionLog entries (with workflow_run_id, execution_context_ref, application)
-  - total: total count of decisions
--->
+    decisions             — list of DecisionLog rows to display
+    total                 — int, total rows matching the current filter set
+    limit                 — currently-loaded slice size (drives the rows
+                             picker + the "showing N of M" hint)
+    filters               — dict of every filter the user supplied,
+                             echoed back into the form for stickiness
+    application_options   — list of {name, display_name} for the
+                             Application dropdown (every registered app)
+    entity_name_options   — list of {name, display_name, entity_kind}
+                             from the catalog UNION (task ∪ agent),
+                             backs the entity-name <datalist>
+    status_options        — list[str] of decision_log statuses
+    log_detail_options    — list[str] of decision_log_detail values
+    entity_type_options   — list[str] (agent / task)
+#}
 {% extends "base.html" %}
 
 {% block title %}Decision Logs — Verity{% endblock %}
@@ -23,40 +36,184 @@
 
 {% include "partials/_execution_subnav.html" %}
 
-<div style="margin-bottom: 16px; font-size: 0.85rem; color: var(--verity-text-light);">
-    {{ total }} total decisions logged
+{# ── SERVER-SIDE FILTER CARD — same layout as runs_list.html ──
+   All filters AND'd; missing fields become "no constraint." Date
+   preset defaults to "Current month" when no param supplied — pick
+   "All time" to opt out of the implicit window.
+#}
+<form method="get" action="/admin/decisions" class="verity-card"
+      style="padding: 14px 16px; margin-bottom: 14px;">
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px 14px;">
+
+        {# Status. Hardcoded universe — see DecisionsReader.DECISION_STATUSES. #}
+        <label class="verity-label" style="margin-bottom: 0;">
+            Status
+            <select name="status" class="verity-select" style="width: 100%;">
+                <option value="">any</option>
+                {% for s in status_options %}
+                <option value="{{ s }}" {% if filters.status == s %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+        {# Entity type — agent or task only, per the CHECK constraint
+           on agent_decision_log. #}
+        <label class="verity-label" style="margin-bottom: 0;">
+            Type
+            <select name="entity_type" class="verity-select" style="width: 100%;">
+                <option value="">any</option>
+                {% for k in entity_type_options %}
+                <option value="{{ k }}" {% if filters.entity_type == k %}selected{% endif %}>{{ k }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+        {# Decision log detail level. #}
+        <label class="verity-label" style="margin-bottom: 0;">
+            Log Level
+            <select name="decision_log_detail" class="verity-select" style="width: 100%;">
+                <option value="">any</option>
+                {% for d in log_detail_options %}
+                <option value="{{ d }}" {% if filters.decision_log_detail == d %}selected{% endif %}>{{ d }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+        {# Application. Sourced from the application table directly —
+           cheaper than DISTINCT-scanning agent_decision_log. Lists
+           every registered app, including ones with zero decisions. #}
+        <label class="verity-label" style="margin-bottom: 0;">
+            Application
+            <select name="application" class="verity-select" style="width: 100%;">
+                <option value="">any</option>
+                {% for opt in application_options %}
+                <option value="{{ opt.name }}" {% if filters.application == opt.name %}selected{% endif %}>{{ opt.display_name or opt.name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+        {# Entity-name partial. Free-text + datalist autocomplete from
+           the catalog (task ∪ agent), shared with the Runs page. #}
+        <label class="verity-label" style="margin-bottom: 0;">
+            Entity name
+            <input type="text" name="entity_name_contains"
+                   list="decisions-entity-name-options"
+                   class="verity-input" style="width: 100%;"
+                   placeholder="contains…"
+                   value="{{ filters.entity_name_contains or '' }}">
+            <datalist id="decisions-entity-name-options">
+                {% for opt in entity_name_options %}
+                <option value="{{ opt.name }}" label="{{ opt.display_name }} ({{ opt.entity_kind }})"></option>
+                {% endfor %}
+            </datalist>
+        </label>
+
+        {# Date-range preset. Custom… reveals the inline datetime
+           inputs below this row. Identical to runs_list.html. #}
+        <label class="verity-label" style="margin-bottom: 0;">
+            Date range
+            <select name="date_preset" id="decisions-date-preset"
+                    class="verity-select" style="width: 100%;"
+                    onchange="document.getElementById('decisions-custom-dates').style.display = (this.value === 'custom') ? 'flex' : 'none';">
+                {% set p = filters.date_preset or 'current_month' %}
+                <option value="current_month"  {% if p == 'current_month'  %}selected{% endif %}>Current month</option>
+                <option value="last_24h"       {% if p == 'last_24h'       %}selected{% endif %}>Last 24 hours</option>
+                <option value="last_7d"        {% if p == 'last_7d'        %}selected{% endif %}>Last 7 days</option>
+                <option value="last_30d"       {% if p == 'last_30d'       %}selected{% endif %}>Last 30 days</option>
+                <option value="last_90d"       {% if p == 'last_90d'       %}selected{% endif %}>Last 90 days</option>
+                <option value="previous_month" {% if p == 'previous_month' %}selected{% endif %}>Previous month</option>
+                <option value="year_to_date"   {% if p == 'year_to_date'   %}selected{% endif %}>Year to date</option>
+                <option value="all"            {% if p == 'all'            %}selected{% endif %}>All time</option>
+                <option value="custom"         {% if p == 'custom'         %}selected{% endif %}>Custom…</option>
+            </select>
+        </label>
+
+        {# Per-page picker. Caps at 1000 to match the parquet/feed
+           export upper bound. #}
+        <label class="verity-label" style="margin-bottom: 0;">
+            Rows
+            <select name="limit" class="verity-select" style="width: 100%;">
+                {% for n in [25, 50, 100, 200, 500, 1000] %}
+                <option value="{{ n }}" {% if limit == n %}selected{% endif %}>{{ n }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+    </div>
+
+    {# Custom-date row, only shown when preset == "custom". #}
+    <div id="decisions-custom-dates"
+         style="display: {% if filters.date_preset == 'custom' %}flex{% else %}none{% endif %}; gap: 12px; margin-top: 10px;">
+        <label class="verity-label" style="margin-bottom: 0; flex: 1;">
+            From
+            <input type="datetime-local" name="created_after"
+                   class="verity-input" style="width: 100%;"
+                   value="{{ filters.created_after or '' }}">
+        </label>
+        <label class="verity-label" style="margin-bottom: 0; flex: 1;">
+            To (exclusive)
+            <input type="datetime-local" name="created_before"
+                   class="verity-input" style="width: 100%;"
+                   value="{{ filters.created_before or '' }}">
+        </label>
+    </div>
+
+    <div style="margin-top: 12px; display: flex; gap: 8px;">
+        <button type="submit" class="verity-btn verity-btn-primary verity-btn-sm">Apply</button>
+        <a href="/admin/decisions" class="verity-btn verity-btn-secondary verity-btn-sm">Clear all</a>
+    </div>
+</form>
+
+{# Rows-loaded hint above the table, identical pattern to runs's
+   "N runs match the current filter set" line but augmented with the
+   "increase rows to see more" nudge when the slice is capped. #}
+<div style="margin-bottom: 8px; font-size: 0.85rem; color: var(--verity-text-light);">
+    {% set loaded = decisions | length %}
+    {% if loaded < total %}
+        Showing <strong>{{ loaded }}</strong> of <strong>{{ total }}</strong>
+        most recent decisions matching the current filter set — increase
+        Rows to see more.
+    {% else %}
+        {{ total }} decision{{ '' if total == 1 else 's' }} match the current filter set.
+    {% endif %}
 </div>
 
 {% if decisions %}
-<table class="verity-table">
+
+{# Client-side search input — narrows the rendered slice. Pure
+   substring match across all columns, case-insensitive. #}
+<input type="text" id="decisionsTableSearch" class="table-search"
+       placeholder="Search this page…"
+       onkeyup="filterTable('decisionsTableSearch','decisionsTable')">
+
+<table class="verity-table sortable-table" id="decisionsTable">
     <thead>
         <tr>
-            <th>Entity</th>
-            <th>Type</th>
-            <th>Step</th>
+            <th class="sortable" onclick="sortTable('decisionsTable',0)">Entity</th>
+            <th class="sortable" onclick="sortTable('decisionsTable',1)">Type</th>
+            <th class="sortable" onclick="sortTable('decisionsTable',2)">Step</th>
+            {# Run ID / Context hold short_id'd UUIDs — sorting on
+               opaque hex isn't useful, so they stay non-sortable. #}
             <th>Run ID</th>
             <th>Context</th>
-            <th>Application</th>
-            <th>Status</th>
-            <th>Log Level</th>
-            <th>Tokens</th>
-            <th>Duration</th>
-            <th>When</th>
+            <th class="sortable" onclick="sortTable('decisionsTable',5)">Application</th>
+            <th class="sortable" onclick="sortTable('decisionsTable',6)">Status</th>
+            <th class="sortable" onclick="sortTable('decisionsTable',7)">Log Level</th>
+            <th class="sortable" onclick="sortTable('decisionsTable',8)">Tokens</th>
+            <th class="sortable" onclick="sortTable('decisionsTable',9)">Duration</th>
+            <th class="sortable" onclick="sortTable('decisionsTable',10)">When</th>
         </tr>
     </thead>
     <tbody>
         {% for d in decisions %}
         <tr class="clickable" onclick="window.location='/admin/decisions/{{ d.id }}'">
-            <!-- Entity display name -->
+
             <td><a href="/admin/decisions/{{ d.id }}">{{ d.entity_name or '—' }}</a></td>
 
-            <!-- Entity type badge -->
             <td><span class="verity-badge verity-badge-{{ d.entity_type }}">{{ d.entity_type }}</span></td>
 
-            <!-- Pipeline step name -->
             <td style="font-size: 0.8rem;">{{ d.step_name or '—' }}</td>
 
-            <!-- Run ID (short format: first 4...last 4) -->
             <td style="font-family: monospace; font-size: 0.7rem;">
                 {% if d.workflow_run_id %}
                     <a href="/admin/audit-trail/run/{{ d.workflow_run_id }}" style="color: var(--verity-blue-deep);">
@@ -67,27 +224,20 @@
                 {% endif %}
             </td>
 
-            <!-- Execution context ref (short format) -->
             <td style="font-size: 0.75rem; color: var(--verity-text-light);">
                 {{ d.execution_context_ref or '—' }}
             </td>
 
-            <!-- Application -->
             <td style="font-size: 0.8rem;">{{ d.application or '—' }}</td>
 
-            <!-- Status badge -->
             <td><span class="verity-badge verity-badge-{{ d.status }}">{{ d.status }}</span></td>
 
-            <!-- Decision log level -->
             <td><span class="verity-badge verity-badge-draft">{{ d.decision_log_detail or 'standard' }}</span></td>
 
-            <!-- Tokens -->
             <td style="font-size: 0.8rem;">{{ (d.input_tokens or 0) + (d.output_tokens or 0) }}</td>
 
-            <!-- Duration -->
             <td style="font-size: 0.8rem;">{{ d.duration_ms or 0 }}ms</td>
 
-            <!-- Timestamp -->
             <td style="font-size: 0.8rem;">{{ d.created_at.strftime('%m-%d %H:%M') if d.created_at else '—' }}</td>
         </tr>
         {% endfor %}
@@ -96,7 +246,7 @@
 {% else %}
 <div class="verity-empty">
     <div style="font-size: 2rem; opacity: 0.3;">◉</div>
-    <div class="verity-empty-message">No decisions logged yet.</div>
+    <div class="verity-empty-message">No decisions match this filter set.</div>
 </div>
 {% endif %}
 

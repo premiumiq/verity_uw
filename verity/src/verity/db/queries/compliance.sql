@@ -8,7 +8,7 @@
 -- Column headers for the coverage matrix, ordered by sort_seq.
 -- Excludes any framework whose validity has expired.
 SELECT id, code, name, jurisdiction, version, sort_seq
-FROM verity_compliance.regulatory_framework
+FROM compliance.regulatory_framework
 WHERE valid_to >= current_date
 ORDER BY sort_seq, code;
 
@@ -16,7 +16,7 @@ ORDER BY sort_seq, code;
 -- name: list_compliance_themes
 -- All canonical_requirement_themes for grouping matrix rows.
 SELECT id, code, name, description, sort_seq
-FROM verity_compliance.canonical_requirement_theme
+FROM compliance.canonical_requirement_theme
 ORDER BY sort_seq, code;
 
 
@@ -53,18 +53,18 @@ SELECT
                     'provision_count', COUNT(*)
                 ) AS b,
                 f.sort_seq
-                FROM verity_compliance.provision_requirement_map prm
-                JOIN verity_compliance.regulatory_provision  p ON p.id = prm.provision_id
-                JOIN verity_compliance.regulatory_framework  f ON f.id = p.framework_id
+                FROM compliance.provision_requirement_map prm
+                JOIN compliance.regulatory_provision  p ON p.id = prm.provision_id
+                JOIN compliance.regulatory_framework  f ON f.id = p.framework_id
                 WHERE prm.canonical_requirement_id = cr.id
                 GROUP BY f.id, f.code, f.name, f.sort_seq
             ) sub
         ),
         '[]'::json
     ) AS bridges
-FROM       verity_compliance.canonical_requirement cr
-JOIN       verity_compliance.canonical_requirement_theme t   ON t.id   = cr.theme_id
-LEFT JOIN  verity_compliance.requirement_coverage          cov ON cov.canonical_requirement_id = cr.id
+FROM       compliance.canonical_requirement cr
+JOIN       compliance.canonical_requirement_theme t   ON t.id   = cr.theme_id
+LEFT JOIN  compliance.requirement_coverage          cov ON cov.canonical_requirement_id = cr.id
 ORDER BY t.sort_seq, cr.sort_seq, cr.code;
 
 
@@ -81,9 +81,9 @@ SELECT
     cov.customer_actions,
     cov.last_reviewed_at,
     cov.reviewed_by
-FROM       verity_compliance.canonical_requirement cr
-JOIN       verity_compliance.canonical_requirement_theme t  ON t.id  = cr.theme_id
-LEFT JOIN  verity_compliance.requirement_coverage         cov ON cov.canonical_requirement_id = cr.id
+FROM       compliance.canonical_requirement cr
+JOIN       compliance.canonical_requirement_theme t  ON t.id  = cr.theme_id
+LEFT JOIN  compliance.requirement_coverage         cov ON cov.canonical_requirement_id = cr.id
 WHERE cr.code = %(canonical_code)s;
 
 
@@ -101,10 +101,10 @@ SELECT
     prm.confidence,
     prm.mapping_source,
     prm.notes
-FROM       verity_compliance.provision_requirement_map prm
-JOIN       verity_compliance.regulatory_provision      p   ON p.id   = prm.provision_id
-JOIN       verity_compliance.regulatory_framework      f   ON f.id   = p.framework_id
-JOIN       verity_compliance.canonical_requirement     cr  ON cr.id  = prm.canonical_requirement_id
+FROM       compliance.provision_requirement_map prm
+JOIN       compliance.regulatory_provision      p   ON p.id   = prm.provision_id
+JOIN       compliance.regulatory_framework      f   ON f.id   = p.framework_id
+JOIN       compliance.canonical_requirement     cr  ON cr.id  = prm.canonical_requirement_id
 WHERE cr.code = %(canonical_code)s
 ORDER BY f.sort_seq, p.sort_seq, p.citation;
 
@@ -123,11 +123,11 @@ SELECT
     plane.name        AS plane_name,
     rfl.role,
     rfl.notes         AS link_notes
-FROM       verity_compliance.requirement_feature_link rfl
-JOIN       verity_compliance.feature                 feat  ON feat.id  = rfl.feature_id
-JOIN       verity_compliance.feature_capability      cap   ON cap.id   = feat.capability_id
-JOIN       verity_compliance.feature_plane           plane ON plane.id = cap.plane_id
-JOIN       verity_compliance.canonical_requirement   cr    ON cr.id    = rfl.canonical_requirement_id
+FROM       compliance.requirement_feature_link rfl
+JOIN       compliance.feature                 feat  ON feat.id  = rfl.feature_id
+JOIN       compliance.feature_capability      cap   ON cap.id   = feat.capability_id
+JOIN       compliance.feature_plane           plane ON plane.id = cap.plane_id
+JOIN       compliance.canonical_requirement   cr    ON cr.id    = rfl.canonical_requirement_id
 WHERE cr.code = %(canonical_code)s
 ORDER BY rfl.role DESC, plane.sort_seq, cap.sort_seq, feat.sort_seq;
 
@@ -140,8 +140,8 @@ SELECT
     f.code         AS framework_code,
     f.name         AS framework_name,
     f.jurisdiction
-FROM       verity_compliance.regulatory_provision p
-JOIN       verity_compliance.regulatory_framework f ON f.id = p.framework_id
+FROM       compliance.regulatory_provision p
+JOIN       compliance.regulatory_framework f ON f.id = p.framework_id
 WHERE p.id = %(provision_id)s;
 
 
@@ -158,10 +158,10 @@ SELECT
     prm.mapping_source,
     t.code           AS theme_code,
     t.name           AS theme_name
-FROM       verity_compliance.provision_requirement_map prm
-JOIN       verity_compliance.canonical_requirement     cr   ON cr.id  = prm.canonical_requirement_id
-JOIN       verity_compliance.canonical_requirement_theme t  ON t.id   = cr.theme_id
-LEFT JOIN  verity_compliance.requirement_coverage         cov ON cov.canonical_requirement_id = cr.id
+FROM       compliance.provision_requirement_map prm
+JOIN       compliance.canonical_requirement     cr   ON cr.id  = prm.canonical_requirement_id
+JOIN       compliance.canonical_requirement_theme t  ON t.id   = cr.theme_id
+LEFT JOIN  compliance.requirement_coverage         cov ON cov.canonical_requirement_id = cr.id
 WHERE prm.provision_id = %(provision_id)s
 ORDER BY prm.match_strength DESC, t.sort_seq, cr.sort_seq;
 
@@ -171,22 +171,22 @@ ORDER BY prm.match_strength DESC, t.sort_seq, cr.sort_seq;
 SELECT
     coverage_level,
     COUNT(*) AS canonical_count
-FROM verity_compliance.requirement_coverage
+FROM compliance.requirement_coverage
 GROUP BY coverage_level;
 
 
 -- name: compliance_overall_counts
 -- Top-level entity totals — for overview page header card.
 SELECT
-    (SELECT COUNT(*) FROM verity_compliance.regulatory_framework        WHERE valid_to >= current_date) AS framework_count,
-    (SELECT COUNT(*) FROM verity_compliance.regulatory_provision)        AS provision_count,
-    (SELECT COUNT(*) FROM verity_compliance.canonical_requirement_theme) AS theme_count,
-    (SELECT COUNT(*) FROM verity_compliance.canonical_requirement)       AS canonical_count,
-    (SELECT COUNT(*) FROM verity_compliance.feature_plane)               AS plane_count,
-    (SELECT COUNT(*) FROM verity_compliance.feature_capability)          AS capability_count,
-    (SELECT COUNT(*) FROM verity_compliance.feature)                     AS feature_count,
-    (SELECT COUNT(*) FROM verity_compliance.provision_requirement_map)   AS provision_canonical_bridges,
-    (SELECT COUNT(*) FROM verity_compliance.requirement_feature_link)    AS canonical_feature_bridges;
+    (SELECT COUNT(*) FROM compliance.regulatory_framework        WHERE valid_to >= current_date) AS framework_count,
+    (SELECT COUNT(*) FROM compliance.regulatory_provision)        AS provision_count,
+    (SELECT COUNT(*) FROM compliance.canonical_requirement_theme) AS theme_count,
+    (SELECT COUNT(*) FROM compliance.canonical_requirement)       AS canonical_count,
+    (SELECT COUNT(*) FROM compliance.feature_plane)               AS plane_count,
+    (SELECT COUNT(*) FROM compliance.feature_capability)          AS capability_count,
+    (SELECT COUNT(*) FROM compliance.feature)                     AS feature_count,
+    (SELECT COUNT(*) FROM compliance.provision_requirement_map)   AS provision_canonical_bridges,
+    (SELECT COUNT(*) FROM compliance.requirement_feature_link)    AS canonical_feature_bridges;
 
 
 -- name: list_frameworks_with_stats
@@ -194,21 +194,21 @@ SELECT
 SELECT
     f.id, f.code, f.name, f.jurisdiction, f.version, f.effective_date,
     f.valid_from, f.valid_to, f.source_url, f.description, f.sort_seq,
-    (SELECT COUNT(*) FROM verity_compliance.regulatory_provision p WHERE p.framework_id = f.id)
+    (SELECT COUNT(*) FROM compliance.regulatory_provision p WHERE p.framework_id = f.id)
         AS provision_count,
     (SELECT COUNT(DISTINCT prm.canonical_requirement_id)
-       FROM verity_compliance.regulatory_provision p
-       JOIN verity_compliance.provision_requirement_map prm ON prm.provision_id = p.id
+       FROM compliance.regulatory_provision p
+       JOIN compliance.provision_requirement_map prm ON prm.provision_id = p.id
        WHERE p.framework_id = f.id)
         AS canonical_count
-FROM verity_compliance.regulatory_framework f
+FROM compliance.regulatory_framework f
 ORDER BY f.sort_seq, f.code;
 
 
 -- name: get_framework_by_code
 SELECT id, code, name, jurisdiction, version, effective_date,
        valid_from, valid_to, source_url, description, sort_seq
-FROM verity_compliance.regulatory_framework
+FROM compliance.regulatory_framework
 WHERE code = %(framework_code)s;
 
 
@@ -217,10 +217,10 @@ WHERE code = %(framework_code)s;
 SELECT
     p.id, p.citation, p.title, p.text, p.sort_seq,
     p.valid_from, p.valid_to,
-    (SELECT COUNT(*) FROM verity_compliance.provision_requirement_map prm
+    (SELECT COUNT(*) FROM compliance.provision_requirement_map prm
         WHERE prm.provision_id = p.id) AS canonical_link_count
-FROM       verity_compliance.regulatory_provision p
-JOIN       verity_compliance.regulatory_framework f ON f.id = p.framework_id
+FROM       compliance.regulatory_provision p
+JOIN       compliance.regulatory_framework f ON f.id = p.framework_id
 WHERE f.code = %(framework_code)s
 ORDER BY p.sort_seq, p.citation;
 
@@ -235,13 +235,13 @@ SELECT
     cov.coverage_level,
     cov.rationale,
     cov.customer_actions,
-    (SELECT COUNT(*) FROM verity_compliance.provision_requirement_map prm
+    (SELECT COUNT(*) FROM compliance.provision_requirement_map prm
         WHERE prm.canonical_requirement_id = cr.id) AS provision_count,
-    (SELECT COUNT(*) FROM verity_compliance.requirement_feature_link rfl
+    (SELECT COUNT(*) FROM compliance.requirement_feature_link rfl
         WHERE rfl.canonical_requirement_id = cr.id) AS feature_count
-FROM       verity_compliance.canonical_requirement cr
-JOIN       verity_compliance.canonical_requirement_theme t   ON t.id  = cr.theme_id
-LEFT JOIN  verity_compliance.requirement_coverage          cov ON cov.canonical_requirement_id = cr.id
+FROM       compliance.canonical_requirement cr
+JOIN       compliance.canonical_requirement_theme t   ON t.id  = cr.theme_id
+LEFT JOIN  compliance.requirement_coverage          cov ON cov.canonical_requirement_id = cr.id
 ORDER BY t.sort_seq, cr.sort_seq, cr.code;
 
 
@@ -252,11 +252,11 @@ SELECT
     cap.code   AS capability_code, cap.name AS capability_name, cap.sort_seq AS capability_sort,
     feat.id, feat.code AS feature_code, feat.name AS feature_name,
     feat.description AS feature_description, feat.status, feat.sort_seq AS feature_sort,
-    (SELECT COUNT(*) FROM verity_compliance.requirement_feature_link rfl
+    (SELECT COUNT(*) FROM compliance.requirement_feature_link rfl
         WHERE rfl.feature_id = feat.id) AS canonical_link_count
-FROM       verity_compliance.feature_plane plane
-JOIN       verity_compliance.feature_capability cap ON cap.plane_id = plane.id
-JOIN       verity_compliance.feature             feat ON feat.capability_id = cap.id
+FROM       compliance.feature_plane plane
+JOIN       compliance.feature_capability cap ON cap.plane_id = plane.id
+JOIN       compliance.feature             feat ON feat.capability_id = cap.id
 ORDER BY plane.sort_seq, cap.sort_seq, feat.sort_seq;
 
 
@@ -265,9 +265,9 @@ SELECT
     feat.id, feat.code, feat.name, feat.description, feat.status, feat.sort_seq,
     cap.code  AS capability_code, cap.name  AS capability_name,
     plane.code AS plane_code, plane.name AS plane_name
-FROM       verity_compliance.feature feat
-JOIN       verity_compliance.feature_capability cap ON cap.id = feat.capability_id
-JOIN       verity_compliance.feature_plane     plane ON plane.id = cap.plane_id
+FROM       compliance.feature feat
+JOIN       compliance.feature_capability cap ON cap.id = feat.capability_id
+JOIN       compliance.feature_plane     plane ON plane.id = cap.plane_id
 WHERE feat.code = %(feature_code)s;
 
 
@@ -282,11 +282,11 @@ SELECT
     cov.coverage_level,
     rfl.role,
     rfl.notes AS link_notes
-FROM       verity_compliance.requirement_feature_link rfl
-JOIN       verity_compliance.canonical_requirement cr  ON cr.id = rfl.canonical_requirement_id
-JOIN       verity_compliance.canonical_requirement_theme t ON t.id = cr.theme_id
-LEFT JOIN  verity_compliance.requirement_coverage cov  ON cov.canonical_requirement_id = cr.id
-JOIN       verity_compliance.feature feat ON feat.id = rfl.feature_id
+FROM       compliance.requirement_feature_link rfl
+JOIN       compliance.canonical_requirement cr  ON cr.id = rfl.canonical_requirement_id
+JOIN       compliance.canonical_requirement_theme t ON t.id = cr.theme_id
+LEFT JOIN  compliance.requirement_coverage cov  ON cov.canonical_requirement_id = cr.id
+JOIN       compliance.feature feat ON feat.id = rfl.feature_id
 WHERE feat.code = %(feature_code)s
 ORDER BY rfl.role DESC, t.sort_seq, cr.sort_seq;
 
@@ -310,11 +310,11 @@ SELECT
     prm.mapping_source,
     prm.validated_by,
     prm.validated_at
-FROM       verity_compliance.provision_requirement_map prm
-JOIN       verity_compliance.regulatory_provision      p   ON p.id = prm.provision_id
-JOIN       verity_compliance.regulatory_framework      f   ON f.id = p.framework_id
-JOIN       verity_compliance.canonical_requirement     cr  ON cr.id = prm.canonical_requirement_id
-JOIN       verity_compliance.canonical_requirement_theme t ON t.id = cr.theme_id
+FROM       compliance.provision_requirement_map prm
+JOIN       compliance.regulatory_provision      p   ON p.id = prm.provision_id
+JOIN       compliance.regulatory_framework      f   ON f.id = p.framework_id
+JOIN       compliance.canonical_requirement     cr  ON cr.id = prm.canonical_requirement_id
+JOIN       compliance.canonical_requirement_theme t ON t.id = cr.theme_id
 WHERE (%(framework_code)s::text    IS NULL OR f.code  = %(framework_code)s)
   AND (%(canonical_code)s::text    IS NULL OR cr.code = %(canonical_code)s)
   AND (%(mapping_source)s::text    IS NULL OR prm.mapping_source = %(mapping_source)s)
@@ -329,9 +329,9 @@ SELECT
     rd.id, rd.code, rd.name, rd.description, rd.report_kind,
     rd.docx_template, rd.output_formats, rd.scope_params,
     rd.sort_seq, rd.is_active, rd.created_at,
-    (SELECT COUNT(*) FROM verity_compliance.report_requirement rr
+    (SELECT COUNT(*) FROM compliance.report_requirement rr
         WHERE rr.report_id = rd.id) AS canonical_count
-FROM verity_compliance.report_definition rd
+FROM compliance.report_definition rd
 WHERE rd.is_active = true
 ORDER BY rd.sort_seq, rd.code;
 
@@ -344,8 +344,8 @@ SELECT
     rrl.created_at, rrl.completed_at,
     rd.code  AS report_code,
     rd.name  AS report_name
-FROM       verity_compliance.report_run_log rrl
-JOIN       verity_compliance.report_definition rd ON rd.id = rrl.report_id
+FROM       compliance.report_run_log rrl
+JOIN       compliance.report_definition rd ON rd.id = rrl.report_id
 ORDER BY rrl.created_at DESC
 LIMIT 25;
 
@@ -366,10 +366,10 @@ SELECT
         ', '
     )                                              AS asset_label,
     COUNT(*)                                       AS decision_count
-FROM       verity_analytics.v_decision d
-LEFT JOIN  verity_analytics.v_entity_version av
+FROM       analytics.v_decision d
+LEFT JOIN  analytics.v_entity_version av
        ON  av.source_pk = d.entity_version_id::text AND d.entity_type = 'agent'
-LEFT JOIN  verity_analytics.v_entity_version tv
+LEFT JOIN  analytics.v_entity_version tv
        ON  tv.source_pk = d.entity_version_id::text AND d.entity_type = 'task'
 WHERE d.execution_context_id IS NOT NULL
 GROUP BY d.execution_context_id
@@ -384,12 +384,28 @@ SELECT
     rd.id, rd.code, rd.name, rd.description,
     rd.report_kind, rd.output_formats,
     rr.section, rr.sort_seq AS requirement_sort
-FROM       verity_compliance.canonical_requirement cr
-JOIN       verity_compliance.report_requirement   rr ON rr.canonical_requirement_id = cr.id
-JOIN       verity_compliance.report_definition    rd ON rd.id = rr.report_id
+FROM       compliance.canonical_requirement cr
+JOIN       compliance.report_requirement   rr ON rr.canonical_requirement_id = cr.id
+JOIN       compliance.report_definition    rd ON rd.id = rr.report_id
 WHERE cr.code = %(canonical_code)s
   AND rd.is_active = true
 ORDER BY rd.sort_seq, rd.code;
+
+
+-- name: list_active_feed_views
+-- Allowlist of analytics.* views the public feed endpoint may serve.
+SELECT id, view_name, description, sort_seq, is_active
+FROM analytics.feed_view
+WHERE is_active = true
+ORDER BY sort_seq, view_name;
+
+
+-- name: get_active_feed_view
+-- Lookup one feed view by name (must be active to be feedable).
+SELECT id, view_name, description, sort_seq, is_active
+FROM analytics.feed_view
+WHERE view_name = %(view_name)s
+  AND is_active = true;
 
 
 -- name: list_canonical_feature_bridges
@@ -408,12 +424,12 @@ SELECT
     plane.code        AS plane_code,
     rfl.role,
     rfl.notes
-FROM       verity_compliance.requirement_feature_link rfl
-JOIN       verity_compliance.canonical_requirement cr     ON cr.id = rfl.canonical_requirement_id
-JOIN       verity_compliance.canonical_requirement_theme t ON t.id = cr.theme_id
-JOIN       verity_compliance.feature feat                 ON feat.id = rfl.feature_id
-JOIN       verity_compliance.feature_capability cap       ON cap.id = feat.capability_id
-JOIN       verity_compliance.feature_plane plane          ON plane.id = cap.plane_id
+FROM       compliance.requirement_feature_link rfl
+JOIN       compliance.canonical_requirement cr     ON cr.id = rfl.canonical_requirement_id
+JOIN       compliance.canonical_requirement_theme t ON t.id = cr.theme_id
+JOIN       compliance.feature feat                 ON feat.id = rfl.feature_id
+JOIN       compliance.feature_capability cap       ON cap.id = feat.capability_id
+JOIN       compliance.feature_plane plane          ON plane.id = cap.plane_id
 WHERE (%(canonical_code)s::text IS NULL OR cr.code   = %(canonical_code)s)
   AND (%(feature_code)s::text   IS NULL OR feat.code = %(feature_code)s)
   AND (%(plane_code)s::text     IS NULL OR plane.code = %(plane_code)s)

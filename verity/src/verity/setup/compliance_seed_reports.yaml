@@ -1,20 +1,34 @@
 # =============================================================================
-# Verity Compliance — Reports + mart_field Seed
+# Verity Compliance — Reports + mart_field + Feed Registry Seed
 # =============================================================================
 # Source of truth for:
-#   verity_analytics.mart_field
-#   verity_compliance.requirement_evidence_field
-#   verity_compliance.report_definition
-#   verity_compliance.report_requirement
+#   analytics.feed_view              (Phase 4 Rung 1 allowlist)
+#   analytics.mart_field
+#   compliance.requirement_evidence_field
+#   compliance.report_definition
+#   compliance.report_requirement
 #
 # Edit freely; re-running `verity compliance seed-reports` UPSERTs by
 # (table_name, column_name) for mart_field and by code for reports.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
+# Feed registry — every entry below is a analytics.* view exposed
+# through the /api/v1/feed/{view_name} endpoint. Views NOT in this list cannot
+# be pulled via the API even if they exist in the schema.
+# -----------------------------------------------------------------------------
+feed_views:
+  - { view: v_entity_version,      description: "All registered AI assets (agents, tasks, prompts) with current version metadata.", sort: 10 }
+  - { view: v_application_entity,  description: "Which application owns which asset.",                                              sort: 20 }
+  - { view: v_lifecycle_event,     description: "Lifecycle state transitions and HITL approval gates.",                             sort: 30 }
+  - { view: v_decision,            description: "Per-call decision log: reasoning, confidence, model, duration.",                   sort: 40 }
+  - { view: v_validation_result,   description: "Per-test validation outcomes (pre-deployment + ongoing).",                         sort: 50 }
+  - { view: v_override,            description: "Human overrides applied to AI-produced values.",                                   sort: 60 }
+
+# -----------------------------------------------------------------------------
 # mart_field — every column reachable from a report.
 # Columns are grouped by view; each entry must match an actual column in
-# verity_analytics.<view>.  semantic_type drives downstream rendering.
+# analytics.<view>.  semantic_type drives downstream rendering.
 # -----------------------------------------------------------------------------
 mart_fields:
 

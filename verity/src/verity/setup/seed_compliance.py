@@ -77,7 +77,7 @@ async def _seed_embedding_config(cur: psycopg.AsyncCursor, cfg: dict[str, Any]) 
     """Idempotent: only insert if no current config row exists for this model+version."""
     await cur.execute(
         """
-        SELECT id FROM verity_compliance.embedding_config
+        SELECT id FROM compliance.embedding_config
         WHERE model_name = %s AND model_version = %s AND is_current = true
         """,
         (cfg["model_name"], cfg["model_version"]),
@@ -88,12 +88,12 @@ async def _seed_embedding_config(cur: psycopg.AsyncCursor, cfg: dict[str, Any]) 
 
     # Demote any other current row before inserting.
     await cur.execute(
-        "UPDATE verity_compliance.embedding_config SET is_current = false "
+        "UPDATE compliance.embedding_config SET is_current = false "
         "WHERE is_current = true"
     )
     await cur.execute(
         """
-        INSERT INTO verity_compliance.embedding_config
+        INSERT INTO compliance.embedding_config
             (model_name, model_version, dim, runtime, is_current)
         VALUES (%s, %s, %s, %s, true)
         """,
@@ -113,7 +113,7 @@ async def _seed_frameworks(cur: psycopg.AsyncCursor, frameworks: list[dict[str, 
     for fw in frameworks:
         await cur.execute(
             """
-            INSERT INTO verity_compliance.regulatory_framework
+            INSERT INTO compliance.regulatory_framework
                 (code, name, jurisdiction, version, effective_date,
                  source_url, description, sort_seq)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
@@ -148,7 +148,7 @@ async def _seed_themes(cur: psycopg.AsyncCursor, themes: list[dict[str, Any]]) -
     for theme in themes:
         await cur.execute(
             """
-            INSERT INTO verity_compliance.canonical_requirement_theme
+            INSERT INTO compliance.canonical_requirement_theme
                 (code, name, description, sort_seq)
             VALUES (%s, %s, %s, %s)
             ON CONFLICT (code) DO UPDATE SET
@@ -178,7 +178,7 @@ async def _seed_feature_hierarchy(
     for plane in planes:
         await cur.execute(
             """
-            INSERT INTO verity_compliance.feature_plane
+            INSERT INTO compliance.feature_plane
                 (code, name, description, sort_seq)
             VALUES (%s, %s, %s, %s)
             ON CONFLICT (code) DO UPDATE SET
@@ -201,7 +201,7 @@ async def _seed_feature_hierarchy(
         for cap in plane.get("capabilities", []):
             await cur.execute(
                 """
-                INSERT INTO verity_compliance.feature_capability
+                INSERT INTO compliance.feature_capability
                     (plane_id, code, name, description, sort_seq)
                 VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT (plane_id, code) DO UPDATE SET
@@ -225,7 +225,7 @@ async def _seed_feature_hierarchy(
             for feat in cap.get("features", []):
                 await cur.execute(
                     """
-                    INSERT INTO verity_compliance.feature
+                    INSERT INTO compliance.feature
                         (capability_id, code, name, description, status, sort_seq)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT (capability_id, code) DO UPDATE SET
@@ -282,9 +282,9 @@ async def seed_data(database_url: str) -> dict[str, int]:
     ) as conn:
         async with conn.cursor() as cur:
             # Pre-fetch lookup tables.
-            theme_lookup = await _lookup(cur, "verity_compliance.canonical_requirement_theme")
-            framework_lookup = await _lookup(cur, "verity_compliance.regulatory_framework")
-            feature_lookup = await _lookup(cur, "verity_compliance.feature")
+            theme_lookup = await _lookup(cur, "compliance.canonical_requirement_theme")
+            framework_lookup = await _lookup(cur, "compliance.regulatory_framework")
+            feature_lookup = await _lookup(cur, "compliance.feature")
 
             # ---- canonical requirements + coverage + feature links -------
             canonical_lookup: dict[str, str] = {}
@@ -341,7 +341,7 @@ async def _upsert_canonical_requirement(
 
     await cur.execute(
         """
-        INSERT INTO verity_compliance.canonical_requirement
+        INSERT INTO compliance.canonical_requirement
             (theme_id, code, title, description, sort_seq)
         VALUES (%s, %s, %s, %s, %s)
         ON CONFLICT (code) DO UPDATE SET
@@ -371,7 +371,7 @@ async def _upsert_coverage(
 ) -> None:
     await cur.execute(
         """
-        INSERT INTO verity_compliance.requirement_coverage
+        INSERT INTO compliance.requirement_coverage
             (canonical_requirement_id, coverage_level, rationale, customer_actions)
         VALUES (%s, %s, %s, %s)
         ON CONFLICT (canonical_requirement_id) DO UPDATE SET
@@ -399,7 +399,7 @@ async def _refresh_feature_links(
 ) -> int:
     # Delete-and-replace so removing a link from YAML actually removes it.
     await cur.execute(
-        "DELETE FROM verity_compliance.requirement_feature_link "
+        "DELETE FROM compliance.requirement_feature_link "
         "WHERE canonical_requirement_id = %s",
         (canonical_requirement_id,),
     )
@@ -413,7 +413,7 @@ async def _refresh_feature_links(
             )
         await cur.execute(
             """
-            INSERT INTO verity_compliance.requirement_feature_link
+            INSERT INTO compliance.requirement_feature_link
                 (canonical_requirement_id, feature_id, role, notes)
             VALUES (%s, %s, %s, %s)
             """,
@@ -442,7 +442,7 @@ async def _upsert_provision(
 
     await cur.execute(
         """
-        INSERT INTO verity_compliance.regulatory_provision
+        INSERT INTO compliance.regulatory_provision
             (framework_id, citation, title, text, sort_seq)
         VALUES (%s, %s, %s, %s, %s)
         ON CONFLICT (framework_id, citation) DO UPDATE SET
@@ -472,7 +472,7 @@ async def _refresh_provision_canonical_links(
     prov_citation: str,
 ) -> int:
     await cur.execute(
-        "DELETE FROM verity_compliance.provision_requirement_map "
+        "DELETE FROM compliance.provision_requirement_map "
         "WHERE provision_id = %s",
         (provision_id,),
     )
@@ -486,7 +486,7 @@ async def _refresh_provision_canonical_links(
             )
         await cur.execute(
             """
-            INSERT INTO verity_compliance.provision_requirement_map
+            INSERT INTO compliance.provision_requirement_map
                 (provision_id, canonical_requirement_id,
                  match_strength, confidence, mapping_source, notes)
             VALUES (%s, %s, %s, %s, %s, %s)
@@ -536,11 +536,32 @@ async def seed_reports(database_url: str) -> dict[str, int]:
         database_url, autocommit=False
     ) as conn:
         async with conn.cursor() as cur:
+            # ---- feed_view registry UPSERT ---------------------------
+            for fv in data.get("feed_views", []):
+                await cur.execute(
+                    """
+                    INSERT INTO analytics.feed_view
+                        (view_name, description, is_active, sort_seq)
+                    VALUES (%s, %s, true, %s)
+                    ON CONFLICT (view_name) DO UPDATE SET
+                        description = EXCLUDED.description,
+                        is_active   = EXCLUDED.is_active,
+                        sort_seq    = EXCLUDED.sort_seq
+                    """,
+                    (
+                        fv["view"],
+                        fv.get("description"),
+                        int(fv.get("sort", 0)),
+                    ),
+                )
+            counts.setdefault("feed_views", 0)
+            counts["feed_views"] = len(data.get("feed_views", []))
+
             # ---- mart_field UPSERT ------------------------------------
             for mf in data.get("mart_fields", []):
                 await cur.execute(
                     """
-                    INSERT INTO verity_analytics.mart_field
+                    INSERT INTO analytics.mart_field
                         (table_name, column_name, semantic_type, description,
                          is_pii, sort_seq)
                     VALUES (%s, %s, %s, %s, %s, %s)
@@ -564,7 +585,7 @@ async def seed_reports(database_url: str) -> dict[str, int]:
 
             # Build (table, column) -> mart_field_id lookup.
             await cur.execute(
-                "SELECT table_name, column_name, id FROM verity_analytics.mart_field"
+                "SELECT table_name, column_name, id FROM analytics.mart_field"
             )
             mart_lookup: dict[tuple[str, str], str] = {
                 (row[0], row[1]): row[2] for row in await cur.fetchall()
@@ -572,7 +593,7 @@ async def seed_reports(database_url: str) -> dict[str, int]:
 
             # Build canonical_code -> id lookup.
             await cur.execute(
-                "SELECT code, id FROM verity_compliance.canonical_requirement"
+                "SELECT code, id FROM compliance.canonical_requirement"
             )
             canonical_lookup: dict[str, str] = {
                 row[0]: row[1] for row in await cur.fetchall()
@@ -589,7 +610,7 @@ async def seed_reports(database_url: str) -> dict[str, int]:
                 cr_id = canonical_lookup[cr_code]
 
                 await cur.execute(
-                    "DELETE FROM verity_compliance.requirement_evidence_field "
+                    "DELETE FROM compliance.requirement_evidence_field "
                     "WHERE canonical_requirement_id = %s",
                     (cr_id,),
                 )
@@ -602,7 +623,7 @@ async def seed_reports(database_url: str) -> dict[str, int]:
                         )
                     await cur.execute(
                         """
-                        INSERT INTO verity_compliance.requirement_evidence_field
+                        INSERT INTO compliance.requirement_evidence_field
                             (canonical_requirement_id, mart_field_id,
                              role, aggregation, sort_seq, notes)
                         VALUES (%s, %s, %s, %s, %s, %s)
@@ -622,7 +643,7 @@ async def seed_reports(database_url: str) -> dict[str, int]:
             for rep in data.get("reports", []):
                 await cur.execute(
                     """
-                    INSERT INTO verity_compliance.report_definition
+                    INSERT INTO compliance.report_definition
                         (code, name, description, report_kind, docx_template,
                          output_formats, scope_params, sort_seq, is_active)
                     VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s, true)
@@ -652,7 +673,7 @@ async def seed_reports(database_url: str) -> dict[str, int]:
                 counts["report_definitions"] += 1
 
                 await cur.execute(
-                    "DELETE FROM verity_compliance.report_requirement "
+                    "DELETE FROM compliance.report_requirement "
                     "WHERE report_id = %s",
                     (report_id,),
                 )
@@ -665,7 +686,7 @@ async def seed_reports(database_url: str) -> dict[str, int]:
                         )
                     await cur.execute(
                         """
-                        INSERT INTO verity_compliance.report_requirement
+                        INSERT INTO compliance.report_requirement
                             (report_id, canonical_requirement_id, section, sort_seq, notes)
                         VALUES (%s, %s, %s, %s, %s)
                         """,
@@ -697,9 +718,9 @@ async def seed_reports(database_url: str) -> dict[str, int]:
 
 # Tables to embed: (table_qualname, [text_columns_in_priority_order])
 _EMBEDDABLE_TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("verity_compliance.regulatory_provision",  ("title", "text")),
-    ("verity_compliance.canonical_requirement", ("title", "description")),
-    ("verity_compliance.feature",               ("name",  "description")),
+    ("compliance.regulatory_provision",  ("title", "text")),
+    ("compliance.canonical_requirement", ("title", "description")),
+    ("compliance.feature",               ("name",  "description")),
 )
 
 
@@ -745,7 +766,7 @@ async def reembed(database_url: str, force: bool = False) -> dict[str, int]:
             await cur.execute(
                 """
                 SELECT id, model_name, dim
-                FROM verity_compliance.embedding_config
+                FROM compliance.embedding_config
                 WHERE is_current = true
                 """
             )
@@ -825,9 +846,9 @@ async def similarity_search(
     from fastembed import TextEmbedding  # type: ignore
 
     table_qualnames = {
-        "canonical_requirement": "verity_compliance.canonical_requirement",
-        "regulatory_provision":  "verity_compliance.regulatory_provision",
-        "feature":               "verity_compliance.feature",
+        "canonical_requirement": "compliance.canonical_requirement",
+        "regulatory_provision":  "compliance.regulatory_provision",
+        "feature":               "compliance.feature",
     }
     if table not in table_qualnames:
         raise ValueError(
@@ -839,7 +860,7 @@ async def similarity_search(
     ) as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT model_name FROM verity_compliance.embedding_config "
+                "SELECT model_name FROM compliance.embedding_config "
                 "WHERE is_current = true"
             )
             r = await cur.fetchone()
@@ -856,7 +877,7 @@ async def similarity_search(
                     SELECT cr.code, cr.title, t.code AS theme_code,
                            1 - (cr.embedding <=> %s::vector) AS cosine_similarity
                     FROM   {table_qualnames[table]} cr
-                    JOIN   verity_compliance.canonical_requirement_theme t
+                    JOIN   compliance.canonical_requirement_theme t
                            ON t.id = cr.theme_id
                     WHERE  cr.embedding IS NOT NULL
                     ORDER BY cr.embedding <=> %s::vector
@@ -867,7 +888,7 @@ async def similarity_search(
                     SELECT p.citation, p.title, f.code AS framework_code,
                            1 - (p.embedding <=> %s::vector) AS cosine_similarity
                     FROM   {table_qualnames[table]} p
-                    JOIN   verity_compliance.regulatory_framework f
+                    JOIN   compliance.regulatory_framework f
                            ON f.id = p.framework_id
                     WHERE  p.embedding IS NOT NULL
                     ORDER BY p.embedding <=> %s::vector
@@ -878,8 +899,8 @@ async def similarity_search(
                     SELECT feat.code, feat.name, p.code AS plane_code,
                            1 - (feat.embedding <=> %s::vector) AS cosine_similarity
                     FROM   {table_qualnames[table]} feat
-                    JOIN   verity_compliance.feature_capability c ON c.id = feat.capability_id
-                    JOIN   verity_compliance.feature_plane     p ON p.id = c.plane_id
+                    JOIN   compliance.feature_capability c ON c.id = feat.capability_id
+                    JOIN   compliance.feature_plane     p ON p.id = c.plane_id
                     WHERE  feat.embedding IS NOT NULL
                     ORDER BY feat.embedding <=> %s::vector
                     LIMIT  %s
@@ -920,7 +941,7 @@ async def show(database_url: str) -> None:
             await cur.execute(
                 """
                 SELECT model_name, model_version, dim, runtime, is_current
-                FROM verity_compliance.embedding_config
+                FROM compliance.embedding_config
                 ORDER BY is_current DESC, created_at DESC
                 """
             )
@@ -936,7 +957,7 @@ async def show(database_url: str) -> None:
                 """
                 SELECT code, name, jurisdiction, version, effective_date,
                        valid_from, valid_to
-                FROM verity_compliance.regulatory_framework
+                FROM compliance.regulatory_framework
                 ORDER BY sort_seq, code
                 """
             )
@@ -954,7 +975,7 @@ async def show(database_url: str) -> None:
             await cur.execute(
                 """
                 SELECT code, name, description
-                FROM verity_compliance.canonical_requirement_theme
+                FROM compliance.canonical_requirement_theme
                 ORDER BY sort_seq, code
                 """
             )
@@ -973,9 +994,9 @@ async def show(database_url: str) -> None:
                 SELECT p.code, p.name, p.sort_seq,
                        c.code, c.name, c.sort_seq,
                        f.code, f.name, f.status, f.sort_seq
-                FROM verity_compliance.feature_plane p
-                JOIN verity_compliance.feature_capability c ON c.plane_id = p.id
-                JOIN verity_compliance.feature             f ON f.capability_id = c.id
+                FROM compliance.feature_plane p
+                JOIN compliance.feature_capability c ON c.plane_id = p.id
+                JOIN compliance.feature             f ON f.capability_id = c.id
                 ORDER BY p.sort_seq, c.sort_seq, f.sort_seq
                 """
             )
@@ -1015,9 +1036,9 @@ async def show(database_url: str) -> None:
                 """
                 SELECT cr.code, cr.title, t.code AS theme_code,
                        cov.coverage_level, cov.customer_actions
-                FROM verity_compliance.canonical_requirement cr
-                JOIN verity_compliance.canonical_requirement_theme t ON t.id = cr.theme_id
-                LEFT JOIN verity_compliance.requirement_coverage cov
+                FROM compliance.canonical_requirement cr
+                JOIN compliance.canonical_requirement_theme t ON t.id = cr.theme_id
+                LEFT JOIN compliance.requirement_coverage cov
                        ON cov.canonical_requirement_id = cr.id
                 ORDER BY t.sort_seq, cr.sort_seq, cr.code
                 """
@@ -1059,9 +1080,9 @@ async def show(database_url: str) -> None:
                 """
                 SELECT f.code, f.name, p.citation, p.title,
                        count(prm.id) AS link_count
-                FROM verity_compliance.regulatory_framework f
-                LEFT JOIN verity_compliance.regulatory_provision p ON p.framework_id = f.id
-                LEFT JOIN verity_compliance.provision_requirement_map prm
+                FROM compliance.regulatory_framework f
+                LEFT JOIN compliance.regulatory_provision p ON p.framework_id = f.id
+                LEFT JOIN compliance.provision_requirement_map prm
                        ON prm.provision_id = p.id
                 GROUP BY f.code, f.name, p.id, p.citation, p.title, f.sort_seq, p.sort_seq
                 ORDER BY f.sort_seq, p.sort_seq NULLS FIRST
