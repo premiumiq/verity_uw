@@ -1388,7 +1388,7 @@ CREATE TABLE runtime.execution_run_error (
 CREATE TABLE runtime.agent_decision_log (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 
-    entity_type             entity_type NOT NULL CHECK (entity_type IN ('agent', 'task')),
+    entity_type             entity_type NOT NULL CHECK (entity_type IN ('agent', 'task', 'tool')),
     entity_version_id       UUID NOT NULL,
 
     prompt_version_ids      UUID[] DEFAULT '{}',
