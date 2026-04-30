@@ -702,6 +702,61 @@ async def make_complete_agent(
     return CompleteAgent(version=av, name=agent.name, agent=agent)
 
 
+# ── testing scaffolding (test_suite + test_case) ──────────────────────────
+
+async def make_test_suite(
+    db: Database,
+    *,
+    entity_type: str,
+    entity_id: UUID,
+    name: str | None = None,
+    suite_type: str = "regression",
+) -> UUID:
+    """Insert a test_suite row anchored to an entity (agent or task).
+    Returns its id."""
+    row = await db.execute_returning(
+        "insert_test_suite",
+        {
+            "name": name or _unique("suite"),
+            "description": "Test suite created by builder.",
+            "entity_type": entity_type,
+            "entity_id": str(entity_id),
+            "suite_type": suite_type,
+            "created_by": "tests",
+        },
+    )
+    assert row is not None
+    return row["id"]
+
+
+async def make_test_case(
+    db: Database,
+    *,
+    suite_id: UUID,
+    name: str | None = None,
+    input_data: dict[str, Any] | None = None,
+    expected_output: dict[str, Any] | None = None,
+    metric_type: str = "exact_match",
+) -> UUID:
+    """Insert a single test_case row. Returns its id."""
+    row = await db.execute_returning(
+        "insert_test_case",
+        {
+            "suite_id": str(suite_id),
+            "name": name or _unique("case"),
+            "description": "Test case created by builder.",
+            "input_data": json.dumps(input_data or {}),
+            "expected_output": json.dumps(expected_output or {"result": "ok"}),
+            "metric_type": metric_type,
+            "metric_config": json.dumps({}),
+            "is_adversarial": False,
+            "tags": [],
+        },
+    )
+    assert row is not None
+    return row["id"]
+
+
 # ── lifecycle promotion ────────────────────────────────────────────────────
 
 async def promote(
