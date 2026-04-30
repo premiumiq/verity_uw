@@ -30,7 +30,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import UUID
 
 from verity.db.connection import Database
@@ -476,6 +476,138 @@ async def make_tool(
         is_write_operation=is_write_operation,
         created_at=row.get("created_at"),
     )
+
+
+# ── wiring (prompt assignment, tool authorization, champion pointer) ──────
+
+async def assign_prompt(
+    db: Database,
+    *,
+    entity_version: AgentVersion | TaskVersion,
+    prompt_version: PromptVersion,
+    api_role: str = "system",
+    governance_tier: str = "behavioural",
+    execution_order: int = 1,
+    is_required: bool = True,
+) -> UUID:
+    """Wire a prompt_version to an agent_version or task_version.
+
+    Returns the entity_prompt_assignment row id.
+    """
+    if isinstance(entity_version, AgentVersion):
+        entity_type = "agent"
+    elif isinstance(entity_version, TaskVersion):
+        entity_type = "task"
+    else:
+        raise TypeError(
+            f"assign_prompt() expects AgentVersion or TaskVersion, got "
+            f"{type(entity_version).__name__}"
+        )
+    row = await db.execute_returning(
+        "insert_entity_prompt_assignment",
+        {
+            "entity_type": entity_type,
+            "entity_version_id": str(entity_version.id),
+            "prompt_version_id": str(prompt_version.id),
+            "api_role": api_role,
+            "governance_tier": governance_tier,
+            "execution_order": execution_order,
+            "is_required": is_required,
+            "condition_logic": None,
+        },
+    )
+    assert row is not None
+    return row["id"]
+
+
+async def authorize_tool(
+    db: Database,
+    *,
+    agent_version: AgentVersion,
+    tool: Tool,
+    notes: str | None = None,
+) -> UUID:
+    """Authorize an agent_version to call a tool. Returns the
+    agent_version_tool row id."""
+    row = await db.execute_returning(
+        "insert_agent_version_tool",
+        {
+            "agent_version_id": str(agent_version.id),
+            "tool_id": str(tool.id),
+            "authorized": True,
+            "notes": notes,
+        },
+    )
+    assert row is not None
+    return row["id"]
+
+
+async def set_champion(db: Database, agent_version: AgentVersion) -> None:
+    """Promote an agent_version to champion AND update the agent's
+    current_champion_version_id pointer.
+
+    Production lifecycle would route through governance.lifecycle.promote()
+    which handles approvals + audit; for tests we want the resulting state
+    without the gate ceremony. Use this builder for engine tests that
+    need a champion to resolve via ``Registry.get_agent_config``.
+    """
+    await promote(db, agent_version, to_state="champion")
+    await db.execute(
+        "set_agent_champion",
+        {
+            "agent_id": str(agent_version.agent_id),
+            "version_id": str(agent_version.id),
+        },
+    )
+
+
+class CompleteAgent(NamedTuple):
+    """The bundle ``make_complete_agent`` returns.
+
+    Tests use ``.name`` for ``run_agent(agent_name=…)`` and ``.version``
+    for any direct version-id work. Returning a NamedTuple instead of
+    monkey-patching the Pydantic AgentVersion keeps Pydantic's strict
+    validation intact.
+    """
+    version: AgentVersion
+    name: str
+    agent: Agent
+
+
+async def make_complete_agent(
+    db: Database,
+    *,
+    name: str | None = None,
+    system_prompt: str = "You are a helpful test assistant. Be concise.",
+    tools: list[Tool] | None = None,
+    promote_to_champion: bool = True,
+) -> CompleteAgent:
+    """One-call setup for a fully-wired agent ready for ``run_agent``.
+
+    Creates: agent, agent_version (mock_mode_enabled=False so the engine
+    actually calls the LLM gateway), prompt + prompt_version, prompt
+    assignment. Optionally authorizes a list of tools and promotes the
+    version to champion (default True — most engine tests want the
+    agent resolvable via ``get_agent_champion``).
+
+    Returns a ``CompleteAgent`` namedtuple with the version, the agent
+    name (for ``run_agent`` invocation), and the agent header.
+    """
+    agent = await make_agent(db, name=name)
+    av = await make_agent_version(db, agent_id=agent.id, mock_mode_enabled=False)
+
+    prompt = await make_prompt(db, name=f"system_{agent.name}")
+    pv = await make_prompt_version(db, prompt_id=prompt.id, content=system_prompt)
+    await assign_prompt(db, entity_version=av, prompt_version=pv)
+
+    if tools:
+        for tool in tools:
+            await authorize_tool(db, agent_version=av, tool=tool)
+
+    if promote_to_champion:
+        await set_champion(db, av)
+
+    return CompleteAgent(version=av, name=agent.name, agent=agent)
 
 
 # ── lifecycle promotion ────────────────────────────────────────────────────
