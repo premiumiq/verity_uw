@@ -51,32 +51,6 @@ async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
             # table, view, type, and index within each.
             for schema in ("governance", "runtime", "compliance", "analytics"):
                 await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
-            # Legacy: old dev DBs may still hold the original public-schema
-            # layout (pre-PR-3) or the verity_* prefixed schemas (pre-PR-1).
-            # Sweep them too so a single --drop-existing run gets to clean
-            # state regardless of where the DB started. Safe to remove once
-            # no environment is on the older layouts.
-            await conn.execute("""
-                DO $$ DECLARE
-                    r RECORD;
-                BEGIN
-                    FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
-                        EXECUTE 'DROP TABLE IF EXISTS public.' || quote_ident(r.tablename) || ' CASCADE';
-                    END LOOP;
-                END $$;
-            """)
-            await conn.execute("""
-                DO $$ DECLARE
-                    r RECORD;
-                BEGIN
-                    FOR r IN (SELECT typname FROM pg_type WHERE typtype = 'e'
-                              AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')) LOOP
-                        EXECUTE 'DROP TYPE IF EXISTS public.' || quote_ident(r.typname) || ' CASCADE';
-                    END LOOP;
-                END $$;
-            """)
-            await conn.execute("DROP SCHEMA IF EXISTS verity_compliance CASCADE")
-            await conn.execute("DROP SCHEMA IF EXISTS verity_analytics CASCADE")
             print("Existing schema dropped.")
 
         print("Applying Verity schema...")
