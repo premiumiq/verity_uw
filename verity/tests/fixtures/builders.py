@@ -614,6 +614,58 @@ class CompleteAgent(NamedTuple):
     agent: Agent
 
 
+class CompleteTask(NamedTuple):
+    """The bundle ``make_complete_task`` returns."""
+    version: TaskVersion
+    name: str
+    task: Task
+
+
+async def make_complete_task(
+    db: Database,
+    *,
+    name: str | None = None,
+    capability_type: str = "extraction",
+    system_prompt: str = "Extract the requested fields from the input.",
+    output_schema: dict[str, Any] | None = None,
+    promote_to_champion: bool = True,
+) -> CompleteTask:
+    """Task counterpart of ``make_complete_agent``.
+
+    Wires task + version + prompt + assignment, then promotes to
+    champion via fast-track. Tasks have a structured output_schema —
+    the engine forces structured output at the LLM call site.
+    """
+    output_schema = output_schema or {
+        "type": "object",
+        "properties": {"result": {"type": "string"}},
+    }
+    task = await make_task(
+        db, name=name, capability_type=capability_type,
+        output_schema=output_schema,
+    )
+    tv = await make_task_version(
+        db, task_id=task.id, output_schema=output_schema,
+        mock_mode_enabled=False,
+    )
+    prompt = await make_prompt(db, name=f"system_{task.name}")
+    pv = await make_prompt_version(db, prompt_id=prompt.id, content=system_prompt)
+    await assign_prompt(db, entity_version=tv, prompt_version=pv)
+
+    if promote_to_champion:
+        await promote(db, tv, to_state="candidate")
+        await promote(db, tv, to_state="champion")
+        await db.execute(
+            "set_task_champion",
+            {
+                "task_id": str(task.id),
+                "version_id": str(tv.id),
+            },
+        )
+
+    return CompleteTask(version=tv, name=task.name, task=task)
+
+
 async def make_complete_agent(
     db: Database,
     *,
