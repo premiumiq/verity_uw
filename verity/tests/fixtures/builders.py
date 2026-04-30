@@ -542,6 +542,46 @@ async def authorize_tool(
     return row["id"]
 
 
+async def set_gate_flags(
+    db: Database,
+    agent_version: AgentVersion | TaskVersion,
+    *,
+    staging_tests_passed: bool | None = None,
+    ground_truth_passed: bool | None = None,
+    fairness_passed: bool | None = None,
+    shadow_period_complete: bool | None = None,
+    challenger_period_complete: bool | None = None,
+) -> None:
+    """Update one or more gate flags on a version. Used in lifecycle
+    tests to simulate the validation outcomes that approvers require.
+
+    Production code sets these via the validation runner / test runner;
+    tests set them directly to focus on the promotion-gate semantics
+    rather than rerunning validation suites.
+    """
+    table = "agent_version" if isinstance(agent_version, AgentVersion) else "task_version"
+    fields = {
+        "staging_tests_passed": staging_tests_passed,
+        "ground_truth_passed": ground_truth_passed,
+        "fairness_passed": fairness_passed,
+        "shadow_period_complete": shadow_period_complete,
+        "challenger_period_complete": challenger_period_complete,
+    }
+    set_fragments = []
+    params: dict[str, Any] = {"id": str(agent_version.id)}
+    for col, value in fields.items():
+        if value is not None:
+            set_fragments.append(f"{col} = %({col})s")
+            params[col] = value
+    if not set_fragments:
+        return
+    sql = (
+        f"UPDATE {table} SET " + ", ".join(set_fragments)
+        + ", updated_at = NOW() WHERE id = %(id)s"
+    )
+    await db.execute_raw(sql, params)
+
+
 async def set_champion(db: Database, agent_version: AgentVersion) -> None:
     """Promote an agent_version to champion AND update the agent's
     current_champion_version_id pointer.
