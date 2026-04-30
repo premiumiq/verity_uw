@@ -233,6 +233,16 @@ async def db(request, template_database):
     await _execute_admin(
         f"CREATE DATABASE {test_db_name} TEMPLATE {template_database}"
     )
+    # Postgres' CREATE DATABASE … TEMPLATE copies tables, types, indexes —
+    # but NOT per-database settings set via ALTER DATABASE. Re-apply
+    # search_path on the clone so unqualified DML resolves the same way
+    # production code expects (where apply_schema set it once on
+    # verity_db). Without this the unqualified `FROM agent` in named
+    # queries can't find governance.agent.
+    await _execute_admin(
+        f"ALTER DATABASE {test_db_name} "
+        "SET search_path TO governance, runtime, compliance, analytics, public"
+    )
 
     test_db = Database(database_url=_db_url(test_db_name))
     await test_db.connect()

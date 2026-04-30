@@ -47,7 +47,15 @@ async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
 
         if drop_existing:
             print("Dropping existing schema...")
-            # Drop all tables in reverse dependency order
+            # Drop the four Verity-owned schemas. CASCADE removes every
+            # table, view, type, and index within each.
+            for schema in ("governance", "runtime", "compliance", "analytics"):
+                await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
+            # Legacy: old dev DBs may still hold the original public-schema
+            # layout (pre-PR-3) or the verity_* prefixed schemas (pre-PR-1).
+            # Sweep them too so a single --drop-existing run gets to clean
+            # state regardless of where the DB started. Safe to remove once
+            # no environment is on the older layouts.
             await conn.execute("""
                 DO $$ DECLARE
                     r RECORD;
@@ -57,7 +65,6 @@ async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
                     END LOOP;
                 END $$;
             """)
-            # Drop custom types
             await conn.execute("""
                 DO $$ DECLARE
                     r RECORD;
@@ -68,13 +75,6 @@ async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
                     END LOOP;
                 END $$;
             """)
-            # Drop compliance + analytics schemas (everything inside is dropped via CASCADE).
-            await conn.execute("DROP SCHEMA IF EXISTS compliance CASCADE")
-            await conn.execute("DROP SCHEMA IF EXISTS analytics CASCADE")
-            # Legacy names from before the verity_* prefix was dropped. Kept here
-            # so a developer with an old dev DB can run `--drop-existing` and
-            # reach a clean state. Safe to remove once no environment carries
-            # the legacy schemas.
             await conn.execute("DROP SCHEMA IF EXISTS verity_compliance CASCADE")
             await conn.execute("DROP SCHEMA IF EXISTS verity_analytics CASCADE")
             print("Existing schema dropped.")
@@ -131,26 +131,17 @@ async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
                 print(f"Statement: {stmt[:200]}...")
                 raise
 
-        # Verify key tables exist
-        result = await conn.execute("""
-            SELECT tablename FROM pg_tables
-            WHERE schemaname = 'public'
-            ORDER BY tablename
-        """)
-        tables = [row[0] for row in await result.fetchall()]
-        print(f"Schema applied. Tables: {', '.join(tables)}")
-
-        # Verify compliance schema tables
-        result = await conn.execute("""
-            SELECT tablename FROM pg_tables
-            WHERE schemaname = 'compliance'
-            ORDER BY tablename
-        """)
-        compliance_tables = [row[0] for row in await result.fetchall()]
-        print(
-            f"compliance tables ({len(compliance_tables)}): "
-            f"{', '.join(compliance_tables)}"
-        )
+        # Verify key tables exist in each schema. The exact counts are
+        # informational — the canonical correctness check is the test
+        # suite (test_schema_applies, test_no_cross_schema_collisions).
+        for schema in ("governance", "runtime", "compliance", "analytics"):
+            result = await conn.execute(
+                "SELECT tablename FROM pg_tables WHERE schemaname = %s "
+                "ORDER BY tablename",
+                (schema,),
+            )
+            tables = [row[0] for row in await result.fetchall()]
+            print(f"{schema} tables ({len(tables)}): {', '.join(tables) or '(none)'}")
 
         # Verify pgvector extension
         result = await conn.execute(
@@ -183,6 +174,25 @@ async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
             except Exception:
                 pass  # Table may not exist yet on first run
         print("Governance applications seeded: ai_ops, model_validation, compliance_audit")
+
+        # Persist the database-level search_path so every future connection
+        # resolves unqualified DML the same way the DDL just did. The
+        # session-level SET search_path inside schema.sql only affects this
+        # one connection; the ALTER DATABASE here makes it durable.
+        #
+        # The current database name comes from psycopg's connection info.
+        db_name = conn.info.dbname
+        # Identifier comes from a system catalog field, not user input,
+        # so direct interpolation is safe (parameter binding can't be
+        # used for object names anyway). Quote-ident defensively.
+        await conn.execute(
+            f'ALTER DATABASE "{db_name}" '
+            "SET search_path TO governance, runtime, compliance, analytics, public"
+        )
+        print(
+            f"Database default search_path set on {db_name}: "
+            "governance, runtime, compliance, analytics, public"
+        )
 
 
 def _split_sql_statements(sql: str) -> list[str]:

@@ -37,8 +37,8 @@ WITH agent_v AS (
         av.created_at                       AS event_ts,
         av.created_at                       AS created_at,
         av.created_at                       AS ingest_ts
-    FROM agent_version av
-    JOIN agent a ON a.id = av.agent_id
+    FROM governance.agent_version av
+    JOIN governance.agent a ON a.id = av.agent_id
 ),
 task_v AS (
     SELECT
@@ -58,8 +58,8 @@ task_v AS (
         tv.created_at                       AS event_ts,
         tv.created_at                       AS created_at,
         tv.created_at                       AS ingest_ts
-    FROM task_version tv
-    JOIN task t ON t.id = tv.task_id
+    FROM governance.task_version tv
+    JOIN governance.task t ON t.id = tv.task_id
 ),
 prompt_v AS (
     SELECT
@@ -79,8 +79,8 @@ prompt_v AS (
         pv.created_at                       AS event_ts,
         pv.created_at                       AS created_at,
         pv.created_at                       AS ingest_ts
-    FROM prompt_version pv
-    JOIN prompt p ON p.id = pv.prompt_id
+    FROM governance.prompt_version pv
+    JOIN governance.prompt p ON p.id = pv.prompt_id
 )
 SELECT * FROM agent_v
 UNION ALL
@@ -103,8 +103,8 @@ SELECT
     ae.created_at               AS event_ts,
     ae.created_at               AS created_at,
     ae.created_at               AS ingest_ts
-FROM application_entity ae
-JOIN application app ON app.id = ae.application_id;
+FROM governance.application_entity ae
+JOIN governance.application app ON app.id = ae.application_id;
 
 
 -- ── v_lifecycle_event ───────────────────────────────────────
@@ -123,7 +123,7 @@ SELECT
     ar.approved_at              AS event_ts,
     ar.approved_at              AS approved_at,
     ar.approved_at              AS ingest_ts
-FROM approval_record ar;
+FROM governance.approval_record ar;
 
 
 -- ── v_decision ───────────────────────────────────────────────
@@ -155,7 +155,7 @@ SELECT
     adl.hitl_required           AS hitl_required,
     adl.hitl_completed          AS hitl_completed,
     adl.low_confidence_flag     AS low_confidence_flag
-FROM agent_decision_log adl;
+FROM runtime.agent_decision_log adl;
 
 
 -- ── v_validation_result ──────────────────────────────────────
@@ -179,7 +179,7 @@ SELECT
     tel.failure_reason          AS failure_reason,
     tel.channel::text           AS channel,
     tel.mock_mode               AS mock_mode
-FROM test_execution_log tel;
+FROM governance.test_execution_log tel;
 
 
 -- ── v_override ───────────────────────────────────────────────
@@ -203,4 +203,4 @@ SELECT
     ho.created_at               AS event_ts,
     ho.created_at               AS created_at,
     ho.created_at               AS ingest_ts
-FROM hitl_override ho;
+FROM runtime.hitl_override ho;

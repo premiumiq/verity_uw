@@ -9,9 +9,30 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "vector";  -- pgvector for description embeddings
 
+
+-- ── Schemas ─────────────────────────────────────────────────────────────
+-- governance: registry, lifecycle, validation, administration (43 tables)
+-- runtime:    execution runs, decision logs, HITL overrides   (8 tables)
+-- compliance + analytics are declared here too (idempotent) so the two
+-- analytics.* views in this file — execution_run_current and
+-- v_model_invocation_cost — don't fail because schema_compliance.sql
+-- hasn't run yet. schema_compliance.sql redeclares them; IF NOT EXISTS
+-- makes both declarations safe.
+CREATE SCHEMA IF NOT EXISTS governance;
+CREATE SCHEMA IF NOT EXISTS runtime;
+CREATE SCHEMA IF NOT EXISTS compliance;
+CREATE SCHEMA IF NOT EXISTS analytics;
+
+-- Session search_path so column-type references (which use unqualified
+-- names like `materiality_tier`) and the seed INSERT in migrate.py both
+-- resolve correctly while this DDL is being applied. The persistent
+-- database-wide default is set by migrate.py at the end of apply_schema
+-- via ALTER DATABASE.
+SET search_path TO governance, runtime, compliance, analytics, public;
+
 -- ── ENUMERATIONS ─────────────────────────────────────────────
 
-CREATE TYPE lifecycle_state AS ENUM (
+CREATE TYPE governance.lifecycle_state AS ENUM (
     'draft',        -- being developed
     'candidate',    -- development complete; ready for staging tests
     'staging',      -- staging tests running
@@ -21,17 +42,17 @@ CREATE TYPE lifecycle_state AS ENUM (
     'deprecated'    -- historical record only; not executable
 );
 
-CREATE TYPE deployment_channel AS ENUM (
+CREATE TYPE governance.deployment_channel AS ENUM (
     'development', 'staging', 'shadow', 'evaluation', 'production'
 );
 
-CREATE TYPE materiality_tier AS ENUM (
+CREATE TYPE governance.materiality_tier AS ENUM (
     'high',    -- influences underwriting decisions directly
     'medium',  -- supports decisions; no direct influence
     'low'      -- operational/process; no decision influence
 );
 
-CREATE TYPE capability_type AS ENUM (
+CREATE TYPE governance.capability_type AS ENUM (
     'classification',   -- doc type, risk category, appetite
     'extraction',       -- field extraction from documents
     'generation',       -- narrative, memo, letter generation
@@ -40,31 +61,31 @@ CREATE TYPE capability_type AS ENUM (
     'validation'        -- checking completeness or correctness
 );
 
-CREATE TYPE trust_level AS ENUM (
+CREATE TYPE governance.trust_level AS ENUM (
     'trusted', 'conditional', 'sandboxed', 'blocked'
 );
 
-CREATE TYPE data_classification AS ENUM (
+CREATE TYPE governance.data_classification AS ENUM (
     'tier1_public', 'tier2_internal', 'tier3_confidential', 'tier4_pii_restricted'
 );
 
-CREATE TYPE entity_type AS ENUM (
+CREATE TYPE governance.entity_type AS ENUM (
     'agent', 'task', 'prompt', 'tool'
 );
 
-CREATE TYPE governance_tier AS ENUM (
+CREATE TYPE governance.governance_tier AS ENUM (
     'behavioural',  -- defines reasoning/output behaviour; full lifecycle required
     'contextual',   -- structures runtime input; lightweight versioning
     'formatting'    -- technical output format; minimal governance
 );
 
-CREATE TYPE api_role AS ENUM (
+CREATE TYPE governance.api_role AS ENUM (
     'system',             -- system prompt passed as system= parameter
     'user',               -- user message template
     'assistant_prefill'   -- pre-filled assistant turn (rare)
 );
 
-CREATE TYPE metric_type AS ENUM (
+CREATE TYPE governance.metric_type AS ENUM (
     'exact_match',          -- output must exactly equal expected
     'schema_valid',         -- output must conform to schema
     'field_accuracy',       -- per-field accuracy for extraction tasks
@@ -74,7 +95,7 @@ CREATE TYPE metric_type AS ENUM (
 );
 
 -- Ground truth dataset lifecycle status
-CREATE TYPE gt_dataset_status AS ENUM (
+CREATE TYPE governance.gt_dataset_status AS ENUM (
     'collecting',    -- records being gathered, not yet ready for labeling
     'labeling',      -- annotations in progress
     'adjudicating',  -- disagreements being resolved
@@ -83,27 +104,27 @@ CREATE TYPE gt_dataset_status AS ENUM (
 );
 
 -- Ground truth quality classification
-CREATE TYPE gt_quality_tier AS ENUM (
+CREATE TYPE governance.gt_quality_tier AS ENUM (
     'silver',   -- single annotator, no independent review
     'gold'      -- multi-annotator with IAA check, adjudication where needed
 );
 
 -- Ground truth record source type
-CREATE TYPE gt_source_type AS ENUM (
+CREATE TYPE governance.gt_source_type AS ENUM (
     'document',     -- a real insurance document (ACORD form, loss run, etc.)
     'submission',   -- a full submission context (for agent testing)
     'synthetic'     -- generated test case, no real source document
 );
 
 -- Ground truth annotator type
-CREATE TYPE gt_annotator_type AS ENUM (
+CREATE TYPE governance.gt_annotator_type AS ENUM (
     'human_sme',      -- domain expert (underwriter, compliance analyst)
     'llm_judge',      -- LLM evaluating against a rubric
     'adjudicator'     -- senior SME resolving a disagreement
 );
 
 -- Why an execution happened (independent of channel and mock_mode)
-CREATE TYPE run_purpose AS ENUM (
+CREATE TYPE governance.run_purpose AS ENUM (
     'production',       -- normal business execution
     'test',             -- test suite run
     'validation',       -- ground truth validation
@@ -114,7 +135,7 @@ CREATE TYPE run_purpose AS ENUM (
 -- ── INFERENCE CONFIGURATION ──────────────────────────────────
 -- Named, reusable LLM API parameter sets.
 
-CREATE TABLE inference_config (
+CREATE TABLE governance.inference_config (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name            VARCHAR(100) UNIQUE NOT NULL,
     display_name    VARCHAR(200) NOT NULL,
@@ -142,7 +163,7 @@ CREATE TABLE inference_config (
 -- Goal-directed Claude invocations that autonomously decide tool
 -- call sequences. Use for complex synthesis and multi-step reasoning.
 
-CREATE TABLE agent (
+CREATE TABLE governance.agent (
     id                          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name                        VARCHAR(100) UNIQUE NOT NULL,
     display_name                VARCHAR(200) NOT NULL,
@@ -174,13 +195,13 @@ CREATE TABLE agent (
     updated_at                  TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_agent_name ON agent(name);
-CREATE INDEX idx_agent_materiality ON agent(materiality_tier);
+CREATE INDEX idx_agent_name ON governance.agent(name);
+CREATE INDEX idx_agent_materiality ON governance.agent(materiality_tier);
 
 
-CREATE TABLE agent_version (
+CREATE TABLE governance.agent_version (
     id                          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    agent_id                    UUID NOT NULL REFERENCES agent(id),
+    agent_id                    UUID NOT NULL REFERENCES governance.agent(id),
 
     -- Version numbering
     major_version               INTEGER NOT NULL DEFAULT 1,
@@ -196,7 +217,7 @@ CREATE TABLE agent_version (
     channel                     deployment_channel NOT NULL DEFAULT 'development',
 
     -- Configuration — sourced from Verity at runtime, never hardcoded
-    inference_config_id         UUID NOT NULL REFERENCES inference_config(id),
+    inference_config_id         UUID NOT NULL REFERENCES governance.inference_config(id),
     -- Declared caller-facing contract. Required for agents that participate
     -- in multi-step workflows; existing agents get '{}' as a placeholder so
     -- seeding keeps working during migration. Admit-time validator rejects
@@ -223,7 +244,7 @@ CREATE TABLE agent_version (
     change_type                 VARCHAR(20),
 
     -- Provenance: set when this version was created via the clone workflow.
-    cloned_from_version_id      UUID REFERENCES agent_version(id),
+    cloned_from_version_id      UUID REFERENCES governance.agent_version(id),
 
     -- Timestamps
     valid_from                  TIMESTAMP,
@@ -234,14 +255,14 @@ CREATE TABLE agent_version (
     CONSTRAINT uq_agent_version UNIQUE (agent_id, major_version, minor_version, patch_version)
 );
 
-CREATE INDEX idx_av_agent ON agent_version(agent_id);
-CREATE INDEX idx_av_state ON agent_version(lifecycle_state);
+CREATE INDEX idx_av_agent ON governance.agent_version(agent_id);
+CREATE INDEX idx_av_state ON governance.agent_version(lifecycle_state);
 
 
 -- ── TASKS ────────────────────────────────────────────────────
 -- Bounded, single-purpose Claude invocations with defined I/O.
 
-CREATE TABLE task (
+CREATE TABLE governance.task (
     id                          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name                        VARCHAR(100) UNIQUE NOT NULL,
     display_name                VARCHAR(200) NOT NULL,
@@ -277,13 +298,13 @@ CREATE TABLE task (
     updated_at                  TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_task_name ON task(name);
-CREATE INDEX idx_task_capability ON task(capability_type);
+CREATE INDEX idx_task_name ON governance.task(name);
+CREATE INDEX idx_task_capability ON governance.task(capability_type);
 
 
-CREATE TABLE task_version (
+CREATE TABLE governance.task_version (
     id                          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    task_id                     UUID NOT NULL REFERENCES task(id),
+    task_id                     UUID NOT NULL REFERENCES governance.task(id),
 
     major_version               INTEGER NOT NULL DEFAULT 1,
     minor_version               INTEGER NOT NULL DEFAULT 0,
@@ -296,7 +317,7 @@ CREATE TABLE task_version (
     lifecycle_state             lifecycle_state NOT NULL DEFAULT 'draft',
     channel                     deployment_channel NOT NULL DEFAULT 'development',
 
-    inference_config_id         UUID NOT NULL REFERENCES inference_config(id),
+    inference_config_id         UUID NOT NULL REFERENCES governance.inference_config(id),
     output_schema               JSONB,
     mock_mode_enabled           BOOLEAN DEFAULT FALSE,
     decision_log_detail         VARCHAR(20) DEFAULT 'standard',  -- full, standard, summary, metadata, none
@@ -311,7 +332,7 @@ CREATE TABLE task_version (
     change_summary              TEXT,
     change_type                 VARCHAR(20),
 
-    cloned_from_version_id      UUID REFERENCES task_version(id),
+    cloned_from_version_id      UUID REFERENCES governance.task_version(id),
 
     valid_from                  TIMESTAMP,
     valid_to                    TIMESTAMP,
@@ -321,14 +342,14 @@ CREATE TABLE task_version (
     CONSTRAINT uq_task_version UNIQUE (task_id, major_version, minor_version, patch_version)
 );
 
-CREATE INDEX idx_tv_task ON task_version(task_id);
-CREATE INDEX idx_tv_state ON task_version(lifecycle_state);
+CREATE INDEX idx_tv_task ON governance.task_version(task_id);
+CREATE INDEX idx_tv_state ON governance.task_version(lifecycle_state);
 
 
 -- ── PROMPTS ──────────────────────────────────────────────────
 -- Reusable text artifacts managed with independent versioning.
 
-CREATE TABLE prompt (
+CREATE TABLE governance.prompt (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name            VARCHAR(200) UNIQUE NOT NULL,
     display_name    VARCHAR(300) NOT NULL,
@@ -338,9 +359,9 @@ CREATE TABLE prompt (
     created_at      TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE prompt_version (
+CREATE TABLE governance.prompt_version (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    prompt_id           UUID NOT NULL REFERENCES prompt(id),
+    prompt_id           UUID NOT NULL REFERENCES governance.prompt(id),
 
     -- 3-part versioning — consistent with agent_version and task_version
     major_version       INTEGER NOT NULL DEFAULT 1,
@@ -375,7 +396,7 @@ CREATE TABLE prompt_version (
                         (governance_tier = 'behavioural') STORED,
     staging_tests_passed BOOLEAN,
 
-    cloned_from_version_id UUID REFERENCES prompt_version(id),
+    cloned_from_version_id UUID REFERENCES governance.prompt_version(id),
 
     -- Temporal validity (SCD Type 2) — set by lifecycle management
     valid_from          TIMESTAMP,
@@ -386,21 +407,21 @@ CREATE TABLE prompt_version (
     CONSTRAINT uq_prompt_version UNIQUE (prompt_id, major_version, minor_version, patch_version)
 );
 
-CREATE INDEX idx_pv_prompt ON prompt_version(prompt_id);
-CREATE INDEX idx_pv_state ON prompt_version(lifecycle_state);
-CREATE INDEX idx_pv_tier ON prompt_version(governance_tier);
+CREATE INDEX idx_pv_prompt ON governance.prompt_version(prompt_id);
+CREATE INDEX idx_pv_state ON governance.prompt_version(lifecycle_state);
+CREATE INDEX idx_pv_tier ON governance.prompt_version(governance_tier);
 
 
 -- ── ENTITY-PROMPT ASSIGNMENT ──────────────────────────────────
 -- Many-to-many: which prompt versions are active for a given
 -- agent_version or task_version.
 
-CREATE TABLE entity_prompt_assignment (
+CREATE TABLE governance.entity_prompt_assignment (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     entity_type         entity_type NOT NULL CHECK (entity_type IN ('agent', 'task')),
     entity_version_id   UUID NOT NULL,
 
-    prompt_version_id   UUID NOT NULL REFERENCES prompt_version(id),
+    prompt_version_id   UUID NOT NULL REFERENCES governance.prompt_version(id),
     api_role            api_role NOT NULL,
     governance_tier     governance_tier NOT NULL,
     execution_order     INTEGER NOT NULL DEFAULT 1,
@@ -412,7 +433,7 @@ CREATE TABLE entity_prompt_assignment (
     CONSTRAINT uq_entity_prompt UNIQUE (entity_type, entity_version_id, prompt_version_id, api_role)
 );
 
-CREATE INDEX idx_epa_entity ON entity_prompt_assignment(entity_type, entity_version_id);
+CREATE INDEX idx_epa_entity ON governance.entity_prompt_assignment(entity_type, entity_version_id);
 
 
 -- ── MCP SERVERS ──────────────────────────────────────────────
@@ -423,7 +444,7 @@ CREATE INDEX idx_epa_entity ON entity_prompt_assignment(entity_type, entity_vers
 --
 -- Added in Phase 4a / FC-14 (MCP tool integration).
 
-CREATE TABLE mcp_server (
+CREATE TABLE governance.mcp_server (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name            VARCHAR(100) UNIQUE NOT NULL,
     display_name    VARCHAR(200) NOT NULL,
@@ -455,7 +476,7 @@ CREATE TABLE mcp_server (
     updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_mcp_server_name ON mcp_server(name);
+CREATE INDEX idx_mcp_server_name ON governance.mcp_server(name);
 
 
 -- ── TOOLS ────────────────────────────────────────────────────
@@ -464,7 +485,7 @@ CREATE INDEX idx_mcp_server_name ON mcp_server(name);
 -- (transport='python_inprocess') or forwarded to an MCP server
 -- (transport='mcp_*', mcp_server_name points at mcp_server.name).
 
-CREATE TABLE tool (
+CREATE TABLE governance.tool (
     id                          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name                        VARCHAR(100) UNIQUE NOT NULL,
     display_name                VARCHAR(200) NOT NULL,
@@ -490,7 +511,7 @@ CREATE TABLE tool (
 
     -- Links this tool to an mcp_server row when transport is an mcp_* variant.
     -- NULL for python_inprocess tools.
-    mcp_server_name             VARCHAR(100) REFERENCES mcp_server(name),
+    mcp_server_name             VARCHAR(100) REFERENCES governance.mcp_server(name),
 
     -- The tool's name on the MCP server (may differ from Verity's `name`,
     -- which must be globally unique in the registry).
@@ -519,30 +540,30 @@ CREATE TABLE tool (
     updated_at                  TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_tool_name ON tool(name);
+CREATE INDEX idx_tool_name ON governance.tool(name);
 
 
 -- ── AGENT VERSION ↔ TOOL JUNCTION ────────────────────────────
 
-CREATE TABLE agent_version_tool (
+CREATE TABLE governance.agent_version_tool (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    agent_version_id    UUID NOT NULL REFERENCES agent_version(id),
-    tool_id             UUID NOT NULL REFERENCES tool(id),
+    agent_version_id    UUID NOT NULL REFERENCES governance.agent_version(id),
+    tool_id             UUID NOT NULL REFERENCES governance.tool(id),
     authorized          BOOLEAN NOT NULL DEFAULT TRUE,
     notes               TEXT,
     created_at          TIMESTAMP DEFAULT NOW(),
     CONSTRAINT uq_avt UNIQUE (agent_version_id, tool_id)
 );
 
-CREATE INDEX idx_avt_agent ON agent_version_tool(agent_version_id);
+CREATE INDEX idx_avt_agent ON governance.agent_version_tool(agent_version_id);
 
 
 -- ── TASK VERSION ↔ TOOL JUNCTION ─────────────────────────────
 
-CREATE TABLE task_version_tool (
+CREATE TABLE governance.task_version_tool (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    task_version_id     UUID NOT NULL REFERENCES task_version(id),
-    tool_id             UUID NOT NULL REFERENCES tool(id),
+    task_version_id     UUID NOT NULL REFERENCES governance.task_version(id),
+    tool_id             UUID NOT NULL REFERENCES governance.tool(id),
     authorized          BOOLEAN NOT NULL DEFAULT TRUE,
     notes               TEXT,
     created_at          TIMESTAMP DEFAULT NOW(),
@@ -558,7 +579,7 @@ CREATE TABLE task_version_tool (
 -- verity.runtime.connectors by the consuming app — Verity itself does not
 -- import EDMS or any specific integration.
 
-CREATE TABLE data_connector (
+CREATE TABLE governance.data_connector (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name            VARCHAR(100) NOT NULL UNIQUE,    -- "edms"
     connector_type  VARCHAR(50)  NOT NULL,           -- "edms" (only type in v1)
@@ -578,11 +599,11 @@ CREATE TABLE data_connector (
 -- failure (SourceResolutionError). required=False only means the caller
 -- may omit the ref; if a ref is provided, it must resolve.
 
-CREATE TABLE task_version_source (
+CREATE TABLE governance.task_version_source (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    task_version_id         UUID NOT NULL REFERENCES task_version(id) ON DELETE CASCADE,
+    task_version_id         UUID NOT NULL REFERENCES governance.task_version(id) ON DELETE CASCADE,
     input_field_name        VARCHAR(100) NOT NULL,   -- key in caller's input_data dict
-    connector_id            UUID NOT NULL REFERENCES data_connector(id),
+    connector_id            UUID NOT NULL REFERENCES governance.data_connector(id),
     fetch_method            VARCHAR(100) NOT NULL,   -- e.g. "get_document_text"
     maps_to_template_var    VARCHAR(100) NOT NULL,   -- e.g. "document_text"
     required                BOOLEAN NOT NULL DEFAULT TRUE,
@@ -593,7 +614,7 @@ CREATE TABLE task_version_source (
     CONSTRAINT uq_tvs_var   UNIQUE (task_version_id, maps_to_template_var)
 );
 
-CREATE INDEX idx_tvs_task_version ON task_version_source(task_version_id);
+CREATE INDEX idx_tvs_task_version ON governance.task_version_source(task_version_id);
 
 
 -- ── TASK VERSION DATA TARGETS ────────────────────────────────
@@ -607,11 +628,11 @@ CREATE INDEX idx_tvs_task_version ON task_version_source(task_version_id);
 -- Validation/test runs never write; the intended write is recorded in the
 -- decision log instead.
 
-CREATE TABLE task_version_target (
+CREATE TABLE governance.task_version_target (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    task_version_id         UUID NOT NULL REFERENCES task_version(id) ON DELETE CASCADE,
+    task_version_id         UUID NOT NULL REFERENCES governance.task_version(id) ON DELETE CASCADE,
     output_field_name       VARCHAR(100) NOT NULL,   -- key in Task's output dict
-    connector_id            UUID NOT NULL REFERENCES data_connector(id),
+    connector_id            UUID NOT NULL REFERENCES governance.data_connector(id),
     write_method            VARCHAR(100) NOT NULL,   -- e.g. "create_document"
     target_container        VARCHAR(200),            -- optional collection/folder
     required                BOOLEAN NOT NULL DEFAULT FALSE,
@@ -621,7 +642,7 @@ CREATE TABLE task_version_target (
     CONSTRAINT uq_tvt_out UNIQUE (task_version_id, output_field_name)
 );
 
-CREATE INDEX idx_tvtgt_task_version ON task_version_target(task_version_id);
+CREATE INDEX idx_tvtgt_task_version ON governance.task_version_target(task_version_id);
 
 
 -- ── WIRING: SOURCES AND TARGETS (UNIFIED FOR TASKS AND AGENTS) ──
@@ -643,7 +664,7 @@ CREATE INDEX idx_tvtgt_task_version ON task_version_target(task_version_id);
 -- the data-migration window; they will be dropped once existing rows are
 -- translated into source_binding / write_target + target_payload_field.
 
-CREATE TABLE source_binding (
+CREATE TABLE governance.source_binding (
     id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     owner_kind       VARCHAR(20) NOT NULL
                      CHECK (owner_kind IN ('task_version', 'agent_version')),
@@ -673,10 +694,10 @@ CREATE TABLE source_binding (
     CONSTRAINT uq_source_binding UNIQUE (owner_kind, owner_id, template_var)
 );
 
-CREATE INDEX idx_source_binding_owner ON source_binding(owner_kind, owner_id);
+CREATE INDEX idx_source_binding_owner ON governance.source_binding(owner_kind, owner_id);
 
 
-CREATE TABLE write_target (
+CREATE TABLE governance.write_target (
     id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     owner_kind       VARCHAR(20) NOT NULL
                      CHECK (owner_kind IN ('task_version', 'agent_version')),
@@ -685,7 +706,7 @@ CREATE TABLE write_target (
     -- in the target_writes audit JSONB on the decision log so operators can
     -- tell which declared target fired.
     name             VARCHAR(100) NOT NULL,
-    connector_id     UUID NOT NULL REFERENCES data_connector(id),
+    connector_id     UUID NOT NULL REFERENCES governance.data_connector(id),
     write_method     VARCHAR(100) NOT NULL,
     -- Optional static container hint (collection / folder / path). Dynamic
     -- routing per-call should be expressed in the payload instead, via
@@ -698,13 +719,13 @@ CREATE TABLE write_target (
     CONSTRAINT uq_write_target UNIQUE (owner_kind, owner_id, name)
 );
 
-CREATE INDEX idx_write_target_owner ON write_target(owner_kind, owner_id);
+CREATE INDEX idx_write_target_owner ON governance.write_target(owner_kind, owner_id);
 
 
-CREATE TABLE target_payload_field (
+CREATE TABLE governance.target_payload_field (
     id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     -- CASCADE: if the write_target is dropped, its payload fields go with it.
-    write_target_id   UUID NOT NULL REFERENCES write_target(id) ON DELETE CASCADE,
+    write_target_id   UUID NOT NULL REFERENCES governance.write_target(id) ON DELETE CASCADE,
     -- The key that appears in the payload dict passed to the connector.
     payload_field     VARCHAR(200) NOT NULL,
     -- Reference string in the wiring DSL: input.<path>, output.<path>,
@@ -717,7 +738,7 @@ CREATE TABLE target_payload_field (
     CONSTRAINT uq_target_payload_field UNIQUE (write_target_id, payload_field)
 );
 
-CREATE INDEX idx_target_payload_field_target ON target_payload_field(write_target_id);
+CREATE INDEX idx_target_payload_field_target ON governance.target_payload_field(write_target_id);
 
 
 -- ── AGENT VERSION ↔ AGENT DELEGATION JUNCTION ────────────────
@@ -740,13 +761,13 @@ CREATE INDEX idx_target_payload_field_target ON target_payload_field(write_targe
 --     child version. Use when you want the parent to keep calling a
 --     previously-validated child version even after newer challengers arrive.
 
-CREATE TABLE agent_version_delegation (
+CREATE TABLE governance.agent_version_delegation (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    parent_agent_version_id UUID NOT NULL REFERENCES agent_version(id),
+    parent_agent_version_id UUID NOT NULL REFERENCES governance.agent_version(id),
 
     -- Exactly one must be set (see CHECK below).
     child_agent_name        VARCHAR(100),
-    child_agent_version_id  UUID REFERENCES agent_version(id),
+    child_agent_version_id  UUID REFERENCES governance.agent_version(id),
 
     -- Optional per-relationship constraints. JSONB so it can grow
     -- without schema churn. Examples:
@@ -770,9 +791,9 @@ CREATE TABLE agent_version_delegation (
     )
 );
 
-CREATE INDEX idx_avd_parent ON agent_version_delegation(parent_agent_version_id);
-CREATE INDEX idx_avd_child_name ON agent_version_delegation(child_agent_name);
-CREATE INDEX idx_avd_child_version ON agent_version_delegation(child_agent_version_id);
+CREATE INDEX idx_avd_parent ON governance.agent_version_delegation(parent_agent_version_id);
+CREATE INDEX idx_avd_child_name ON governance.agent_version_delegation(child_agent_name);
+CREATE INDEX idx_avd_child_version ON governance.agent_version_delegation(child_agent_version_id);
 
 
 -- ── APPLICATIONS ─────────────────────────────────────────────
@@ -780,7 +801,7 @@ CREATE INDEX idx_avd_child_version ON agent_version_delegation(child_agent_versi
 -- Enables multi-tenant governance: filter decisions, inventory, and
 -- entity mappings by application.
 
-CREATE TABLE application (
+CREATE TABLE governance.application (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name            VARCHAR(100) UNIQUE NOT NULL,
     display_name    VARCHAR(200) NOT NULL,
@@ -792,17 +813,17 @@ CREATE TABLE application (
 -- Many-to-many: which agents, tasks, prompts, tools belong to which
 -- application. Entities can be shared across apps.
 
-CREATE TABLE application_entity (
+CREATE TABLE governance.application_entity (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    application_id  UUID NOT NULL REFERENCES application(id),
+    application_id  UUID NOT NULL REFERENCES governance.application(id),
     entity_type     entity_type NOT NULL,
     entity_id       UUID NOT NULL,
     created_at      TIMESTAMP DEFAULT NOW(),
     CONSTRAINT uq_app_entity UNIQUE (application_id, entity_type, entity_id)
 );
 
-CREATE INDEX idx_ae_app ON application_entity(application_id);
-CREATE INDEX idx_ae_entity ON application_entity(entity_type, entity_id);
+CREATE INDEX idx_ae_app ON governance.application_entity(application_id);
+CREATE INDEX idx_ae_entity ON governance.application_entity(entity_type, entity_id);
 
 
 -- ── EXECUTION CONTEXT ────────────────────────────────────────
@@ -811,9 +832,9 @@ CREATE INDEX idx_ae_entity ON application_entity(entity_type, entity_id);
 -- The context_ref is opaque to Verity — the business app defines it.
 -- Uniqueness is per application: (application_id, context_ref).
 
-CREATE TABLE execution_context (
+CREATE TABLE runtime.execution_context (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    application_id  UUID NOT NULL REFERENCES application(id),
+    application_id  UUID NOT NULL REFERENCES governance.application(id),
     context_ref     VARCHAR(500) NOT NULL,
     context_type    VARCHAR(100),
     metadata        JSONB DEFAULT '{}',
@@ -821,12 +842,12 @@ CREATE TABLE execution_context (
     CONSTRAINT uq_app_context UNIQUE (application_id, context_ref)
 );
 
-CREATE INDEX idx_ec_app ON execution_context(application_id);
+CREATE INDEX idx_ec_app ON runtime.execution_context(application_id);
 
 
 -- ── TEST SUITES & CASES ───────────────────────────────────────
 
-CREATE TABLE test_suite (
+CREATE TABLE governance.test_suite (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name                VARCHAR(200) NOT NULL,
     description         TEXT,
@@ -838,9 +859,9 @@ CREATE TABLE test_suite (
     created_at          TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE test_case (
+CREATE TABLE governance.test_case (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    suite_id            UUID NOT NULL REFERENCES test_suite(id),
+    suite_id            UUID NOT NULL REFERENCES governance.test_suite(id),
     name                VARCHAR(200) NOT NULL,
     description         TEXT,
     input_data          JSONB NOT NULL,
@@ -858,7 +879,7 @@ CREATE TABLE test_case (
     created_at          TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_tc_suite ON test_case(suite_id);
+CREATE INDEX idx_tc_suite ON governance.test_case(suite_id);
 
 
 -- Per-call mock data for test cases. Each row mocks one interaction.
@@ -873,9 +894,9 @@ CREATE INDEX idx_tc_suite ON test_case(suite_id);
 --              on task_version_target). The connector write is skipped;
 --              the intended write is recorded in the decision log.
 -- call_order supports multi-call scenarios for 'tool' (unused for source/target).
-CREATE TABLE test_case_mock (
+CREATE TABLE governance.test_case_mock (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    test_case_id    UUID NOT NULL REFERENCES test_case(id) ON DELETE CASCADE,
+    test_case_id    UUID NOT NULL REFERENCES governance.test_case(id) ON DELETE CASCADE,
     mock_kind       VARCHAR(20) NOT NULL DEFAULT 'tool'
                     CHECK (mock_kind IN ('tool', 'source', 'target')),
     mock_key        VARCHAR(200) NOT NULL,
@@ -885,17 +906,17 @@ CREATE TABLE test_case_mock (
     created_at      TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_tcm_case ON test_case_mock(test_case_id);
+CREATE INDEX idx_tcm_case ON governance.test_case_mock(test_case_id);
 -- idx_tcm_kind created in the idempotent additions section below (after
 -- mock_kind column is guaranteed to exist on previously-created tables).
 
 
-CREATE TABLE test_execution_log (
+CREATE TABLE governance.test_execution_log (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    suite_id            UUID NOT NULL REFERENCES test_suite(id),
+    suite_id            UUID NOT NULL REFERENCES governance.test_suite(id),
     entity_type         entity_type NOT NULL,
     entity_version_id   UUID NOT NULL,
-    test_case_id        UUID NOT NULL REFERENCES test_case(id),
+    test_case_id        UUID NOT NULL REFERENCES governance.test_case(id),
     run_at              TIMESTAMP DEFAULT NOW(),
     mock_mode           BOOLEAN NOT NULL,
     channel             deployment_channel,
@@ -910,8 +931,8 @@ CREATE TABLE test_execution_log (
     inference_config_snapshot JSONB
 );
 
-CREATE INDEX idx_tel_entity ON test_execution_log(entity_type, entity_version_id);
-CREATE INDEX idx_tel_suite ON test_execution_log(suite_id);
+CREATE INDEX idx_tel_entity ON governance.test_execution_log(entity_type, entity_version_id);
+CREATE INDEX idx_tel_suite ON governance.test_execution_log(suite_id);
 
 
 -- ── GROUND TRUTH — THREE-TABLE DESIGN ────────────────────────
@@ -925,7 +946,7 @@ CREATE INDEX idx_tel_suite ON test_execution_log(suite_id);
 -- Storage abstraction: all document references use provider/container/key
 -- instead of MinIO-specific fields. Works with MinIO, S3, Azure Blob, local.
 
-CREATE TABLE ground_truth_dataset (
+CREATE TABLE governance.ground_truth_dataset (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 
     -- Which Verity entity this dataset validates
@@ -966,7 +987,7 @@ CREATE TABLE ground_truth_dataset (
     coverage_notes          TEXT,
 
     applies_to_versions     UUID[] DEFAULT '{}',
-    superseded_by           UUID REFERENCES ground_truth_dataset(id),
+    superseded_by           UUID REFERENCES governance.ground_truth_dataset(id),
 
     created_at              TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -974,17 +995,17 @@ CREATE TABLE ground_truth_dataset (
     CONSTRAINT uq_gt_dataset UNIQUE (entity_type, entity_id, name, version)
 );
 
-CREATE INDEX idx_gtd_entity ON ground_truth_dataset(entity_type, entity_id);
-CREATE INDEX idx_gtd_status ON ground_truth_dataset(status);
+CREATE INDEX idx_gtd_entity ON governance.ground_truth_dataset(entity_type, entity_id);
+CREATE INDEX idx_gtd_status ON governance.ground_truth_dataset(status);
 
 
 -- One input item within a dataset. This is the "question" — the document
 -- or context fed to the entity during validation. Carries NO label.
 -- The label lives entirely in ground_truth_annotation.
 
-CREATE TABLE ground_truth_record (
+CREATE TABLE governance.ground_truth_record (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    dataset_id              UUID NOT NULL REFERENCES ground_truth_dataset(id)
+    dataset_id              UUID NOT NULL REFERENCES governance.ground_truth_dataset(id)
                             ON DELETE CASCADE,
     record_index            INTEGER NOT NULL,
 
@@ -1008,8 +1029,8 @@ CREATE TABLE ground_truth_record (
     CONSTRAINT uq_gt_record UNIQUE (dataset_id, record_index)
 );
 
-CREATE INDEX idx_gtr_dataset ON ground_truth_record(dataset_id);
-CREATE INDEX idx_gtr_tags    ON ground_truth_record USING GIN(tags);
+CREATE INDEX idx_gtr_dataset ON governance.ground_truth_record(dataset_id);
+CREATE INDEX idx_gtr_tags    ON governance.ground_truth_record USING GIN(tags);
 
 
 -- Per-call mock data for ground truth records. Same shape as test_case_mock;
@@ -1019,9 +1040,9 @@ CREATE INDEX idx_gtr_tags    ON ground_truth_record USING GIN(tags);
 -- reasons against the exact data the SME saw. For task validation with
 -- declared sources, kind='source' mocks let a record override the connector
 -- fetch (e.g. test the Task against a stored payload instead of EDMS).
-CREATE TABLE ground_truth_record_mock (
+CREATE TABLE governance.ground_truth_record_mock (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    record_id       UUID NOT NULL REFERENCES ground_truth_record(id) ON DELETE CASCADE,
+    record_id       UUID NOT NULL REFERENCES governance.ground_truth_record(id) ON DELETE CASCADE,
     mock_kind       VARCHAR(20) NOT NULL DEFAULT 'tool'
                     CHECK (mock_kind IN ('tool', 'source', 'target')),
     mock_key        VARCHAR(200) NOT NULL,
@@ -1031,7 +1052,7 @@ CREATE TABLE ground_truth_record_mock (
     created_at      TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_gtrm_record ON ground_truth_record_mock(record_id);
+CREATE INDEX idx_gtrm_record ON governance.ground_truth_record_mock(record_id);
 -- idx_gtrm_kind created in the idempotent additions section below (after
 -- mock_kind column is guaranteed to exist on previously-created tables).
 
@@ -1049,11 +1070,11 @@ CREATE INDEX idx_gtrm_record ON ground_truth_record_mock(record_id);
 -- LLM-as-judge: first-class annotator type. Tracked with model name and
 -- prompt version for reproducibility.
 
-CREATE TABLE ground_truth_annotation (
+CREATE TABLE governance.ground_truth_annotation (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    record_id               UUID NOT NULL REFERENCES ground_truth_record(id)
+    record_id               UUID NOT NULL REFERENCES governance.ground_truth_record(id)
                             ON DELETE CASCADE,
-    dataset_id              UUID NOT NULL REFERENCES ground_truth_dataset(id),
+    dataset_id              UUID NOT NULL REFERENCES governance.ground_truth_dataset(id),
 
     -- Who or what produced this annotation
     annotator_type          gt_annotator_type NOT NULL,
@@ -1065,7 +1086,7 @@ CREATE TABLE ground_truth_annotation (
 
     -- LLM judge fields
     judge_model             VARCHAR(100),
-    judge_prompt_version_id UUID REFERENCES prompt_version(id),
+    judge_prompt_version_id UUID REFERENCES governance.prompt_version(id),
     judge_reasoning         TEXT,
 
     -- The label itself — what the correct output should be.
@@ -1094,20 +1115,20 @@ CREATE TABLE ground_truth_annotation (
     )
 );
 
-CREATE INDEX idx_gta_record     ON ground_truth_annotation(record_id);
-CREATE INDEX idx_gta_dataset    ON ground_truth_annotation(dataset_id);
-CREATE INDEX idx_gta_auth       ON ground_truth_annotation(record_id)
+CREATE INDEX idx_gta_record     ON governance.ground_truth_annotation(record_id);
+CREATE INDEX idx_gta_dataset    ON governance.ground_truth_annotation(dataset_id);
+CREATE INDEX idx_gta_auth       ON governance.ground_truth_annotation(record_id)
                                 WHERE is_authoritative = TRUE;
-CREATE INDEX idx_gta_type       ON ground_truth_annotation(annotator_type);
+CREATE INDEX idx_gta_type       ON governance.ground_truth_annotation(annotator_type);
 
 
 -- ── VALIDATION RUNS ───────────────────────────────────────────
 
-CREATE TABLE validation_run (
+CREATE TABLE governance.validation_run (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     entity_type             entity_type NOT NULL CHECK (entity_type IN ('agent', 'task')),
     entity_version_id       UUID NOT NULL,
-    dataset_id              UUID NOT NULL REFERENCES ground_truth_dataset(id),
+    dataset_id              UUID NOT NULL REFERENCES governance.ground_truth_dataset(id),
     dataset_version         VARCHAR(50),
     -- Which dataset version was used, so results are unambiguous
     run_at                  TIMESTAMP DEFAULT NOW(),
@@ -1144,18 +1165,18 @@ CREATE TABLE validation_run (
     notes                   TEXT
 );
 
-CREATE INDEX idx_vr_entity ON validation_run(entity_type, entity_version_id);
+CREATE INDEX idx_vr_entity ON governance.validation_run(entity_type, entity_version_id);
 
 
 -- Per-record prediction results from a validation run.
 -- Enables drill-down from aggregate metrics (F1=0.95) to individual
 -- misclassifications, extraction errors, or incorrect triage outcomes.
 
-CREATE TABLE validation_record_result (
+CREATE TABLE governance.validation_record_result (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    validation_run_id       UUID NOT NULL REFERENCES validation_run(id)
+    validation_run_id       UUID NOT NULL REFERENCES governance.validation_run(id)
                             ON DELETE CASCADE,
-    ground_truth_record_id  UUID NOT NULL REFERENCES ground_truth_record(id),
+    ground_truth_record_id  UUID NOT NULL REFERENCES governance.ground_truth_record(id),
     record_index            INTEGER NOT NULL,
 
     -- Ground truth vs prediction
@@ -1182,13 +1203,13 @@ CREATE TABLE validation_record_result (
     CONSTRAINT uq_vrr UNIQUE (validation_run_id, record_index)
 );
 
-CREATE INDEX idx_vrr_run     ON validation_record_result(validation_run_id);
-CREATE INDEX idx_vrr_correct ON validation_record_result(validation_run_id, correct);
+CREATE INDEX idx_vrr_run     ON governance.validation_record_result(validation_run_id);
+CREATE INDEX idx_vrr_correct ON governance.validation_record_result(validation_run_id, correct);
 
 
 -- ── EVALUATION RUNS ───────────────────────────────────────────
 
-CREATE TABLE evaluation_run (
+CREATE TABLE governance.evaluation_run (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     entity_type             entity_type NOT NULL,
     entity_version_id       UUID NOT NULL,
@@ -1221,12 +1242,12 @@ CREATE TABLE evaluation_run (
     created_at              TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_er_entity ON evaluation_run(entity_type, entity_version_id);
+CREATE INDEX idx_er_entity ON governance.evaluation_run(entity_type, entity_version_id);
 
 
 -- ── APPROVAL RECORDS (HITL GATES) ────────────────────────────
 
-CREATE TABLE approval_record (
+CREATE TABLE governance.approval_record (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     entity_type             entity_type NOT NULL,
     entity_version_id       UUID NOT NULL,
@@ -1251,8 +1272,8 @@ CREATE TABLE approval_record (
     override_reason         TEXT
 );
 
-CREATE INDEX idx_ar_entity ON approval_record(entity_type, entity_version_id);
-CREATE INDEX idx_ar_gate ON approval_record(gate_type);
+CREATE INDEX idx_ar_entity ON governance.approval_record(entity_type, entity_version_id);
+CREATE INDEX idx_ar_gate ON governance.approval_record(gate_type);
 
 
 -- ── RUN TRACKING (EVENT-SOURCED) ─────────────────────────────
@@ -1273,7 +1294,7 @@ CREATE INDEX idx_ar_gate ON approval_record(gate_type);
 --
 -- API and UI reads go through the view; workers INSERT into the tables.
 
-CREATE TABLE execution_run (
+CREATE TABLE runtime.execution_run (
     id                    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 
     -- What was requested. Immutable once inserted.
@@ -1283,7 +1304,7 @@ CREATE TABLE execution_run (
     entity_name           VARCHAR(100) NOT NULL,
     channel               deployment_channel NOT NULL,
     input_json            JSONB,
-    execution_context_id  UUID REFERENCES execution_context(id),
+    execution_context_id  UUID REFERENCES runtime.execution_context(id),
     -- Caller-supplied correlation id grouping multiple runs into one
     -- logical workflow invocation. Opaque to Verity.
     workflow_run_id       UUID,
@@ -1302,15 +1323,15 @@ CREATE TABLE execution_run (
     submitted_by          VARCHAR(100)
 );
 
-CREATE INDEX idx_execution_run_context  ON execution_run(execution_context_id);
-CREATE INDEX idx_execution_run_workflow ON execution_run(workflow_run_id);
-CREATE INDEX idx_execution_run_entity   ON execution_run(entity_kind, entity_version_id);
-CREATE INDEX idx_execution_run_submitted ON execution_run(submitted_at DESC);
+CREATE INDEX idx_execution_run_context  ON runtime.execution_run(execution_context_id);
+CREATE INDEX idx_execution_run_workflow ON runtime.execution_run(workflow_run_id);
+CREATE INDEX idx_execution_run_entity   ON runtime.execution_run(entity_kind, entity_version_id);
+CREATE INDEX idx_execution_run_submitted ON runtime.execution_run(submitted_at DESC);
 
 
-CREATE TABLE execution_run_status (
+CREATE TABLE runtime.execution_run_status (
     id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    execution_run_id  UUID NOT NULL REFERENCES execution_run(id),
+    execution_run_id  UUID NOT NULL REFERENCES runtime.execution_run(id),
     -- 'submitted' — inserted in the same txn as the execution_run row.
     -- 'claimed'   — a worker has taken ownership of the run.
     -- 'heartbeat' — periodic proof-of-life from the claiming worker.
@@ -1325,13 +1346,13 @@ CREATE TABLE execution_run_status (
     notes             TEXT
 );
 
-CREATE INDEX idx_exec_run_status_run ON execution_run_status(execution_run_id, recorded_at DESC);
+CREATE INDEX idx_exec_run_status_run ON runtime.execution_run_status(execution_run_id, recorded_at DESC);
 
 
-CREATE TABLE execution_run_completion (
+CREATE TABLE runtime.execution_run_completion (
     id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     -- Only one terminal-success row per run; enforced by UNIQUE.
-    execution_run_id  UUID NOT NULL UNIQUE REFERENCES execution_run(id),
+    execution_run_id  UUID NOT NULL UNIQUE REFERENCES runtime.execution_run(id),
     -- 'complete'  — worker produced a successful envelope.
     -- 'cancelled' — run was terminated on request before/after claim.
     final_status      VARCHAR(20) NOT NULL
@@ -1345,10 +1366,10 @@ CREATE TABLE execution_run_completion (
 );
 
 
-CREATE TABLE execution_run_error (
+CREATE TABLE runtime.execution_run_error (
     id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     -- Only one terminal-failure row per run; enforced by UNIQUE.
-    execution_run_id  UUID NOT NULL UNIQUE REFERENCES execution_run(id),
+    execution_run_id  UUID NOT NULL UNIQUE REFERENCES runtime.execution_run(id),
     failed_at         TIMESTAMP NOT NULL DEFAULT NOW(),
     -- Machine-readable code (e.g. 'connector_timeout', 'schema_violation').
     error_code        VARCHAR(100),
@@ -1364,7 +1385,7 @@ CREATE TABLE execution_run_error (
 -- ── AGENT DECISION LOG ───────────────────────────────────────
 -- Every Claude invocation — agent or task — is logged here.
 
-CREATE TABLE agent_decision_log (
+CREATE TABLE runtime.agent_decision_log (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 
     entity_type             entity_type NOT NULL CHECK (entity_type IN ('agent', 'task')),
@@ -1384,10 +1405,10 @@ CREATE TABLE agent_decision_log (
     -- Populated for any decision produced from a run submitted through
     -- the async submission API; null for legacy synchronous calls that
     -- predate the execution_run machinery.
-    execution_run_id        UUID REFERENCES execution_run(id),
+    execution_run_id        UUID REFERENCES runtime.execution_run(id),
 
     -- Hierarchy: tracks parent-child relationships for sub-agent calls.
-    parent_decision_id      UUID REFERENCES agent_decision_log(id),
+    parent_decision_id      UUID REFERENCES runtime.agent_decision_log(id),
     decision_depth          INTEGER DEFAULT 0,
     step_name               VARCHAR(100),
 
@@ -1422,15 +1443,15 @@ CREATE TABLE agent_decision_log (
 
     -- For audit reruns: direct FK to the original decision being reproduced.
     -- Preserves lineage without burying it in JSONB metadata.
-    reproduced_from_decision_id UUID REFERENCES agent_decision_log(id),
+    reproduced_from_decision_id UUID REFERENCES runtime.agent_decision_log(id),
 
     -- Execution context: business-level grouping registered by the app.
     -- Links this decision to a specific business operation (e.g., submission, policy).
-    execution_context_id    UUID REFERENCES execution_context(id),
+    execution_context_id    UUID REFERENCES runtime.execution_context(id),
 
     hitl_required           BOOLEAN DEFAULT FALSE,
     hitl_completed          BOOLEAN DEFAULT FALSE,
-    hitl_approval_id        UUID REFERENCES approval_record(id),
+    hitl_approval_id        UUID REFERENCES governance.approval_record(id),
 
     status                  VARCHAR(30) DEFAULT 'complete',
     error_message           TEXT,
@@ -1460,11 +1481,11 @@ CREATE TABLE agent_decision_log (
     created_at              TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_adl_entity ON agent_decision_log(entity_type, entity_version_id);
-CREATE INDEX idx_adl_created ON agent_decision_log(created_at);
-CREATE INDEX idx_adl_workflow ON agent_decision_log(workflow_run_id);
-CREATE INDEX idx_adl_run ON agent_decision_log(execution_run_id);
-CREATE INDEX idx_adl_parent ON agent_decision_log(parent_decision_id);
+CREATE INDEX idx_adl_entity ON runtime.agent_decision_log(entity_type, entity_version_id);
+CREATE INDEX idx_adl_created ON runtime.agent_decision_log(created_at);
+CREATE INDEX idx_adl_workflow ON runtime.agent_decision_log(workflow_run_id);
+CREATE INDEX idx_adl_run ON runtime.agent_decision_log(execution_run_id);
+CREATE INDEX idx_adl_parent ON runtime.agent_decision_log(parent_decision_id);
 
 
 -- ── RUN TRACKING BACK-FILL FKS ───────────────────────────────
@@ -1476,11 +1497,11 @@ CREATE INDEX idx_adl_parent ON agent_decision_log(parent_decision_id);
 
 ALTER TABLE execution_run_completion
     ADD CONSTRAINT fk_exec_run_completion_decision
-    FOREIGN KEY (decision_log_id) REFERENCES agent_decision_log(id);
+    FOREIGN KEY (decision_log_id) REFERENCES runtime.agent_decision_log(id);
 
 ALTER TABLE execution_run_error
     ADD CONSTRAINT fk_exec_run_error_decision
-    FOREIGN KEY (decision_log_id) REFERENCES agent_decision_log(id);
+    FOREIGN KEY (decision_log_id) REFERENCES runtime.agent_decision_log(id);
 
 
 -- ── RUN TRACKING: CURRENT-STATE VIEW ─────────────────────────
@@ -1492,7 +1513,7 @@ ALTER TABLE execution_run_error
 -- API and UI reads go through this view so callers never have to join
 -- the four tables themselves.
 
-CREATE VIEW execution_run_current AS
+CREATE VIEW analytics.execution_run_current AS
 SELECT
     r.id,
     r.entity_kind,
@@ -1536,21 +1557,21 @@ SELECT
     -- When the worker first picked it up (for elapsed-time display while
     -- still running; null if never claimed).
     first_claim.first_claimed_at        AS first_started_at
-FROM execution_run r
-LEFT JOIN execution_run_completion c ON c.execution_run_id = r.id
-LEFT JOIN execution_run_error      e ON e.execution_run_id = r.id
+FROM runtime.execution_run r
+LEFT JOIN runtime.execution_run_completion c ON c.execution_run_id = r.id
+LEFT JOIN runtime.execution_run_error      e ON e.execution_run_id = r.id
 LEFT JOIN LATERAL (
     SELECT status AS latest_status,
            recorded_at AS latest_status_at,
            worker_id AS latest_worker_id
-    FROM execution_run_status
+    FROM runtime.execution_run_status
     WHERE execution_run_id = r.id
     ORDER BY recorded_at DESC
     LIMIT 1
 ) s ON TRUE
 LEFT JOIN LATERAL (
     SELECT MIN(recorded_at) AS first_claimed_at
-    FROM execution_run_status
+    FROM runtime.execution_run_status
     WHERE execution_run_id = r.id AND status = 'claimed'
 ) first_claim ON TRUE;
 
@@ -1570,13 +1591,13 @@ LEFT JOIN LATERAL (
 --   - which fact_types drift between AI and human,
 --   - which submissions accumulate the most HITL corrections.
 
-CREATE TABLE IF NOT EXISTS hitl_override (
+CREATE TABLE IF NOT EXISTS runtime.hitl_override (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 
     -- Technical anchor: the Verity decision row whose output
     -- carried the value the human is now correcting. The
     -- output_path is a JSONPath into that decision's output_json.
-    decision_log_id         UUID NOT NULL REFERENCES agent_decision_log(id) ON DELETE CASCADE,
+    decision_log_id         UUID NOT NULL REFERENCES runtime.agent_decision_log(id) ON DELETE CASCADE,
     output_path             TEXT NOT NULL,
 
     -- Values. ai_value is nullable (the AI may have looked but
@@ -1599,15 +1620,15 @@ CREATE TABLE IF NOT EXISTS hitl_override (
     reason                  TEXT
 );
 
-CREATE INDEX idx_ho_decision   ON hitl_override(decision_log_id);
-CREATE INDEX idx_ho_fact       ON hitl_override(application, entity_type, fact_type);
-CREATE INDEX idx_ho_entity_ref ON hitl_override(application, entity_type, entity_reference);
-CREATE INDEX idx_ho_created    ON hitl_override(created_at);
+CREATE INDEX idx_ho_decision   ON runtime.hitl_override(decision_log_id);
+CREATE INDEX idx_ho_fact       ON runtime.hitl_override(application, entity_type, fact_type);
+CREATE INDEX idx_ho_entity_ref ON runtime.hitl_override(application, entity_type, entity_reference);
+CREATE INDEX idx_ho_created    ON runtime.hitl_override(created_at);
 
 
 -- ── MODEL CARDS ───────────────────────────────────────────────
 
-CREATE TABLE model_card (
+CREATE TABLE governance.model_card (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     entity_type             entity_type NOT NULL CHECK (entity_type IN ('agent', 'task')),
     entity_version_id       UUID NOT NULL,
@@ -1624,7 +1645,7 @@ CREATE TABLE model_card (
     prompt_sensitivity_notes TEXT,
 
     validated_by            VARCHAR(200),
-    validation_run_id       UUID REFERENCES validation_run(id),
+    validation_run_id       UUID REFERENCES governance.validation_run(id),
     validation_notes        TEXT,
 
     regulatory_notes        TEXT,
@@ -1638,12 +1659,12 @@ CREATE TABLE model_card (
     updated_at              TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_mc_entity ON model_card(entity_type, entity_version_id);
+CREATE INDEX idx_mc_entity ON governance.model_card(entity_type, entity_version_id);
 
 
 -- ── METRIC THRESHOLDS ─────────────────────────────────────────
 
-CREATE TABLE metric_threshold (
+CREATE TABLE governance.metric_threshold (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     entity_type         entity_type NOT NULL,
     entity_id           UUID NOT NULL,
@@ -1661,7 +1682,7 @@ CREATE TABLE metric_threshold (
 -- Per-field tolerance configuration for extraction tasks.
 -- Defines how each extracted field should be compared against ground truth.
 
-CREATE TABLE field_extraction_config (
+CREATE TABLE governance.field_extraction_config (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     entity_type         entity_type NOT NULL CHECK (entity_type IN ('task')),
     entity_id           UUID NOT NULL,
@@ -1683,7 +1704,7 @@ CREATE TABLE field_extraction_config (
 
 -- ── INCIDENTS ────────────────────────────────────────────────
 
-CREATE TABLE incident (
+CREATE TABLE governance.incident (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     entity_type             entity_type NOT NULL,
     entity_id               UUID NOT NULL,
@@ -1709,7 +1730,7 @@ CREATE TABLE incident (
 
 -- ── DESCRIPTION SIMILARITY LOG ───────────────────────────────
 
-CREATE TABLE description_similarity_log (
+CREATE TABLE governance.description_similarity_log (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     checked_entity_type     entity_type NOT NULL,
     checked_entity_id       UUID NOT NULL,
@@ -1726,7 +1747,7 @@ CREATE TABLE description_similarity_log (
     checked_at              TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_dsl_entity ON description_similarity_log(checked_entity_type, checked_entity_id);
+CREATE INDEX idx_dsl_entity ON governance.description_similarity_log(checked_entity_type, checked_entity_id);
 
 
 -- ============================================================
@@ -1737,7 +1758,7 @@ CREATE INDEX idx_dsl_entity ON description_similarity_log(checked_entity_type, c
 -- These are GOVERNANCE settings (decision logging, redaction thresholds),
 -- not business app settings.
 
-CREATE TABLE IF NOT EXISTS platform_settings (
+CREATE TABLE IF NOT EXISTS governance.platform_settings (
     key                 TEXT PRIMARY KEY,
     value               TEXT NOT NULL,
     category            TEXT NOT NULL DEFAULT 'general',
@@ -1769,7 +1790,7 @@ CREATE TABLE IF NOT EXISTS platform_settings (
 -- window contains the invocation's started_at — so historical reports
 -- stay stable when prices change.
 
-CREATE TABLE IF NOT EXISTS model (
+CREATE TABLE IF NOT EXISTS governance.model (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     provider        VARCHAR(50)  NOT NULL,
     model_id        VARCHAR(200) NOT NULL,
@@ -1781,13 +1802,13 @@ CREATE TABLE IF NOT EXISTS model (
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT uq_model UNIQUE (provider, model_id)
 );
-CREATE INDEX IF NOT EXISTS idx_model_provider ON model(provider);
-CREATE INDEX IF NOT EXISTS idx_model_status ON model(status);
+CREATE INDEX IF NOT EXISTS idx_model_provider ON governance.model(provider);
+CREATE INDEX IF NOT EXISTS idx_model_status ON governance.model(status);
 
 
-CREATE TABLE IF NOT EXISTS model_price (
+CREATE TABLE IF NOT EXISTS governance.model_price (
     id                          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    model_id                    UUID NOT NULL REFERENCES model(id),
+    model_id                    UUID NOT NULL REFERENCES governance.model(id),
     input_price_per_1m          NUMERIC(14,6) NOT NULL,
     output_price_per_1m         NUMERIC(14,6) NOT NULL,
     cache_read_price_per_1m     NUMERIC(14,6),
@@ -1798,16 +1819,16 @@ CREATE TABLE IF NOT EXISTS model_price (
     notes                       TEXT,
     created_at                  TIMESTAMPTZ DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_mp_lookup ON model_price(model_id, valid_from DESC);
+CREATE INDEX IF NOT EXISTS idx_mp_lookup ON governance.model_price(model_id, valid_from DESC);
 -- At most one currently-active price per model. Application code
 -- closes the prior row (sets valid_to) before inserting a new one.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_mp_active ON model_price(model_id) WHERE valid_to IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_mp_active ON governance.model_price(model_id) WHERE valid_to IS NULL;
 
 
-CREATE TABLE IF NOT EXISTS model_invocation_log (
+CREATE TABLE IF NOT EXISTS runtime.model_invocation_log (
     id                              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    decision_log_id                 UUID NOT NULL REFERENCES agent_decision_log(id) ON DELETE CASCADE,
-    model_id                        UUID NOT NULL REFERENCES model(id),
+    decision_log_id                 UUID NOT NULL REFERENCES runtime.agent_decision_log(id) ON DELETE CASCADE,
+    model_id                        UUID NOT NULL REFERENCES governance.model(id),
     -- Denormalized (for fast group-by without joins on the hot path):
     provider                        VARCHAR(50)  NOT NULL,
     model_name                      VARCHAR(200) NOT NULL,
@@ -1825,15 +1846,15 @@ CREATE TABLE IF NOT EXISTS model_invocation_log (
     per_turn_metadata               JSONB,
     created_at                      TIMESTAMPTZ DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_mil_decision ON model_invocation_log(decision_log_id);
-CREATE INDEX IF NOT EXISTS idx_mil_started  ON model_invocation_log(started_at);
-CREATE INDEX IF NOT EXISTS idx_mil_model    ON model_invocation_log(model_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_mil_decision ON runtime.model_invocation_log(decision_log_id);
+CREATE INDEX IF NOT EXISTS idx_mil_started  ON runtime.model_invocation_log(started_at);
+CREATE INDEX IF NOT EXISTS idx_mil_model    ON runtime.model_invocation_log(model_id, started_at);
 
 
 -- Cost-on-the-fly view. Joins each invocation to the price row whose
 -- [valid_from, valid_to) window contains the invocation's started_at.
 -- Historical reports stay stable across price changes.
-CREATE OR REPLACE VIEW v_model_invocation_cost AS
+CREATE OR REPLACE VIEW analytics.v_model_invocation_cost AS
 SELECT
     mil.id,
     mil.decision_log_id,
@@ -1867,8 +1888,8 @@ SELECT
       + (mil.cache_read_input_tokens::numeric / 1e6)
             * COALESCE(mp.cache_read_price_per_1m, mp.input_price_per_1m * 0.1)
     ) AS total_cost_usd
-FROM model_invocation_log mil
-JOIN model_price mp
+FROM runtime.model_invocation_log mil
+JOIN governance.model_price mp
   ON mp.model_id = mil.model_id
  AND mil.started_at >= mp.valid_from
  AND (mp.valid_to IS NULL OR mil.started_at < mp.valid_to);
@@ -1883,12 +1904,12 @@ JOIN model_price mp
 -- Model management — link inference configs to the registered model
 -- catalog. Kept alongside the existing `model_name` VARCHAR column for
 -- transition; seed script backfills this FK from the text column.
-ALTER TABLE inference_config ADD COLUMN IF NOT EXISTS model_id UUID REFERENCES model(id);
+ALTER TABLE inference_config ADD COLUMN IF NOT EXISTS model_id UUID REFERENCES governance.model(id);
 
 -- Secondary index on test_case_mock after the primary CREATE TABLE
 -- above finalizes the mock_kind column.
-CREATE INDEX IF NOT EXISTS idx_tcm_kind  ON test_case_mock(test_case_id, mock_kind);
-CREATE INDEX IF NOT EXISTS idx_gtrm_kind ON ground_truth_record_mock(record_id, mock_kind);
+CREATE INDEX IF NOT EXISTS idx_tcm_kind  ON governance.test_case_mock(test_case_id, mock_kind);
+CREATE INDEX IF NOT EXISTS idx_gtrm_kind ON governance.ground_truth_record_mock(record_id, mock_kind);
 
 
 -- ============================================================
@@ -1910,7 +1931,7 @@ CREATE INDEX IF NOT EXISTS idx_gtrm_kind ON ground_truth_record_mock(record_id, 
 -- fit application/model scopes; the admin UI reads quota_check
 -- directly for active breach counts.
 
-CREATE TABLE IF NOT EXISTS quota (
+CREATE TABLE IF NOT EXISTS governance.quota (
     id                   UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     scope_type           VARCHAR(20) NOT NULL CHECK (scope_type IN ('application','agent','task','model')),
     scope_id             UUID,                             -- polymorphic; not a hard FK because the target table varies
@@ -1924,13 +1945,13 @@ CREATE TABLE IF NOT EXISTS quota (
     created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_quota_scope   ON quota(scope_type, scope_id);
-CREATE INDEX IF NOT EXISTS idx_quota_enabled ON quota(enabled);
+CREATE INDEX IF NOT EXISTS idx_quota_scope   ON governance.quota(scope_type, scope_id);
+CREATE INDEX IF NOT EXISTS idx_quota_enabled ON governance.quota(enabled);
 
 
-CREATE TABLE IF NOT EXISTS quota_check (
+CREATE TABLE IF NOT EXISTS governance.quota_check (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    quota_id        UUID NOT NULL REFERENCES quota(id) ON DELETE CASCADE,
+    quota_id        UUID NOT NULL REFERENCES governance.quota(id) ON DELETE CASCADE,
     checked_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     period_start    TIMESTAMPTZ NOT NULL,
     period_end      TIMESTAMPTZ NOT NULL,
@@ -1942,5 +1963,5 @@ CREATE TABLE IF NOT EXISTS quota_check (
     resolved_at     TIMESTAMPTZ,                           -- set when a later check shows spend below threshold
     note            TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_qc_quota_checked ON quota_check(quota_id, checked_at DESC);
-CREATE INDEX IF NOT EXISTS idx_qc_active        ON quota_check(alert_fired, resolved_at);
+CREATE INDEX IF NOT EXISTS idx_qc_quota_checked ON governance.quota_check(quota_id, checked_at DESC);
+CREATE INDEX IF NOT EXISTS idx_qc_active        ON governance.quota_check(alert_fired, resolved_at);
