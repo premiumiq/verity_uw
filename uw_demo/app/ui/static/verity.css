@@ -371,6 +371,59 @@ a:hover {
 .verity-badge-pending  { background: var(--verity-blue-light);      color: var(--verity-blue-dark); }
 
 
+/* ── STAGE PILL ──────────────────────────────────────────────
+   Two-line pill used in the submissions list and detail header.
+   Top line  = stage name (Intake, Document Processing, etc.).
+   Bottom line = what's happening in that stage right now.
+   Color is driven by stage_status, NOT by stage — so a glance
+   tells the underwriter whether the row is idle (grey), working
+   (blue), waiting on them (amber), done (green), or in trouble
+   (red). Decoupled from the lifecycle badges above so risk-score
+   and appetite columns can read independently.
+*/
+.verity-stage-pill {
+    display: inline-flex;
+    flex-direction: column;
+    padding: 5px 10px;
+    border-radius: 6px;
+    line-height: 1.2;
+    min-width: 150px;
+}
+.verity-stage-pill-name {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.verity-stage-pill-state {
+    font-size: 0.7rem;
+    font-weight: 500;
+    opacity: 0.85;
+    margin-top: 1px;
+}
+
+.verity-stage-pill-pending  { background: var(--verity-gray-pale);  color: var(--verity-text); }
+.verity-stage-pill-running  { background: var(--verity-blue-pale);  color: var(--verity-blue-deep); }
+.verity-stage-pill-blocked  { background: var(--verity-amber-light); color: #816014; }
+.verity-stage-pill-complete { background: var(--verity-green-light); color: #3E6044; }
+.verity-stage-pill-failed   { background: var(--verity-red-light);  color: #A23838; }
+.verity-stage-pill-declined { background: var(--verity-gray-dark);  color: var(--verity-text-sidebar); }
+
+
+/* ── RISK / APPETITE BADGES ──────────────────────────────────
+   Independent traffic-light columns. Same .verity-badge base
+   shape, but their own class names so a re-theme can diverge
+   from stage-status without rewiring template logic.
+*/
+.verity-risk-green     { background: var(--verity-green-light); color: #3E6044; }
+.verity-risk-amber     { background: var(--verity-amber-light); color: #816014; }
+.verity-risk-red       { background: var(--verity-red-light);   color: #A23838; }
+
+.verity-appetite-within     { background: var(--verity-green-light); color: #3E6044; }
+.verity-appetite-borderline { background: var(--verity-amber-light); color: #816014; }
+.verity-appetite-outside    { background: var(--verity-red-light);   color: #A23838; }
+
+
 /* ── BUTTONS ───────────────────────────────────────────────── */
 
 .verity-btn {

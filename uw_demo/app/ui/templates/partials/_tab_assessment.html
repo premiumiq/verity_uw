@@ -19,11 +19,11 @@
             <span class="verity-badge verity-badge-agent">agent</span>
             Risk Triage
             {% if triage.risk_score == 'Green' %}
-                <span class="verity-badge verity-badge-champion">{{ triage.risk_score }}</span>
+                <span class="verity-badge verity-risk-green">{{ triage.risk_score }}</span>
             {% elif triage.risk_score == 'Amber' %}
-                <span class="verity-badge verity-badge-shadow">{{ triage.risk_score }}</span>
+                <span class="verity-badge verity-risk-amber">{{ triage.risk_score }}</span>
             {% elif triage.risk_score == 'Red' %}
-                <span class="verity-badge verity-badge-high">{{ triage.risk_score }}</span>
+                <span class="verity-badge verity-risk-red">{{ triage.risk_score }}</span>
             {% endif %}
         </div>
         <div class="verity-detail-grid">
@@ -46,11 +46,11 @@
             <span class="verity-badge verity-badge-agent">agent</span>
             Appetite Assessment
             {% if appetite.determination == 'within_appetite' %}
-                <span class="verity-badge verity-badge-champion">Within Appetite</span>
+                <span class="verity-badge verity-appetite-within">Within Appetite</span>
             {% elif appetite.determination == 'borderline' %}
-                <span class="verity-badge verity-badge-shadow">Borderline</span>
+                <span class="verity-badge verity-appetite-borderline">Borderline</span>
             {% elif appetite.determination == 'outside_appetite' %}
-                <span class="verity-badge verity-badge-high">Outside Appetite</span>
+                <span class="verity-badge verity-appetite-outside">Outside Appetite</span>
             {% endif %}
         </div>
         <div class="verity-detail-grid">

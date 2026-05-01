@@ -93,6 +93,45 @@ SUBMISSION_DOCS = {
         "loss_run_bayview_chemical.txt",
         "supplemental_gl_bayview_chemical.txt",
     ],
+    # Rows 12-17: additional 'intake' submissions across DO/GL and
+    # small/mid/large revenue, using companies whose docs already
+    # live in seed_docs/filled/. Row 11 (Skyline Logistics) is the
+    # 'documents_received' empty-state row and stays as-is below in
+    # seed_uw.py.
+    # Row 12: DO, mid revenue, business services — intake.
+    "00000012-0012-0012-0012-000000000012": [
+        "do_app_continental_services.pdf",
+        "loss_run_continental_services.txt",
+        "financial_stmt_continental_services.txt",
+    ],
+    # Row 13: GL, small revenue, mining — intake.
+    "00000013-0013-0013-0013-000000000013": [
+        "gl_app_granite_peak.pdf",
+        "loss_run_granite_peak.txt",
+        "supplemental_gl_granite_peak.txt",
+    ],
+    # Row 14: DO, large revenue, financial services — intake.
+    "00000014-0014-0014-0014-000000000014": [
+        "do_app_horizon_capital.pdf",
+        "loss_run_horizon_capital.txt",
+    ],
+    # Row 15: GL, mid revenue, environmental services — intake.
+    "00000015-0015-0015-0015-000000000015": [
+        "gl_app_clearwater_environmental.pdf",
+        "loss_run_clearwater_environmental.txt",
+        "financial_stmt_clearwater_environmental.txt",
+    ],
+    # Row 16: DO, small-mid revenue, technology — intake.
+    "00000016-0016-0016-0016-000000000016": [
+        "do_app_novatech_holdings.pdf",
+        "loss_run_novatech_holdings.txt",
+    ],
+    # Row 17: GL, mid-large revenue, timber/forestry — intake.
+    "00000017-0017-0017-0017-000000000017": [
+        "gl_app_redwood_timber.pdf",
+        "loss_run_redwood_timber.txt",
+        "supplemental_gl_redwood_timber.txt",
+    ],
 }
 
 # All filenames that belong to submissions (so we know what's left for GT)

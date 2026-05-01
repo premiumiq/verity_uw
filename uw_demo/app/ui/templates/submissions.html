@@ -8,6 +8,7 @@
   - status_counts: dict of status -> count
 -->
 {% extends "uw_base.html" %}
+{% from "partials/_stage_pill.html" import stage_pill %}
 
 {% block title %}Submissions — UW Demo{% endblock %}
 
@@ -69,42 +70,29 @@
             <td>{{ sub.sic_description[:30] if sub.sic_description else '—' }}{% if sub.sic_description and sub.sic_description|length > 30 %}...{% endif %}</td>
             <td>{{ sub.doc_count if sub.doc_count else '—' }}</td>
             <td>
-                {# Pill is driven by current_stage + current_stage_status.
-                   Color reads from the stage-status semantics:
-                   complete=champion (green), running=shadow (amber),
-                   blocked_on_input=staging (blue-ish), failed=high (red),
-                   pending=draft (grey). #}
-                {% set s = sub.current_stage %}
-                {% set st = sub.current_stage_status %}
-                {%- set badge_class =
-                       'verity-badge-champion' if st == 'complete'
-                  else 'verity-badge-shadow'   if st == 'running'
-                  else 'verity-badge-staging'  if st == 'blocked_on_input'
-                  else 'verity-badge-high'     if st == 'failed'
-                  else 'verity-badge-draft' -%}
-                <span class="verity-badge {{ badge_class }}"
-                      title="{{ s | replace('_',' ') | title }} — {{ st | replace('_',' ') | title }}">
-                  {{ s | replace('_',' ') | title }}
-                </span>
+                {# Two-line pill — stage name + what's happening, with
+                   status-driven color. Shared with the detail page
+                   header so the pill never disagrees between views. #}
+                {{ stage_pill(sub.current_stage, sub.current_stage_status) }}
             </td>
             <td>
                 {% if sub.risk_score == 'Green' %}
-                    <span class="verity-badge verity-badge-champion">Green</span>
+                    <span class="verity-badge verity-risk-green">Green</span>
                 {% elif sub.risk_score == 'Amber' %}
-                    <span class="verity-badge verity-badge-shadow">Amber</span>
+                    <span class="verity-badge verity-risk-amber">Amber</span>
                 {% elif sub.risk_score == 'Red' %}
-                    <span class="verity-badge verity-badge-high">Red</span>
+                    <span class="verity-badge verity-risk-red">Red</span>
                 {% else %}
                     —
                 {% endif %}
             </td>
             <td>
                 {% if sub.appetite == 'within_appetite' %}
-                    <span class="verity-badge verity-badge-champion">Within</span>
+                    <span class="verity-badge verity-appetite-within">Within</span>
                 {% elif sub.appetite == 'borderline' %}
-                    <span class="verity-badge verity-badge-shadow">Borderline</span>
+                    <span class="verity-badge verity-appetite-borderline">Borderline</span>
                 {% elif sub.appetite == 'outside_appetite' %}
-                    <span class="verity-badge verity-badge-high">Outside</span>
+                    <span class="verity-badge verity-appetite-outside">Outside</span>
                 {% else %}
                     —
                 {% endif %}
