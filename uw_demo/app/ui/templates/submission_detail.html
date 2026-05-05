@@ -4,6 +4,7 @@
   Layout: Stepper + Verity link → Summary cards → Action bar → Tabs
 -->
 {% extends "uw_base.html" %}
+{% from "partials/_stage_pill.html" import stage_pill %}
 
 {% block title %}{{ sub.named_insured }} — UW Demo{% endblock %}
 
@@ -17,6 +18,7 @@
 {% block page_title %}
     {{ sub.named_insured }}
     <span class="verity-badge verity-badge-agent">{{ sub.lob }}</span>
+    {{ stage_pill(current_stage_name, current_stage_status) }}
 {% endblock %}
 
 {% block content %}
@@ -167,11 +169,11 @@
         <div class="verity-card-header">
             Risk Triage
             {% if triage.risk_score == 'Green' %}
-                <span class="verity-badge verity-badge-champion">{{ triage.risk_score }}</span>
+                <span class="verity-badge verity-risk-green">{{ triage.risk_score }}</span>
             {% elif triage.risk_score == 'Amber' %}
-                <span class="verity-badge verity-badge-shadow">{{ triage.risk_score }}</span>
+                <span class="verity-badge verity-risk-amber">{{ triage.risk_score }}</span>
             {% elif triage.risk_score == 'Red' %}
-                <span class="verity-badge verity-badge-high">{{ triage.risk_score }}</span>
+                <span class="verity-badge verity-risk-red">{{ triage.risk_score }}</span>
             {% endif %}
         </div>
         <div class="verity-detail-grid">
@@ -192,11 +194,11 @@
         <div class="verity-card-header">
             Appetite Assessment
             {% if appetite.determination == 'within_appetite' %}
-                <span class="verity-badge verity-badge-champion">Within Appetite</span>
+                <span class="verity-badge verity-appetite-within">Within Appetite</span>
             {% elif appetite.determination == 'borderline' %}
-                <span class="verity-badge verity-badge-shadow">Borderline</span>
+                <span class="verity-badge verity-appetite-borderline">Borderline</span>
             {% elif appetite.determination == 'outside_appetite' %}
-                <span class="verity-badge verity-badge-high">Outside Appetite</span>
+                <span class="verity-badge verity-appetite-outside">Outside Appetite</span>
             {% endif %}
         </div>
         <div class="verity-detail-grid">

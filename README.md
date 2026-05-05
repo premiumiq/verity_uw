@@ -34,11 +34,11 @@ A metamodel-driven framework for deploying, testing, validating, and governing a
 
 ---
 
-## The Four Planes
+## The  Planes
 
-Verity is organized into four logical planes. Two are shipped today; two are on the roadmap.
+Verity is organized into logical planes. Two are shipped today; two are on the roadmap.
 
-![The four planes — Runtime, Studio, Agents, Analytics over the Governance metamodel](docs/images/four-planes.png)
+![The  planes — Runtime, Studio, Agents, Analytics over the Governance metamodel](docs/images/four-planes.png)
 
 ### 1. Verity Governance — *shipped*
 

@@ -1,0 +1,108 @@
+{#
+  STAGE PILL — submission's current-stage indicator.
+
+  Two-line pill showing:
+    1. Stage name (Intake, Document Processing, …)
+    2. What's happening right now in that stage
+
+  Color is driven by stage status (NOT stage), so a quick glance
+  tells you: idle (grey), working (blue), needs you (amber),
+  done (green), failed (red), declined (slate).
+
+  Caller passes `stage` and `status` (the .verity-stage-pill macro
+  resolves the rest).
+
+  Usage:
+    {% from "partials/_stage_pill.html" import stage_pill %}
+    {{ stage_pill(sub.current_stage, sub.current_stage_status) }}
+#}
+
+{% macro stage_pill(stage, status) -%}
+  {#-
+    Status → CSS modifier class. Single source of truth, edit here.
+  -#}
+  {#- Declined is terminal; its slate color wins regardless of
+      the sub-status the stage row carries. -#}
+  {%- set color_class =
+        'verity-stage-pill-declined' if stage == 'declined'
+   else 'verity-stage-pill-pending'  if status == 'pending'
+   else 'verity-stage-pill-running'  if status == 'running'
+   else 'verity-stage-pill-blocked'  if status == 'blocked_on_input'
+   else 'verity-stage-pill-complete' if status == 'complete'
+   else 'verity-stage-pill-failed'   if status == 'failed'
+   else 'verity-stage-pill-pending' -%}
+
+  {#-
+    Human-readable stage name. The DB enum keys (snake_case) get
+    title-cased and snake-stripped here in one place so detail and
+    list pages always agree.
+  -#}
+  {%- set stage_label =
+        'Intake'              if stage == 'intake'
+   else 'Document Processing' if stage == 'document_processing'
+   else 'Information Review'  if stage == 'information_review'
+   else 'Triage'              if stage == 'triage'
+   else 'Appetite'            if stage == 'appetite'
+   else 'Declined'            if stage == 'declined'
+   else stage | replace('_',' ') | title -%}
+
+  {#-
+    State subtext — the "what's happening" line. Per (stage, status)
+    pair, in plain English. Falls back to a sane generic if the
+    combo isn't enumerated.
+  -#}
+  {%- set state_label = '' -%}
+
+  {%- if stage == 'declined' -%}
+    {%- set state_label = 'Submission declined' -%}
+
+  {%- elif stage == 'intake' -%}
+    {%- if status == 'complete' -%}{%- set state_label = 'Awaiting documents' -%}
+    {%- elif status == 'pending' -%}{%- set state_label = 'New submission' -%}
+    {%- elif status == 'running' -%}{%- set state_label = 'Receiving submission…' -%}
+    {%- endif -%}
+
+  {%- elif stage == 'document_processing' -%}
+    {%- if status == 'pending' -%}{%- set state_label = 'Ready to process' -%}
+    {%- elif status == 'running' -%}{%- set state_label = 'Extracting fields…' -%}
+    {%- elif status == 'blocked_on_input' -%}{%- set state_label = 'Action: Process documents' -%}
+    {%- elif status == 'complete' -%}{%- set state_label = 'Extraction complete' -%}
+    {%- elif status == 'failed' -%}{%- set state_label = 'Extraction failed' -%}
+    {%- endif -%}
+
+  {%- elif stage == 'information_review' -%}
+    {%- if status == 'pending' -%}{%- set state_label = 'Waiting on extraction' -%}
+    {%- elif status == 'running' -%}{%- set state_label = 'HITL review needed' -%}
+    {%- elif status == 'blocked_on_input' -%}{%- set state_label = 'Action: Review flagged fields' -%}
+    {%- elif status == 'complete' -%}{%- set state_label = 'Review approved' -%}
+    {%- elif status == 'failed' -%}{%- set state_label = 'Review failed' -%}
+    {%- endif -%}
+
+  {%- elif stage == 'triage' -%}
+    {%- if status == 'pending' -%}{%- set state_label = 'Ready for risk scoring' -%}
+    {%- elif status == 'running' -%}{%- set state_label = 'Scoring risk…' -%}
+    {%- elif status == 'blocked_on_input' -%}{%- set state_label = 'Action: Confirm triage' -%}
+    {%- elif status == 'complete' -%}{%- set state_label = 'Triaged' -%}
+    {%- elif status == 'failed' -%}{%- set state_label = 'Triage failed' -%}
+    {%- endif -%}
+
+  {%- elif stage == 'appetite' -%}
+    {%- if status == 'pending' -%}{%- set state_label = 'Ready for appetite check' -%}
+    {%- elif status == 'running' -%}{%- set state_label = 'Checking appetite…' -%}
+    {%- elif status == 'blocked_on_input' -%}{%- set state_label = 'Action: Confirm appetite' -%}
+    {%- elif status == 'complete' -%}{%- set state_label = 'Workflow complete' -%}
+    {%- elif status == 'failed' -%}{%- set state_label = 'Appetite check failed' -%}
+    {%- endif -%}
+  {%- endif -%}
+
+  {#- Generic fallback if a (stage, status) pair wasn't enumerated. -#}
+  {%- if not state_label -%}
+    {%- set state_label = status | replace('_',' ') | capitalize -%}
+  {%- endif -%}
+
+  <span class="verity-stage-pill {{ color_class }}"
+        title="{{ stage_label }} — {{ state_label }}">
+    <span class="verity-stage-pill-name">{{ stage_label }}</span>
+    <span class="verity-stage-pill-state">{{ state_label }}</span>
+  </span>
+{%- endmacro %}

@@ -1,41 +1,29 @@
-"""Seed uw_db with demo submissions, loss history, documents,
-extractions, and assessments.
+"""Seed uw_db with demo submissions and loss history.
 
-Creates the schema (idempotent) and inserts 10 demo submissions
-across DO and GL lines of business with varied stages of the UW
-workflow:
+Every seeded submission lands in the 'intake' stage with no
+documents, extractions, or assessments pre-populated. The user
+walks each submission forward through the workflow themselves
+from a clean starting state.
 
-  - 5 in 'intake'             — fresh submissions, no docs persisted
-  - 2 in 'review'             — extraction has flagged HITL items
-  - 2 in 'approved'           — extraction passed cleanly
-  - 1 in 'assessed'           — full pipeline complete (extraction + triage + appetite)
-
-For non-intake submissions the seed also writes:
-  - one row per document into uw_db `document` (referencing the
-    EDMS UUIDs returned by seed_edms);
-  - per-field rows into `submission_extraction`;
-  - for the 'assessed' row, triage and appetite rows into
-    `submission_assessment`.
+The companion seed_edms.py uploads the same documents to the
+Vault (EDMS) so they're discoverable by the Documents tab —
+they just don't have rows in uw_db `document` yet. Clicking
+"Discover Documents" in the UI is what creates those rows.
 
 Usage:
-    # Called from register_all.py with the EDMS doc id map:
-    await seed_uw_db(edms_doc_ids=edms_doc_ids)
+    # Called from register_all.py:
+    await seed_uw_db(drop_existing=True)
 
-    # Or standalone (no document/extraction seeding for non-intake):
+    # Standalone (no schema reset — additive only):
     python -m uw_demo.app.setup.seed_uw
 """
 
 import asyncio
-import json
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 
 import psycopg
 
-# We import SUBMISSION_DOCS so this script and seed_edms agree on
-# which files belong to which submission. Single source of truth.
-from uw_demo.app.setup.seed_edms import SUBMISSION_DOCS
 # Stage-aware state machine helpers — the seed script uses the same
 # transition path the runtime uses so we don't drift away from rule
 # checks in seed-time data shaping.
@@ -194,7 +182,7 @@ SUBMISSIONS = [
             {"year": 2025, "claims": 0, "incurred": 0, "paid": 0, "reserves": 0},
         ],
     },
-    # ── Row 6: DO, mid revenue, software — review ──────────────
+    # ── Row 6: DO, mid revenue, software — intake ──────────────
     {
         "id": "00000006-0006-0006-0006-000000000006",
         "named_insured": "Pinnacle Software Inc",
@@ -214,14 +202,14 @@ SUBMISSIONS = [
         "retention_requested": 150000,
         "prior_carrier": "Liberty Mutual",
         "prior_premium": 78000,
-        "status": "review",
+        "status": "intake",
         "loss_history": [
             {"year": 2023, "claims": 1, "incurred": 95000, "paid": 75000, "reserves": 20000},
             {"year": 2024, "claims": 0, "incurred": 0, "paid": 0, "reserves": 0},
             {"year": 2025, "claims": 1, "incurred": 220000, "paid": 0, "reserves": 220000},
         ],
     },
-    # ── Row 7: DO, large revenue, hardware mfg — review ────────
+    # ── Row 7: DO, large revenue, hardware mfg — intake ────────
     {
         "id": "00000007-0007-0007-0007-000000000007",
         "named_insured": "Westfield Manufacturing Co",
@@ -241,14 +229,14 @@ SUBMISSIONS = [
         "retention_requested": 500000,
         "prior_carrier": "AIG",
         "prior_premium": 195000,
-        "status": "review",
+        "status": "intake",
         "loss_history": [
             {"year": 2023, "claims": 2, "incurred": 380000, "paid": 280000, "reserves": 100000},
             {"year": 2024, "claims": 1, "incurred": 45000, "paid": 45000, "reserves": 0},
             {"year": 2025, "claims": 3, "incurred": 720000, "paid": 200000, "reserves": 520000},
         ],
     },
-    # ── Row 8: GL, mid revenue, precision parts — approved ─────
+    # ── Row 8: GL, mid revenue, precision parts — intake ───────
     {
         "id": "00000008-0008-0008-0008-000000000008",
         "named_insured": "Cascade Precision LLC",
@@ -266,14 +254,14 @@ SUBMISSIONS = [
         "retention_requested": 100000,
         "prior_carrier": "Travelers",
         "prior_premium": 52000,
-        "status": "approved",
+        "status": "intake",
         "loss_history": [
             {"year": 2023, "claims": 1, "incurred": 28000, "paid": 28000, "reserves": 0},
             {"year": 2024, "claims": 1, "incurred": 42000, "paid": 42000, "reserves": 0},
             {"year": 2025, "claims": 0, "incurred": 0, "paid": 0, "reserves": 0},
         ],
     },
-    # ── Row 9: GL, large revenue, structural metal — approved ──
+    # ── Row 9: GL, large revenue, structural metal — intake ────
     {
         "id": "00000009-0009-0009-0009-000000000009",
         "named_insured": "Ironworks Heavy Industries",
@@ -291,14 +279,14 @@ SUBMISSIONS = [
         "retention_requested": 350000,
         "prior_carrier": "Zurich",
         "prior_premium": 215000,
-        "status": "approved",
+        "status": "intake",
         "loss_history": [
             {"year": 2023, "claims": 4, "incurred": 380000, "paid": 320000, "reserves": 60000},
             {"year": 2024, "claims": 3, "incurred": 245000, "paid": 220000, "reserves": 25000},
             {"year": 2025, "claims": 2, "incurred": 110000, "paid": 90000, "reserves": 20000},
         ],
     },
-    # ── Row 10: GL, mid-large revenue, chemicals — assessed ────
+    # ── Row 10: GL, mid-large revenue, chemicals — intake ──────
     {
         "id": "00000010-0010-0010-0010-000000000010",
         "named_insured": "Bayview Chemical Co",
@@ -316,19 +304,173 @@ SUBMISSIONS = [
         "retention_requested": 200000,
         "prior_carrier": "Liberty Mutual",
         "prior_premium": 138000,
-        "status": "assessed",
+        "status": "intake",
         "loss_history": [
             {"year": 2023, "claims": 2, "incurred": 165000, "paid": 165000, "reserves": 0},
             {"year": 2024, "claims": 1, "incurred": 88000, "paid": 88000, "reserves": 0},
             {"year": 2025, "claims": 2, "incurred": 220000, "paid": 80000, "reserves": 140000},
         ],
     },
-    # ── Row 11: GL, small revenue, logistics — documents_received,
-    # but Vault has NO documents for this submission (no entry in
-    # SUBMISSION_DOCS). Exercises the empty-state UX in the
-    # Documents tab — the user sees "no docs" with both Discover
-    # and Upload buttons available even after status has moved
-    # past 'intake'. ─────────────────────────────────────────────
+    # ── Row 12: DO, mid revenue, business services — intake ────
+    {
+        "id": "00000012-0012-0012-0012-000000000012",
+        "named_insured": "Continental Services Corp",
+        "lob": "DO",
+        "fein": "38-9911223",
+        "entity_type": "Corporation",
+        "state_of_incorporation": "Virginia",
+        "sic_code": "7389",
+        "sic_description": "Business Services NEC",
+        "annual_revenue": 60000000,
+        "employee_count": 320,
+        "board_size": 7,
+        "independent_directors": 3,
+        "effective_date": "2026-08-01",
+        "expiration_date": "2027-08-01",
+        "limits_requested": 5000000,
+        "retention_requested": 100000,
+        "prior_carrier": "Hartford",
+        "prior_premium": 58000,
+        "status": "intake",
+        "loss_history": [
+            {"year": 2023, "claims": 0, "incurred": 0, "paid": 0, "reserves": 0},
+            {"year": 2024, "claims": 1, "incurred": 35000, "paid": 35000, "reserves": 0},
+            {"year": 2025, "claims": 0, "incurred": 0, "paid": 0, "reserves": 0},
+        ],
+    },
+    # ── Row 13: GL, small revenue, mining — intake ─────────────
+    {
+        "id": "00000013-0013-0013-0013-000000000013",
+        "named_insured": "Granite Peak Mining LLC",
+        "lob": "GL",
+        "fein": "44-2233445",
+        "entity_type": "LLC",
+        "state_of_incorporation": "Colorado",
+        "sic_code": "1041",
+        "sic_description": "Gold Mining",
+        "annual_revenue": 18000000,
+        "employee_count": 110,
+        "effective_date": "2026-09-15",
+        "expiration_date": "2027-09-15",
+        "limits_requested": 2000000,
+        "retention_requested": 75000,
+        "prior_carrier": "Zurich",
+        "prior_premium": 42000,
+        "status": "intake",
+        "loss_history": [
+            {"year": 2023, "claims": 2, "incurred": 95000, "paid": 75000, "reserves": 20000},
+            {"year": 2024, "claims": 1, "incurred": 38000, "paid": 38000, "reserves": 0},
+            {"year": 2025, "claims": 2, "incurred": 120000, "paid": 60000, "reserves": 60000},
+        ],
+    },
+    # ── Row 14: DO, large revenue, financial services — intake ─
+    {
+        "id": "00000014-0014-0014-0014-000000000014",
+        "named_insured": "Horizon Capital Partners",
+        "lob": "DO",
+        "fein": "61-3344556",
+        "entity_type": "Corporation",
+        "state_of_incorporation": "New York",
+        "sic_code": "6199",
+        "sic_description": "Finance Services",
+        "annual_revenue": 150000000,
+        "employee_count": 540,
+        "board_size": 10,
+        "independent_directors": 6,
+        "effective_date": "2026-05-15",
+        "expiration_date": "2027-05-15",
+        "limits_requested": 12000000,
+        "retention_requested": 350000,
+        "prior_carrier": "Chubb",
+        "prior_premium": 165000,
+        "status": "intake",
+        "loss_history": [
+            {"year": 2023, "claims": 1, "incurred": 180000, "paid": 180000, "reserves": 0},
+            {"year": 2024, "claims": 0, "incurred": 0, "paid": 0, "reserves": 0},
+            {"year": 2025, "claims": 1, "incurred": 95000, "paid": 0, "reserves": 95000},
+        ],
+    },
+    # ── Row 15: GL, mid revenue, environmental services — intake
+    {
+        "id": "00000015-0015-0015-0015-000000000015",
+        "named_insured": "Clearwater Environmental Inc",
+        "lob": "GL",
+        "fein": "73-4455667",
+        "entity_type": "Corporation",
+        "state_of_incorporation": "Washington",
+        "sic_code": "4959",
+        "sic_description": "Environmental Services NEC",
+        "annual_revenue": 40000000,
+        "employee_count": 195,
+        "effective_date": "2026-07-15",
+        "expiration_date": "2027-07-15",
+        "limits_requested": 3000000,
+        "retention_requested": 100000,
+        "prior_carrier": "Liberty Mutual",
+        "prior_premium": 48000,
+        "status": "intake",
+        "loss_history": [
+            {"year": 2023, "claims": 1, "incurred": 55000, "paid": 55000, "reserves": 0},
+            {"year": 2024, "claims": 2, "incurred": 110000, "paid": 80000, "reserves": 30000},
+            {"year": 2025, "claims": 1, "incurred": 42000, "paid": 30000, "reserves": 12000},
+        ],
+    },
+    # ── Row 16: DO, small-mid revenue, technology — intake ─────
+    {
+        "id": "00000016-0016-0016-0016-000000000016",
+        "named_insured": "Novatech Holdings Inc",
+        "lob": "DO",
+        "fein": "85-5566778",
+        "entity_type": "Corporation",
+        "state_of_incorporation": "Texas",
+        "sic_code": "7370",
+        "sic_description": "Computer Services",
+        "annual_revenue": 28000000,
+        "employee_count": 165,
+        "board_size": 6,
+        "independent_directors": 3,
+        "effective_date": "2026-08-01",
+        "expiration_date": "2027-08-01",
+        "limits_requested": 3000000,
+        "retention_requested": 75000,
+        "prior_carrier": "Travelers",
+        "prior_premium": 32000,
+        "status": "intake",
+        "loss_history": [
+            {"year": 2023, "claims": 0, "incurred": 0, "paid": 0, "reserves": 0},
+            {"year": 2024, "claims": 1, "incurred": 22000, "paid": 22000, "reserves": 0},
+            {"year": 2025, "claims": 0, "incurred": 0, "paid": 0, "reserves": 0},
+        ],
+    },
+    # ── Row 17: GL, mid-large revenue, timber/forestry — intake ─
+    {
+        "id": "00000017-0017-0017-0017-000000000017",
+        "named_insured": "Redwood Timber Co",
+        "lob": "GL",
+        "fein": "92-6677889",
+        "entity_type": "Corporation",
+        "state_of_incorporation": "California",
+        "sic_code": "2411",
+        "sic_description": "Logging",
+        "annual_revenue": 110000000,
+        "employee_count": 480,
+        "effective_date": "2026-04-15",
+        "expiration_date": "2027-04-15",
+        "limits_requested": 8000000,
+        "retention_requested": 250000,
+        "prior_carrier": "AIG",
+        "prior_premium": 145000,
+        "status": "intake",
+        "loss_history": [
+            {"year": 2023, "claims": 3, "incurred": 215000, "paid": 180000, "reserves": 35000},
+            {"year": 2024, "claims": 2, "incurred": 130000, "paid": 130000, "reserves": 0},
+            {"year": 2025, "claims": 4, "incurred": 290000, "paid": 100000, "reserves": 190000},
+        ],
+    },
+    # ── Row 11: GL, small revenue, logistics — intake.
+    # Has NO entry in SUBMISSION_DOCS, so Vault is empty for this
+    # submission. Exercises the empty-state UX in the Documents
+    # tab even before any extraction has happened. ──────────────
     {
         "id": "00000011-0011-0011-0011-000000000011",
         "named_insured": "Skyline Logistics Group",
@@ -346,7 +488,7 @@ SUBMISSIONS = [
         "retention_requested": 50000,
         "prior_carrier": "Progressive",
         "prior_premium": 24000,
-        "status": "documents_received",
+        "status": "intake",
         "loss_history": [
             {"year": 2023, "claims": 1, "incurred": 35000, "paid": 35000, "reserves": 0},
             {"year": 2024, "claims": 0, "incurred": 0, "paid": 0, "reserves": 0},
@@ -354,114 +496,6 @@ SUBMISSIONS = [
         ],
     },
 ]
-
-
-# ── EXTRACTION SEED DATA ────────────────────────────────────
-# For submissions in 'review' / 'approved' / 'assessed' we pre-seed
-# `submission_extraction` rows so the UI has realistic data to render
-# without requiring the user to first run the extraction pipeline.
-#
-# 'review' rows include needs_review=TRUE on a couple of fields with
-# lower confidence to demonstrate the HITL flag flow. 'approved' and
-# 'assessed' rows are clean (no review flags).
-#
-# Schema columns in this phase: field_name, extracted_value, confidence,
-# needs_review, review_reason, extraction_notes. Provenance columns
-# (source_document_id, source_page, etc.) are added in a later phase
-# and will be backfilled then.
-
-EXTRACTIONS_BY_SUBMISSION: dict[str, list[dict]] = {
-    # ── Row 6: Pinnacle Software (review) ──────────────────────
-    "00000006-0006-0006-0006-000000000006": [
-        {"field": "named_insured", "value": "Pinnacle Software Inc", "confidence": 0.98},
-        {"field": "fein", "value": "47-3344558", "confidence": 0.95},
-        {"field": "annual_revenue", "value": "80000000", "confidence": 0.91},
-        {"field": "employee_count", "value": "420", "confidence": 0.88},
-        {"field": "board_size", "value": "8", "confidence": 0.92},
-        {"field": "independent_directors", "value": "4", "confidence": 0.65,
-         "needs_review": True, "review_reason": "low_confidence"},
-        {"field": "limits_requested", "value": "7500000", "confidence": 0.94},
-        {"field": "retention_requested", "value": "150000", "confidence": 0.90},
-        {"field": "prior_carrier", "value": "Liberty Mutual", "confidence": 0.62,
-         "needs_review": True, "review_reason": "low_confidence"},
-    ],
-    # ── Row 7: Westfield Manufacturing (review) ────────────────
-    "00000007-0007-0007-0007-000000000007": [
-        {"field": "named_insured", "value": "Westfield Manufacturing Co", "confidence": 0.97},
-        {"field": "fein", "value": "59-4455661", "confidence": 0.96},
-        {"field": "annual_revenue", "value": "200000000", "confidence": 0.89},
-        {"field": "employee_count", "value": "1100", "confidence": 0.87},
-        {"field": "board_size", "value": "11", "confidence": 0.91},
-        {"field": "independent_directors", "value": "6", "confidence": 0.85},
-        {"field": "limits_requested", "value": "15000000", "confidence": 0.66,
-         "needs_review": True, "review_reason": "low_confidence"},
-        {"field": "retention_requested", "value": "500000", "confidence": 0.93},
-        {"field": "prior_carrier", "value": "AIG", "confidence": 0.95},
-    ],
-    # ── Row 8: Cascade Precision (approved) ────────────────────
-    "00000008-0008-0008-0008-000000000008": [
-        {"field": "named_insured", "value": "Cascade Precision LLC", "confidence": 0.98},
-        {"field": "fein", "value": "82-5566772", "confidence": 0.96},
-        {"field": "annual_revenue", "value": "45000000", "confidence": 0.94},
-        {"field": "employee_count", "value": "220", "confidence": 0.93},
-        {"field": "limits_requested", "value": "4000000", "confidence": 0.95},
-        {"field": "retention_requested", "value": "100000", "confidence": 0.92},
-        {"field": "prior_carrier", "value": "Travelers", "confidence": 0.97},
-    ],
-    # ── Row 9: Ironworks Heavy (approved) ──────────────────────
-    "00000009-0009-0009-0009-000000000009": [
-        {"field": "named_insured", "value": "Ironworks Heavy Industries", "confidence": 0.99},
-        {"field": "fein", "value": "91-6677883", "confidence": 0.97},
-        {"field": "annual_revenue", "value": "180000000", "confidence": 0.91},
-        {"field": "employee_count", "value": "950", "confidence": 0.89},
-        {"field": "limits_requested", "value": "12000000", "confidence": 0.94},
-        {"field": "retention_requested", "value": "350000", "confidence": 0.90},
-        {"field": "prior_carrier", "value": "Zurich", "confidence": 0.95},
-    ],
-    # ── Row 10: Bayview Chemical (assessed) ────────────────────
-    "00000010-0010-0010-0010-000000000010": [
-        {"field": "named_insured", "value": "Bayview Chemical Co", "confidence": 0.98},
-        {"field": "fein", "value": "16-7788994", "confidence": 0.95},
-        {"field": "annual_revenue", "value": "95000000", "confidence": 0.92},
-        {"field": "employee_count", "value": "410", "confidence": 0.90},
-        {"field": "limits_requested", "value": "8000000", "confidence": 0.93},
-        {"field": "retention_requested", "value": "200000", "confidence": 0.91},
-        {"field": "prior_carrier", "value": "Liberty Mutual", "confidence": 0.96},
-    ],
-}
-
-
-# ── ASSESSMENT SEED DATA ────────────────────────────────────
-# Only the 'assessed' submission gets pre-seeded triage + appetite.
-# Everything else lights up via the live mock pipeline when the user
-# clicks Process Documents → Assess Risk.
-
-ASSESSMENTS_BY_SUBMISSION: dict[str, dict[str, dict]] = {
-    "00000010-0010-0010-0010-000000000010": {
-        "triage": {
-            "risk_score": "Amber",
-            "routing": "assign_to_senior_uw",
-            "confidence": 0.84,
-            "reasoning": (
-                "Bayview Chemical has a clean financial profile and "
-                "moderate claims frequency, but 2025 reserves remain "
-                "open at $140K and the SIC 2899 chemical class warrants "
-                "senior review for products/completed-ops exposure. "
-                "Routing to senior underwriter."
-            ),
-        },
-        "appetite": {
-            "determination": "borderline",
-            "confidence": 0.78,
-            "reasoning": (
-                "Industrial chemicals (SIC 2899) is on the appetite "
-                "watch list. Revenue and loss history are within "
-                "guidelines but the sector requires explicit senior "
-                "approval per §4.1 of the GL guidelines."
-            ),
-        },
-    },
-}
 
 
 # ── SEEDING LOGIC ────────────────────────────────────────────
@@ -518,234 +552,64 @@ async def _seed_loss_history(cur, sub: dict) -> None:
 
 
 async def _seed_submission_stages(cur, sub: dict) -> None:
-    """Seed submission_stage rows so the new submission lands in
-    the same workflow position the old `status` enum implied.
+    """Seed submission_stage rows for a freshly-created submission.
 
-    Status mapping (from the legacy `status` field on the seed dict
-    to the per-stage statuses we now write):
+    Every seeded submission lands in the same starting state:
+      - intake.complete (the submission record exists)
+      - all other stages stay at their default 'pending'
 
-      intake               — all stages pending
-      documents_received   — intake.complete,
-                             document_processing.blocked_on_input
-                             (waiting for the user to click Process)
-      review               — intake + document_processing complete,
-                             information_review.running
-      approved             — through information_review complete
-      assessed             — all forward stages complete
-      declined             — declined.failed (terminal)
-
-    Re-uses the runtime's transition_stage helper so the audit
-    events the runtime would emit are emitted here too — seeded
-    submissions get a coherent submission_event timeline.
-    """
+    The user advances each submission forward through the workflow
+    via the UI. Re-uses transition_stage so the seed-time intake
+    completion lands in submission_event with the same shape as a
+    runtime-driven transition would."""
     sid = sub["id"]
-    status = sub.get("status", "intake")
-
-    # Always create the row-per-stage skeleton first.
     await ensure_stages(cur, sid)
-
-    # Intake is "we have the submission record" — true by virtue of
-    # the row existing. Transition unconditionally so even the
-    # freshest 'intake' submission has its first stage marked done
-    # and current_stage moves to document_processing.
-    await transition_stage(cur, sid, "intake", "complete",
-                            changed_by="seed_script",
-                            reason="seed: intake auto-complete (row exists)")
-
-    # Walk forward stages to the position implied by the legacy
-    # `status` field. transition_stage is idempotent on same-status,
-    # so unhit stages stay at their default 'pending'.
-
-    if status == "documents_received":
-        await transition_stage(cur, sid, "document_processing",
-                                "blocked_on_input",
-                                changed_by="seed_script",
-                                blocked_reason="awaiting_pipeline_trigger",
-                                reason="seed: docs discovered, awaiting processing")
-
-    if status in ("review", "approved", "assessed"):
-        await transition_stage(cur, sid, "document_processing", "complete",
-                                changed_by="seed_script",
-                                reason="seed: doc-processing pipeline finished")
-
-    if status == "review":
-        await transition_stage(cur, sid, "information_review", "running",
-                                changed_by="seed_script",
-                                reason="seed: HITL review pending")
-
-    if status in ("approved", "assessed"):
-        await transition_stage(cur, sid, "information_review", "complete",
-                                changed_by="seed_script",
-                                reason="seed: review approved (auto or HITL)")
-
-    if status == "assessed":
-        await transition_stage(cur, sid, "triage", "complete",
-                                changed_by="seed_script",
-                                reason="seed: triage complete")
-        await transition_stage(cur, sid, "appetite", "complete",
-                                changed_by="seed_script",
-                                reason="seed: appetite complete")
+    await transition_stage(
+        cur, sid, "intake", "complete",
+        changed_by="seed_script",
+        reason="seed: intake auto-complete (row exists)",
+    )
 
 
-async def _seed_documents(cur, sub: dict, edms_doc_ids: dict[str, str]) -> int:
-    """Insert one `document` row per file in SUBMISSION_DOCS for this
-    submission. Looks up each filename in the edms_doc_ids map (built
-    by seed_edms during upload). Files not found in the map are
-    skipped with a warning print — usually means seed_edms didn't run
-    or the file is missing from seed_docs/filled/.
-
-    Returns the number of rows inserted."""
-    filenames = SUBMISSION_DOCS.get(sub["id"], [])
-    if not filenames:
-        return 0
-
-    inserted = 0
-    for fname in filenames:
-        edms_uuid = edms_doc_ids.get(fname)
-        if not edms_uuid:
-            print(f"    ! skip {fname} — not in EDMS upload map")
-            continue
-        # content_type from extension; cheap and good enough for the
-        # demo display. EDMS already has the canonical value.
-        content_type = "application/pdf" if fname.endswith(".pdf") else "text/plain"
-        await cur.execute(
-            """INSERT INTO document (
-                submission_id, edms_document_id, filename, content_type,
-                discovery_status, extraction_status
-            ) VALUES (%s, %s, %s, %s, 'received', 'pending')
-            ON CONFLICT (submission_id, edms_document_id) DO NOTHING
-            """,
-            (sub["id"], edms_uuid, fname, content_type),
-        )
-        inserted += 1
-    return inserted
+# DROP order respects FK dependencies — children before parents.
+# Submission_event, submission_extraction_audit, submission_extraction,
+# submission_assessment, document, loss_history, submission_stage all
+# reference submission. app_settings stands alone.
+_DROP_TABLES_SQL = """
+DROP TABLE IF EXISTS submission_event           CASCADE;
+DROP TABLE IF EXISTS submission_extraction_audit CASCADE;
+DROP TABLE IF EXISTS submission_extraction      CASCADE;
+DROP TABLE IF EXISTS submission_assessment      CASCADE;
+DROP TABLE IF EXISTS document                   CASCADE;
+DROP TABLE IF EXISTS loss_history               CASCADE;
+DROP TABLE IF EXISTS submission_stage           CASCADE;
+DROP TABLE IF EXISTS submission                 CASCADE;
+DROP TABLE IF EXISTS app_settings               CASCADE;
+DROP TYPE  IF EXISTS stage_status_enum;
+DROP TYPE  IF EXISTS submission_stage_enum;
+"""
 
 
-def _application_filename(submission_id: str) -> str | None:
-    """Pick the submission's primary application PDF — the
-    do_app_*.pdf or gl_app_*.pdf in its SUBMISSION_DOCS list.
-    That's the file most extracted fields are sourced from for
-    seed purposes; the sparkle tooltip names it as the source.
-    Falls back to the first listed file when no application file
-    is identified."""
-    files = SUBMISSION_DOCS.get(submission_id, [])
-    for f in files:
-        if f.startswith("do_app_") or f.startswith("gl_app_"):
-            return f
-    return files[0] if files else None
-
-
-async def _seed_extractions(cur, sub: dict) -> int:
-    """Insert per-field extraction rows in the new ai_*/hitl_* model
-    with structured provenance the sparkle UX needs.
-
-    For each seeded field we set:
-      ai_value, ai_confidence, ai_found=TRUE
-      source_document_id  (uw_db `document.id` of the submission's
-                           primary application PDF)
-      source_snippet      (a quoted version of the value; stand-in
-                           for a real verbatim quote)
-      extractor_id        ('field_extractor@seed' so the sparkle
-                           tooltip's Extractor: line is non-empty)
-      output_path         ('$.fields.<name>.value' — same convention
-                           live runs use)
-      verity_execution_run_id stays NULL on seeded rows because no
-      Verity decision exists; the edit handler will recognise NULL
-      and skip the override-API forwarding path for these rows."""
-    fields = EXTRACTIONS_BY_SUBMISSION.get(sub["id"])
-    if not fields:
-        return 0
-
-    # Resolve the source document id once per submission.
-    src_filename = _application_filename(sub["id"])
-    src_doc_id: str | None = None
-    if src_filename:
-        await cur.execute(
-            """SELECT id FROM document
-            WHERE submission_id = %s AND filename = %s""",
-            (sub["id"], src_filename),
-        )
-        row = await cur.fetchone()
-        if row:
-            src_doc_id = str(row[0])
-
-    for f in fields:
-        snippet = f'"{f["value"]}"' if f.get("value") is not None else None
-        output_path = f"$.fields.{f['field']}.value"
-        await cur.execute(
-            """INSERT INTO submission_extraction (
-                submission_id, field_name,
-                ai_value, ai_confidence, ai_found,
-                source_document_id, source_snippet,
-                extractor_id, output_path,
-                needs_review, review_reason
-            ) VALUES (%s, %s, %s, %s, TRUE, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (submission_id, field_name) DO NOTHING
-            """,
-            (
-                sub["id"], f["field"], f["value"], f["confidence"],
-                src_doc_id, snippet,
-                "field_extractor@seed", output_path,
-                f.get("needs_review", False), f.get("review_reason"),
-            ),
-        )
-    return len(fields)
-
-
-async def _seed_assessments(cur, sub: dict) -> int:
-    """Insert triage and appetite rows for the 'assessed' submission."""
-    by_type = ASSESSMENTS_BY_SUBMISSION.get(sub["id"])
-    if not by_type:
-        return 0
-
-    triage = by_type.get("triage")
-    if triage:
-        await cur.execute(
-            """INSERT INTO submission_assessment (
-                submission_id, assessment_type, result,
-                risk_score, routing, confidence, reasoning
-            ) VALUES (%s, 'triage', %s, %s, %s, %s, %s)
-            ON CONFLICT (submission_id, assessment_type) DO NOTHING
-            """,
-            (
-                sub["id"], json.dumps(triage),
-                triage.get("risk_score"), triage.get("routing"),
-                triage.get("confidence"), triage.get("reasoning"),
-            ),
-        )
-
-    appetite = by_type.get("appetite")
-    if appetite:
-        await cur.execute(
-            """INSERT INTO submission_assessment (
-                submission_id, assessment_type, result,
-                determination, confidence, reasoning
-            ) VALUES (%s, 'appetite', %s, %s, %s, %s)
-            ON CONFLICT (submission_id, assessment_type) DO NOTHING
-            """,
-            (
-                sub["id"], json.dumps(appetite),
-                appetite.get("determination"),
-                appetite.get("confidence"), appetite.get("reasoning"),
-            ),
-        )
-    return (1 if triage else 0) + (1 if appetite else 0)
-
-
-async def seed_uw_db(edms_doc_ids: dict[str, str] | None = None):
+async def seed_uw_db(*, drop_existing: bool = False):
     """Apply schema and insert all demo data.
 
     Args:
-        edms_doc_ids: filename → EDMS UUID map returned by seed_edms.
-            When None (standalone run), document/extraction/assessment
-            seeding for non-intake submissions is skipped.
+        drop_existing: if True, drop all uw_db tables/types before
+            re-applying the schema. Used by register_all to make every
+            seed run reproducible — submissions, stages, and audit
+            events all start from an empty slate. EDMS uploads are
+            owned by seed_edms.py; uw_db `document` rows are created
+            by the user's "Discover Documents" click in the UI.
     """
-    edms_doc_ids = edms_doc_ids or {}
-
     # ── Apply schema (idempotent — uses IF NOT EXISTS) ────────
     schema_sql = SCHEMA_FILE.read_text()
 
     async with await psycopg.AsyncConnection.connect(UW_DB_URL) as conn:
+        if drop_existing:
+            async with conn.cursor() as cur:
+                await cur.execute(_DROP_TABLES_SQL)
+            await conn.commit()
+            print("  + uw_db tables dropped")
         async with conn.cursor() as cur:
             await cur.execute(schema_sql)
         await conn.commit()
@@ -767,23 +631,7 @@ async def seed_uw_db(edms_doc_ids: dict[str, str] | None = None):
                 await _seed_loss_history(cur, sub)
                 await _seed_submission_stages(cur, sub)
 
-                # For non-intake rows, seed documents + extractions
-                # (and assessments for 'assessed').
-                doc_count = 0
-                ext_count = 0
-                ass_count = 0
-                if sub.get("status", "intake") != "intake":
-                    doc_count = await _seed_documents(cur, sub, edms_doc_ids)
-                    ext_count = await _seed_extractions(cur, sub)
-                    ass_count = await _seed_assessments(cur, sub)
-
-                tag = f"{sub['named_insured']} ({sub['lob']}, {sub.get('status', 'intake')})"
-                extras: list[str] = []
-                if doc_count: extras.append(f"{doc_count} docs")
-                if ext_count: extras.append(f"{ext_count} extractions")
-                if ass_count: extras.append(f"{ass_count} assessments")
-                extras_str = f" [{', '.join(extras)}]" if extras else ""
-                print(f"  + {tag}{extras_str}")
+                print(f"  + {sub['named_insured']} ({sub['lob']}, intake)")
 
         await conn.commit()
         print(f"  + {len(SUBMISSIONS)} submissions seeded")
