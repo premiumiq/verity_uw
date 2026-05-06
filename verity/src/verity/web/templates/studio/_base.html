@@ -1,0 +1,175 @@
+<!--
+  STUDIO BASE TEMPLATE — Verity Studio
+
+  Sibling of templates/base.html (Admin). Studio reuses the same
+  Verity brand chrome (sidebar + topbar + content area, all driven
+  by .verity-* CSS classes in verity.css) but with a four-mode left
+  rail tailored to the authoring journey.
+
+  EXTENDING THIS TEMPLATE:
+  Mode pages override these Jinja2 blocks:
+  - block title          — Browser tab title
+  - block breadcrumbs    — Breadcrumb items below "Verity Studio"
+  - block page_title     — H1 below breadcrumbs
+  - block content        — Main page content
+
+  Mode pages also pass:
+  - active_mode  — one of "compose", "validate", "deploy", "govern".
+                   Highlights the corresponding nav link.
+
+  ASSETS:
+  - Tailwind via CDN (utility classes for layout)
+  - HTMX via CDN (will be used by later slices for partial updates)
+  - Poppins via Google Fonts (matches Admin console)
+  - /studio/static/verity.css — shared brand stylesheet
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Verity Studio{% endblock %}</title>
+
+    <!-- Poppins font from Google Fonts (matches Admin console) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Tailwind CSS — utility classes for layout -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- HTMX — used by later slices for live previews and partial saves -->
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+
+    <!-- Verity brand stylesheet — shared with the Admin console -->
+    <link rel="stylesheet" href="/studio/static/verity.css">
+
+    <!--
+      Studio-specific micro-styles. Kept inline so Slice 1 doesn't
+      touch verity.css. Anything that earns its keep can be lifted
+      into verity.css in a later slice.
+    -->
+    <style>
+        /* "Exit Studio" button — the way back out to the Admin
+           console. Lives at the very top of the sidebar with extra
+           visual weight so it reads as an exit action, not as part
+           of the mode navigation below. */
+        .studio-exit-button {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 14px 16px;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--verity-text-sidebar-dim);
+            font-size: 0.8rem;
+            font-weight: 500;
+            text-decoration: none;
+            border-radius: 4px;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+        }
+        .studio-exit-button:hover {
+            background: rgba(255, 255, 255, 0.16);
+            color: white;
+            border-color: rgba(255, 255, 255, 0.28);
+        }
+        .studio-exit-arrow {
+            font-size: 1rem;
+            line-height: 1;
+        }
+    </style>
+</head>
+<body>
+
+<!-- ============================================================
+     PAGE LAYOUT: Sidebar (fixed left) + Main Content (right)
+     Same .verity-layout wrapper as the Admin console — visual
+     consistency without code duplication.
+     ============================================================ -->
+<div class="verity-layout">
+
+    <!-- ── LEFT SIDEBAR ─────────────────────────────────────── -->
+    <nav class="verity-sidebar">
+
+        <!-- Exit-Studio button at the top — visually distinct from
+             the mode rail below so users see it as a way out, not
+             another nav item. -->
+        <a href="/admin/" class="studio-exit-button">
+            <span class="studio-exit-arrow">←</span>
+            <span>Exit Studio</span>
+        </a>
+
+        <!-- Brand / Logo area. Says "STUDIO" so it's unmistakable
+             which app you're in. -->
+        <div class="verity-sidebar-brand">
+            <img src="/studio/static/images/verity_white_logo.png"
+                 alt="Verity"
+                 style="height: 56px; margin-bottom: 4px;">
+            <div class="verity-subtitle">STUDIO</div>
+        </div>
+
+        <!-- Four-mode navigation. Clean icon + label per item — no
+             captions, the labels are short enough to stand alone. -->
+        <div class="verity-sidebar-nav">
+
+            <a href="/studio/compose"
+               class="verity-nav-link {% if active_mode == 'compose' %}active{% endif %}">
+                <span class="verity-nav-icon">✎</span> Compose
+            </a>
+
+            <a href="/studio/validate"
+               class="verity-nav-link {% if active_mode == 'validate' %}active{% endif %}">
+                <span class="verity-nav-icon">⏵</span> Validate
+            </a>
+
+            <a href="/studio/deploy"
+               class="verity-nav-link {% if active_mode == 'deploy' %}active{% endif %}">
+                <span class="verity-nav-icon">⤴</span> Deploy
+            </a>
+
+            <a href="/studio/govern"
+               class="verity-nav-link {% if active_mode == 'govern' %}active{% endif %}">
+                <span class="verity-nav-icon">⚖</span> Govern
+            </a>
+
+        </div><!-- end sidebar-nav -->
+
+        <!-- Footer: version stamp. Kept minimal because Studio borrows
+             the Verity brand and version. -->
+        <div style="padding: 0 16px 10px; font-size: 0.6rem;
+                    color: rgba(255, 255, 255, 0.3);">
+            Verity Studio v0.1.0
+        </div>
+
+    </nav><!-- end sidebar -->
+
+
+    <!-- ── MAIN CONTENT AREA ────────────────────────────────── -->
+    <main class="verity-main">
+
+        <!-- Top bar: breadcrumbs + page title -->
+        <div class="verity-topbar">
+
+            <!-- Breadcrumbs — navigable path. Studio root segment
+                 always points back to the Compose default landing. -->
+            <div class="verity-breadcrumbs">
+                <a href="/studio/">Verity Studio</a>
+                {% block breadcrumbs %}{% endblock %}
+            </div>
+
+            <!-- Page title -->
+            <h1 class="verity-page-title">{% block page_title %}Studio{% endblock %}</h1>
+        </div>
+
+        <!-- Page content -->
+        <div class="verity-content">
+            {% block content %}{% endblock %}
+        </div>
+
+    </main><!-- end main -->
+
+</div><!-- end layout -->
+
+</body>
+</html>

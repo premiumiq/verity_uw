@@ -23,6 +23,7 @@ from verity.client.inprocess import Verity
 from verity.utils.logging import CorrelationMiddleware, setup_logging
 from verity.web.api.router import build_api_router
 from verity.web.app import create_verity_web
+from verity.web.studio_app import create_verity_studio
 
 
 # Load .env from current working directory
@@ -95,3 +96,10 @@ app.include_router(build_api_router(verity))
 # Mount the Verity admin web UI at /admin/
 verity_web = create_verity_web(verity)
 app.mount("/admin", verity_web)
+
+# Mount Verity Studio (authoring + governance frontend) at /studio/.
+# Studio is a sibling sub-app of the Admin console — same FastAPI
+# process, same database, same /api/v1/* API surface. See
+# docs/plans/studio-build-plan.md.
+verity_studio = create_verity_studio(verity)
+app.mount("/studio", verity_studio)

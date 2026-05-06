@@ -491,15 +491,24 @@ class Registry:
 
     async def update_agent_version_draft(self, version_id, **fields) -> Optional[dict]:
         """Update mutable fields on a draft agent_version. Returns the
-        updated row on success, None if the version isn't in draft."""
+        updated row on success, None if the version isn't in draft OR
+        the optimistic-concurrency stamp doesn't match.
+
+        Optional kwarg ``expected_updated_at`` (datetime/str/None): if
+        provided, the UPDATE only applies when the row's current
+        updated_at still equals this stamp. None means "no concurrency
+        check" (legacy callers continue to work). See
+        docs/plans/studio-build-plan.md §2.14.
+        """
         params = dict(fields)
         params["version_id"] = str(version_id)
-        # SQL uses COALESCE — missing keys must be present as None so
-        # psycopg has something to bind each placeholder to.
+        # SQL uses COALESCE for COALESCE-able fields and a guarded
+        # comparison for expected_updated_at — both need the param to
+        # exist (as None) when the caller didn't supply it.
         for key in ("inference_config_id", "output_schema", "authority_thresholds",
                     "mock_mode_enabled", "decision_log_detail",
                     "developer_name", "change_summary", "change_type",
-                    "limitations_this_version"):
+                    "limitations_this_version", "expected_updated_at"):
             params.setdefault(key, None)
         if params["inference_config_id"] is not None:
             params["inference_config_id"] = str(params["inference_config_id"])
@@ -507,10 +516,14 @@ class Registry:
         return await self.db.execute_returning("update_agent_version_draft", params)
 
     async def update_task_version_draft(self, version_id, **fields) -> Optional[dict]:
+        """Update mutable fields on a draft task_version. See
+        ``update_agent_version_draft`` for the ``expected_updated_at``
+        contract."""
         params = dict(fields)
         params["version_id"] = str(version_id)
         for key in ("inference_config_id", "output_schema", "mock_mode_enabled",
-                    "decision_log_detail", "developer_name", "change_summary", "change_type"):
+                    "decision_log_detail", "developer_name", "change_summary",
+                    "change_type", "expected_updated_at"):
             params.setdefault(key, None)
         if params["inference_config_id"] is not None:
             params["inference_config_id"] = str(params["inference_config_id"])
@@ -518,10 +531,14 @@ class Registry:
         return await self.db.execute_returning("update_task_version_draft", params)
 
     async def update_prompt_version_draft(self, version_id, **fields) -> Optional[dict]:
+        """Update mutable fields on a draft prompt_version. See
+        ``update_agent_version_draft`` for the ``expected_updated_at``
+        contract."""
         params = dict(fields)
         params["version_id"] = str(version_id)
         for key in ("content", "api_role", "governance_tier",
-                    "change_summary", "sensitivity_level", "author_name"):
+                    "change_summary", "sensitivity_level", "author_name",
+                    "expected_updated_at"):
             params.setdefault(key, None)
         return await self.db.execute_returning("update_prompt_version_draft", params)
 
@@ -904,6 +921,95 @@ class Registry:
 
     async def list_prompt_versions(self, prompt_id: UUID) -> list[dict]:
         return await self.db.fetch_all("list_prompt_versions", {"prompt_id": str(prompt_id)})
+
+    async def get_inference_config_by_name(self, name: str) -> Optional[dict]:
+        return await self.db.fetch_one(
+            "get_inference_config_by_name", {"config_name": name},
+        )
+
+    async def update_tool(
+        self, tool_id, **fields,
+    ) -> Optional[dict]:
+        """Update mutable fields on a tool row in place.
+
+        Tools are global and unversioned. Optional kwarg
+        ``expected_updated_at`` carries the optimistic-concurrency
+        stamp the editor captured on read.
+        """
+        params = dict(fields)
+        params["tool_id"] = str(tool_id)
+        for key in (
+            "display_name", "description",
+            "input_schema", "output_schema",
+            "transport", "mcp_server_name", "mcp_tool_name",
+            "implementation_path",
+            "mock_mode_enabled", "mock_response_key", "mock_responses",
+            "data_classification_max",
+            "is_write_operation", "requires_confirmation",
+            "tags", "expected_updated_at",
+        ):
+            params.setdefault(key, None)
+        params = _prepare_json_params(
+            params,
+            json_fields=["input_schema", "output_schema", "mock_responses"],
+        )
+        return await self.db.execute_returning("update_tool", params)
+
+    async def update_inference_config(
+        self, config_id, **fields,
+    ) -> Optional[dict]:
+        """Update mutable fields on an inference_config row in place.
+
+        Configs are not versioned — this is the only update path.
+        Optional kwarg ``expected_updated_at`` (ISO timestamp / datetime
+        / None) carries the optimistic-concurrency stamp the editor
+        captured on read; a mismatch returns None (the API/Studio
+        layer translates that into 409 stale_write).
+        """
+        params = dict(fields)
+        params["config_id"] = str(config_id)
+        for key in (
+            "display_name", "description", "intended_use", "model_name",
+            "temperature", "max_tokens", "top_p", "top_k",
+            "stop_sequences", "extended_params", "expected_updated_at",
+        ):
+            params.setdefault(key, None)
+        params = _prepare_json_params(params, json_fields=["extended_params"])
+        return await self.db.execute_returning(
+            "update_inference_config", params,
+        )
+
+    # ── WHERE-USED REVERSE LOOKUP ─────────────────────────────
+    # Reads governance.entity_consumers (a view defined in
+    # schema.sql) joined to consumer headers + version rows so
+    # callers get name / version_label / lifecycle_state in one
+    # round-trip. Studio's safe-edit guarantee uses this to
+    # block in-place save when a champion or challenger consumes
+    # the row being edited. See
+    # docs/plans/studio-build-plan.md §2.13.
+
+    async def get_entity_consumers(
+        self, used_type: str, used_id,
+    ) -> list[dict]:
+        """List the agent_version / task_version rows that consume
+        the given asset.
+
+        Args:
+            used_type: One of 'prompt', 'tool', 'inference_config',
+                'data_connector'. Other values return [] because the
+                view doesn't have edges for them.
+            used_id: The asset's UUID. Accepts UUID or str.
+
+        Returns:
+            A list of dicts: ``{consumer_type, consumer_id,
+            consumer_name, version_label, lifecycle_state}``,
+            ordered by lifecycle_state then name then version.
+            Empty list if the asset has no consumers.
+        """
+        return await self.db.fetch_all(
+            "get_entity_consumers",
+            {"used_type": used_type, "used_id": str(used_id)},
+        )
 
     # ── APPLICATION & CONTEXT ─────────────────────────────────
 

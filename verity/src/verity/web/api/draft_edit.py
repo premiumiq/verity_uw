@@ -31,6 +31,10 @@ async def _ensure_draft_result(row, version_id: str, entity_type: str):
     SQL draft-guarded UPDATEs / DELETEs return zero rows for non-draft
     targets. The lookup here fetches the real current state so the
     caller knows WHY the edit was rejected.
+
+    Used by DELETE handlers — for PATCH, prefer
+    ``_classify_update_failure`` which also handles the stale_write
+    case introduced by the optimistic-concurrency contract.
     """
     if row:
         return
@@ -40,6 +44,79 @@ async def _ensure_draft_result(row, version_id: str, entity_type: str):
             f"{entity_type} version {version_id} is not editable — it is "
             f"not in draft state. Clone it into a new draft instead."
         ),
+    )
+
+
+# Map entity_type → the named SQL query that returns the row's
+# current lifecycle_state and updated_at. Used by
+# ``_classify_update_failure``.
+_STATUS_QUERY_BY_ENTITY = {
+    "agent": "get_agent_version_status_for_concurrency",
+    "task": "get_task_version_status_for_concurrency",
+    "prompt": "get_prompt_version_status_for_concurrency",
+}
+
+
+async def _classify_update_failure(
+    verity, entity_type: str, version_id: str,
+) -> HTTPException:
+    """Diagnose why a draft UPDATE returned zero rows.
+
+    The draft-guarded UPDATE queries match nothing when:
+      1. The row doesn't exist at all                  → 404
+      2. The row exists but lifecycle_state != 'draft' → 409 lifecycle conflict
+      3. The row is in draft but updated_at differs    → 409 stale_write
+
+    This helper does a follow-up SELECT to determine which case applies
+    and returns the appropriate HTTPException. The follow-up is only
+    paid on the failure path — the success path bypasses it entirely.
+    See docs/plans/studio-build-plan.md §2.14.
+    """
+    query_name = _STATUS_QUERY_BY_ENTITY.get(entity_type)
+    if query_name is None:
+        # Caller bug — shouldn't happen for the current PATCH set.
+        return HTTPException(
+            status_code=500,
+            detail=f"Unknown entity_type for concurrency check: {entity_type!r}",
+        )
+
+    row = await verity.db.fetch_one(query_name, {"version_id": str(version_id)})
+
+    # Case 1: nothing with that id.
+    if not row:
+        return HTTPException(
+            status_code=404,
+            detail=f"{entity_type} version {version_id} not found.",
+        )
+
+    # Case 2: row exists but is not editable. Keep the existing 409
+    # message — existing tests assert on the "not editable" substring.
+    state = row.get("lifecycle_state")
+    if state != "draft":
+        return HTTPException(
+            status_code=409,
+            detail=(
+                f"{entity_type} version {version_id} is not editable — it is "
+                f"not in draft state. Clone it into a new draft instead."
+            ),
+        )
+
+    # Case 3: row IS in draft, so the only remaining cause for a
+    # zero-row UPDATE is a stale optimistic-concurrency stamp.
+    current_updated_at = row.get("updated_at")
+    return HTTPException(
+        status_code=409,
+        detail={
+            "error_code": "stale_write",
+            "current_updated_at": (
+                current_updated_at.isoformat() if current_updated_at else None
+            ),
+            "message": (
+                f"Another save updated this {entity_type} version after you "
+                "read it. Reload to see the current state, then re-apply "
+                "your edits."
+            ),
+        },
     )
 
 
@@ -60,7 +137,15 @@ def build_draft_edit_router(verity) -> APIRouter:
         mock_mode_enabled, decision_log_detail, developer_name,
         change_summary, change_type, limitations_this_version.
 
-        Returns 409 if the version is not in draft.
+        Optional optimistic-concurrency field:
+            expected_updated_at — ISO 8601 timestamp the client last
+            read for this row. When supplied, the UPDATE only applies
+            if the row's current updated_at still matches. Mismatch
+            returns 409 with ``error_code: stale_write``.
+
+        Returns 404 if the version doesn't exist, 409 if it isn't in
+        draft, or 409 stale_write if a concurrent save advanced the
+        stamp. See docs/plans/studio-build-plan.md §2.14.
         """
         try:
             row = await verity.registry.update_agent_version_draft(
@@ -68,7 +153,8 @@ def build_draft_edit_router(verity) -> APIRouter:
             )
         except (ValueError, PsycopgError) as exc:
             raise _as_400(exc)
-        await _ensure_draft_result(row, version_id, "agent")
+        if not row:
+            raise await _classify_update_failure(verity, "agent", version_id)
         return row
 
     @router.patch("/tasks/{name}/versions/{version_id}")
@@ -79,6 +165,9 @@ def build_draft_edit_router(verity) -> APIRouter:
 
         Editable: inference_config_id, output_schema, mock_mode_enabled,
         decision_log_detail, developer_name, change_summary, change_type.
+
+        Accepts ``expected_updated_at`` for optimistic concurrency —
+        see ``update_agent_version`` for the contract.
         """
         try:
             row = await verity.registry.update_task_version_draft(
@@ -86,7 +175,8 @@ def build_draft_edit_router(verity) -> APIRouter:
             )
         except (ValueError, PsycopgError) as exc:
             raise _as_400(exc)
-        await _ensure_draft_result(row, version_id, "task")
+        if not row:
+            raise await _classify_update_failure(verity, "task", version_id)
         return row
 
     @router.patch("/prompts/{name}/versions/{version_id}")
@@ -97,6 +187,9 @@ def build_draft_edit_router(verity) -> APIRouter:
 
         Editable: content, api_role, governance_tier, change_summary,
         sensitivity_level, author_name.
+
+        Accepts ``expected_updated_at`` for optimistic concurrency —
+        see ``update_agent_version`` for the contract.
         """
         try:
             row = await verity.registry.update_prompt_version_draft(
@@ -104,7 +197,8 @@ def build_draft_edit_router(verity) -> APIRouter:
             )
         except (ValueError, PsycopgError) as exc:
             raise _as_400(exc)
-        await _ensure_draft_result(row, version_id, "prompt")
+        if not row:
+            raise await _classify_update_failure(verity, "prompt", version_id)
         return row
 
     # ── PUT — transactional replace of an association set ───────

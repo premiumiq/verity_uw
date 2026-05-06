@@ -1,0 +1,55 @@
+{#
+  Save-status partial.
+
+  Replaces the #save-status div under any Studio editor form. The
+  HTMX ``hx-swap="outerHTML"`` swaps this whole div in, so the partial
+  must include the wrapper element with the same id.
+
+  Inputs (one of three shapes, by ``status``):
+
+    status="ok":
+      new_updated_at  — ISO 8601 timestamp of the row's new stamp.
+      entity_label    — Short label for the saved entity to surface
+                        in the message (e.g. ``v1.2.0`` for a prompt
+                        version, ``claude_default`` for a config).
+                        Optional.
+
+    status="conflict":
+      current_updated_at — server's current stamp; informs the user
+                           how stale they were.
+      reload_url         — Absolute URL to GET to see the current
+                           state. The user's edits stay in the form
+                           above.
+
+    status="error":
+      message — free-form error message to surface verbatim.
+#}
+<div id="save-status" style="margin-top: 12px;">
+{% if status == "ok" %}
+    <div style="padding: 12px 16px; background: #E8F0E9; color: #4D6E54;
+                border-radius: 3px; border-left: 3px solid #8AB391;">
+        <strong>Saved.</strong>
+        {% if entity_label %}
+            <code>{{ entity_label }}</code>
+        {% endif %}
+        now updated at <code>{{ new_updated_at }}</code>.
+    </div>
+{% elif status == "conflict" %}
+    <div style="padding: 12px 16px; background: #F9F0DA; color: #8A6925;
+                border-radius: 3px; border-left: 3px solid #E3B447;">
+        <strong>Stale save.</strong>
+        Someone else updated this row at
+        <code>{{ current_updated_at }}</code> after you opened the
+        editor. Your edits are still in the form above —
+        <a href="{{ reload_url }}"
+           style="color: var(--verity-blue-dark); text-decoration: underline;">reload to see the current state</a>
+        and re-apply.
+    </div>
+{% elif status == "error" %}
+    <div style="padding: 12px 16px; background: #F4DEDE; color: #8A3A2A;
+                border-radius: 3px; border-left: 3px solid #ED7D31;">
+        <strong>Could not save.</strong>
+        {{ message }}
+    </div>
+{% endif %}
+</div>

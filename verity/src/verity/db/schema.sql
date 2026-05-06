@@ -356,7 +356,11 @@ CREATE TABLE governance.prompt (
     description     TEXT NOT NULL,
     primary_entity_type  entity_type,
     primary_entity_id    UUID,
-    created_at      TIMESTAMP DEFAULT NOW()
+    created_at      TIMESTAMP DEFAULT NOW(),
+    -- Stamp bumped by every successful UPDATE on the row. Studio's
+    -- optimistic-concurrency contract reads this on edit and sends it
+    -- back on save (see docs/plans/studio-build-plan.md §2.14).
+    updated_at      TIMESTAMP DEFAULT NOW()
 );
 
 CREATE TABLE governance.prompt_version (
@@ -403,6 +407,9 @@ CREATE TABLE governance.prompt_version (
     valid_to            TIMESTAMP,
 
     created_at          TIMESTAMP DEFAULT NOW(),
+    -- Bumped by every successful UPDATE. Drives Studio's
+    -- optimistic-concurrency contract (see docs/plans/studio-build-plan.md §2.14).
+    updated_at          TIMESTAMP DEFAULT NOW(),
 
     CONSTRAINT uq_prompt_version UNIQUE (prompt_id, major_version, minor_version, patch_version)
 );
@@ -1905,6 +1912,108 @@ JOIN governance.model_price mp
 -- catalog. Kept alongside the existing `model_name` VARCHAR column for
 -- transition; seed script backfills this FK from the text column.
 ALTER TABLE inference_config ADD COLUMN IF NOT EXISTS model_id UUID REFERENCES governance.model(id);
+
+-- Studio optimistic-concurrency stamps on prompt and prompt_version.
+-- agent / agent_version / task / task_version / inference_config / tool
+-- already carry updated_at from their original CREATE TABLE statements;
+-- prompt and prompt_version were missing it. Adding them here covers
+-- existing databases that were created before the column was declared
+-- in the CREATE TABLE block above. See
+-- docs/plans/studio-build-plan.md §2.14.
+ALTER TABLE governance.prompt
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+ALTER TABLE governance.prompt_version
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+
+
+-- ============================================================
+-- ENTITY CONSUMERS — reverse lookup view for "where-used"
+-- ============================================================
+-- Studio's safe-edit guarantee (docs/plans/studio-build-plan.md §2.4)
+-- depends on knowing which agent_version / task_version rows
+-- consume a given asset (prompt / tool / inference_config /
+-- data_connector). This view captures those edges as
+-- (used_type, used_id, consumer_type, consumer_id) tuples — pure
+-- ID mapping, no enrichment. The named query
+-- `get_entity_consumers` joins to the consumer's name /
+-- version_label / lifecycle_state for display.
+--
+-- Coverage in this view: FK-based relationships only. Reference-
+-- string relationships in source_binding (e.g. fetch:edms/...)
+-- are not parsed here; they would need string parsing and are
+-- a future enhancement.
+--
+-- Idempotent: CREATE OR REPLACE picks up new branches without
+-- needing a drop. Re-running apply_schema is safe.
+
+CREATE OR REPLACE VIEW governance.entity_consumers AS
+
+    -- prompt → agent_version (via prompt_version + entity_prompt_assignment)
+    SELECT
+        'prompt'::text          AS used_type,
+        p.id                    AS used_id,
+        'agent_version'::text   AS consumer_type,
+        epa.entity_version_id   AS consumer_id
+    FROM governance.entity_prompt_assignment epa
+    JOIN governance.prompt_version pv ON pv.id = epa.prompt_version_id
+    JOIN governance.prompt p ON p.id = pv.prompt_id
+    WHERE epa.entity_type = 'agent'
+
+    UNION ALL
+
+    -- prompt → task_version
+    SELECT 'prompt'::text, p.id, 'task_version'::text, epa.entity_version_id
+    FROM governance.entity_prompt_assignment epa
+    JOIN governance.prompt_version pv ON pv.id = epa.prompt_version_id
+    JOIN governance.prompt p ON p.id = pv.prompt_id
+    WHERE epa.entity_type = 'task'
+
+    UNION ALL
+
+    -- tool → agent_version
+    SELECT 'tool'::text, tool_id, 'agent_version'::text, agent_version_id
+    FROM governance.agent_version_tool
+
+    UNION ALL
+
+    -- tool → task_version
+    SELECT 'tool'::text, tool_id, 'task_version'::text, task_version_id
+    FROM governance.task_version_tool
+
+    UNION ALL
+
+    -- inference_config → agent_version (FK on agent_version.inference_config_id)
+    SELECT 'inference_config'::text, inference_config_id, 'agent_version'::text, id
+    FROM governance.agent_version
+    WHERE inference_config_id IS NOT NULL
+
+    UNION ALL
+
+    -- inference_config → task_version
+    SELECT 'inference_config'::text, inference_config_id, 'task_version'::text, id
+    FROM governance.task_version
+    WHERE inference_config_id IS NOT NULL
+
+    UNION ALL
+
+    -- data_connector → task_version (legacy task_version_source)
+    SELECT 'data_connector'::text, connector_id, 'task_version'::text, task_version_id
+    FROM governance.task_version_source
+
+    UNION ALL
+
+    -- data_connector → task_version (legacy task_version_target)
+    SELECT 'data_connector'::text, connector_id, 'task_version'::text, task_version_id
+    FROM governance.task_version_target
+
+    UNION ALL
+
+    -- data_connector → agent_version OR task_version (unified write_target).
+    -- owner_kind is constrained to 'task_version' / 'agent_version' by
+    -- the table CHECK, so the cast is safe.
+    SELECT 'data_connector'::text, connector_id, owner_kind::text, owner_id
+    FROM governance.write_target
+;
 
 -- Secondary index on test_case_mock after the primary CREATE TABLE
 -- above finalizes the mock_kind column.

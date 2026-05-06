@@ -1,0 +1,32 @@
+{#
+  Validate — preview a draft and exercise it before promoting.
+#}
+{% extends "studio/_base.html" %}
+
+{% block title %}Validate — Verity Studio{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <span>Validate</span>
+{% endblock %}
+
+{% block page_title %}Validate{% endblock %}
+
+{% block content %}
+
+<p style="max-width: 720px; color: var(--verity-text); margin-bottom: 16px;">
+    Validate is where a draft is exercised before promotion. Authors
+    run live previews against any available model, execute validation
+    batches against ground-truth datasets, and attach the resulting
+    <code>validation_run</code> as evidence on a promotion request.
+    Preview runs are tagged <em>experimental</em> and excluded from
+    production telemetry.
+</p>
+
+<p style="color: var(--verity-text-light);">
+    The Validate workspace will go here. Expect a preview pane with
+    schema-aware input forms, a mock-vs-live toggle, an ephemeral LLM
+    override, and a batch runner with per-case drill-down.
+</p>
+
+{% endblock %}

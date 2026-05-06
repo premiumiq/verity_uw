@@ -1,0 +1,54 @@
+{#
+  Where-used informational panel.
+
+  Lists every agent_version / task_version that consumes the asset on
+  the page (any of its prompt_versions, in the case of a prompt
+  header). Each consumer's lifecycle_state is shown so the author can
+  see the blast radius of any edit.
+
+  Inputs (passed by the route handler):
+    consumers — list of {consumer_type, consumer_id, consumer_name,
+                version_label, lifecycle_state}, ordered by
+                lifecycle_state ascending.
+
+  This is informational for now — it does NOT block edits. Editing a
+  draft is always safe (drafts can't be referenced by champion or
+  challenger versions; the lifecycle gates enforce that). The panel
+  becomes load-bearing for the gate when the editor learns to handle
+  global-asset edits at the header level.
+#}
+{% if consumers %}
+<div class="verity-card"
+     style="border-left: 3px solid var(--verity-blue);
+            background: var(--verity-bg-alt); margin-bottom: 16px;">
+    <h3 style="margin: 0 0 8px 0; font-size: 0.85rem; letter-spacing: 0.04em;
+               text-transform: uppercase; color: var(--verity-blue-deep);">
+        Used by {{ consumers|length }} version{% if consumers|length != 1 %}s{% endif %}
+    </h3>
+    <ul style="margin: 0; padding-left: 0; list-style: none;">
+        {% for c in consumers %}
+        <li style="margin: 4px 0; font-size: 0.9rem;">
+            <span style="display: inline-block; min-width: 90px; padding: 1px 8px;
+                         font-size: 0.7rem; text-transform: uppercase;
+                         letter-spacing: 0.04em; border-radius: 2px;
+                         {% if c.lifecycle_state == 'champion' %}
+                            background: #E8F0E9; color: #4D6E54;
+                         {% elif c.lifecycle_state == 'challenger' %}
+                            background: #F9F0DA; color: #8A6925;
+                         {% elif c.lifecycle_state == 'draft' %}
+                            background: #EDEDED; color: #4D4D4D;
+                         {% else %}
+                            background: #E8EEF8; color: #405A8A;
+                         {% endif %}">
+                {{ c.lifecycle_state }}
+            </span>
+            <strong>{{ c.consumer_name }}</strong>
+            <span style="color: var(--verity-text-light);">v{{ c.version_label }}</span>
+            <span style="color: var(--verity-text-light); font-size: 0.75rem;">
+                ({{ c.consumer_type|replace('_', ' ') }})
+            </span>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}

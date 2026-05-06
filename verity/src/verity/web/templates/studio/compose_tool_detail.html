@@ -1,0 +1,214 @@
+{#
+  Compose → Tools → <name>: in-place edit form for the tool row.
+
+  Tools are unversioned — every save propagates to every authorising
+  agent_version / task_version. The where-used panel surfaces the
+  consumer set, and a banner warns the author when at least one
+  consumer is in champion or challenger.
+
+  Boolean checkboxes use the hidden=0 / checkbox=1 pair so
+  unchecking a box actually saves False (otherwise an unchecked
+  checkbox sends nothing and the COALESCE update would preserve the
+  old value).
+#}
+{% extends "studio/_base.html" %}
+
+{% block title %}{{ tool.name }} — Verity Studio{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/studio/compose">Compose</a>
+    <span class="separator">›</span>
+    <a href="/studio/compose/tools">Tools</a>
+    <span class="separator">›</span>
+    <span>{{ tool.name }}</span>
+{% endblock %}
+
+{% block page_title %}
+    {{ tool.display_name }}
+    <span style="color: var(--verity-text-light); font-size: 0.7em; font-weight: normal;">
+        ({{ tool.name }})
+    </span>
+{% endblock %}
+
+{% block content %}
+
+{% include "studio/_partials/where_used_panel.html" %}
+
+{% set has_promoted_consumer = consumers and consumers|selectattr('lifecycle_state', 'in', ['champion', 'challenger'])|list|length > 0 %}
+
+{% if has_promoted_consumer %}
+<div style="padding: 12px 16px; margin-bottom: 16px;
+            background: #F9F0DA; color: #8A6925;
+            border-radius: 3px; border-left: 3px solid #E3B447;">
+    <strong>Promoted consumer.</strong>
+    Saving will affect the production behaviour of every champion or
+    challenger version listed above. Tools are not versioned — there
+    is no clone-to-draft alternative. Consider registering a new tool
+    with a different name if you only want to change behaviour for
+    one consumer.
+</div>
+{% endif %}
+
+<form hx-post="/studio/compose/tools/{{ tool.name }}/save"
+      hx-target="#save-status"
+      hx-swap="outerHTML"
+      class="verity-card"
+      style="display: flex; flex-direction: column; gap: 16px;">
+
+    <input type="hidden"
+           name="expected_updated_at"
+           value="{{ updated_at_iso }}">
+
+    <div style="display: flex; gap: 16px;">
+        <label style="flex: 1;">
+            <strong style="display: block; margin-bottom: 4px;">Display name</strong>
+            <input type="text"
+                   name="display_name"
+                   value="{{ tool.display_name }}"
+                   style="width: 100%; padding: 6px;">
+        </label>
+
+        <label style="flex: 1;">
+            <strong style="display: block; margin-bottom: 4px;">Transport</strong>
+            <select name="transport" style="width: 100%; padding: 6px;">
+                {% set tx = tool.transport %}
+                <option value="python_inprocess" {% if tx == 'python_inprocess' %}selected{% endif %}>python_inprocess</option>
+                <option value="mcp_stdio"        {% if tx == 'mcp_stdio'        %}selected{% endif %}>mcp_stdio</option>
+                <option value="mcp_sse"          {% if tx == 'mcp_sse'          %}selected{% endif %}>mcp_sse</option>
+                <option value="mcp_http"         {% if tx == 'mcp_http'         %}selected{% endif %}>mcp_http</option>
+            </select>
+        </label>
+    </div>
+
+    <label>
+        <strong style="display: block; margin-bottom: 4px;">Description</strong>
+        <textarea name="description"
+                  rows="2"
+                  style="width: 100%; padding: 6px;">{{ tool.description or '' }}</textarea>
+    </label>
+
+    <h3 style="margin: 8px 0 4px 0; font-size: 0.95rem;">Implementation</h3>
+
+    <div style="display: flex; gap: 16px;">
+        <label style="flex: 1;">
+            <strong style="display: block; margin-bottom: 4px;">Implementation path</strong>
+            <input type="text"
+                   name="implementation_path"
+                   value="{{ tool.implementation_path or '' }}"
+                   placeholder="package.module.function (python_inprocess only)"
+                   style="width: 100%; padding: 6px; font-family: ui-monospace, monospace;">
+        </label>
+    </div>
+
+    <div style="display: flex; gap: 16px;">
+        <label style="flex: 1;">
+            <strong style="display: block; margin-bottom: 4px;">MCP server name</strong>
+            <input type="text"
+                   name="mcp_server_name"
+                   value="{{ tool.mcp_server_name or '' }}"
+                   placeholder="(only for mcp_* transports)"
+                   style="width: 100%; padding: 6px;">
+        </label>
+
+        <label style="flex: 1;">
+            <strong style="display: block; margin-bottom: 4px;">MCP tool name</strong>
+            <input type="text"
+                   name="mcp_tool_name"
+                   value="{{ tool.mcp_tool_name or '' }}"
+                   placeholder="(only for mcp_* transports)"
+                   style="width: 100%; padding: 6px;">
+        </label>
+    </div>
+
+    <h3 style="margin: 8px 0 4px 0; font-size: 0.95rem;">Schemas</h3>
+
+    <label>
+        <strong style="display: block; margin-bottom: 4px;">Input schema (JSON)</strong>
+        <textarea name="input_schema"
+                  rows="6"
+                  style="width: 100%; padding: 6px; font-family: ui-monospace, monospace;">{{ input_schema_text }}</textarea>
+    </label>
+
+    <label>
+        <strong style="display: block; margin-bottom: 4px;">Output schema (JSON)</strong>
+        <textarea name="output_schema"
+                  rows="6"
+                  style="width: 100%; padding: 6px; font-family: ui-monospace, monospace;">{{ output_schema_text }}</textarea>
+    </label>
+
+    <h3 style="margin: 8px 0 4px 0; font-size: 0.95rem;">Mock mode</h3>
+
+    <label style="display: flex; align-items: center; gap: 8px;">
+        <input type="hidden" name="mock_mode_enabled" value="0">
+        <input type="checkbox" name="mock_mode_enabled" value="1"
+               {% if tool.mock_mode_enabled %}checked{% endif %}>
+        <span><strong>Mock mode enabled</strong> — the engine returns canned data instead of calling the real implementation.</span>
+    </label>
+
+    <label>
+        <strong style="display: block; margin-bottom: 4px;">Mock response key</strong>
+        <input type="text"
+               name="mock_response_key"
+               value="{{ tool.mock_response_key or '' }}"
+               placeholder="default"
+               style="width: 100%; padding: 6px;">
+    </label>
+
+    <label>
+        <strong style="display: block; margin-bottom: 4px;">Mock responses (JSON)</strong>
+        <textarea name="mock_responses"
+                  rows="6"
+                  placeholder='{"default": {"status": "ok"}}'
+                  style="width: 100%; padding: 6px; font-family: ui-monospace, monospace;">{{ mock_responses_text }}</textarea>
+    </label>
+
+    <h3 style="margin: 8px 0 4px 0; font-size: 0.95rem;">Governance</h3>
+
+    <label>
+        <strong style="display: block; margin-bottom: 4px;">Data classification (max)</strong>
+        <select name="data_classification_max" style="width: 100%; padding: 6px;">
+            {% set dc = tool.data_classification_max %}
+            <option value="tier1_public"        {% if dc|string == 'tier1_public'        %}selected{% endif %}>tier1_public</option>
+            <option value="tier2_internal"      {% if dc|string == 'tier2_internal'      %}selected{% endif %}>tier2_internal</option>
+            <option value="tier3_confidential"  {% if dc|string == 'tier3_confidential'  %}selected{% endif %}>tier3_confidential</option>
+            <option value="tier4_pii_restricted"{% if dc|string == 'tier4_pii_restricted'%}selected{% endif %}>tier4_pii_restricted</option>
+        </select>
+    </label>
+
+    <label style="display: flex; align-items: center; gap: 8px;">
+        <input type="hidden" name="is_write_operation" value="0">
+        <input type="checkbox" name="is_write_operation" value="1"
+               {% if tool.is_write_operation %}checked{% endif %}>
+        <span><strong>Write operation</strong> — this tool mutates external state. Engine gates writes by deployment channel.</span>
+    </label>
+
+    <label style="display: flex; align-items: center; gap: 8px;">
+        <input type="hidden" name="requires_confirmation" value="0">
+        <input type="checkbox" name="requires_confirmation" value="1"
+               {% if tool.requires_confirmation %}checked{% endif %}>
+        <span><strong>Requires confirmation</strong> — high-impact writes that should pause for human approval.</span>
+    </label>
+
+    <label>
+        <strong style="display: block; margin-bottom: 4px;">Tags</strong>
+        <textarea name="tags"
+                  rows="3"
+                  placeholder="One tag per line."
+                  style="width: 100%; padding: 6px; font-family: ui-monospace, monospace;">{{ tags_text }}</textarea>
+    </label>
+
+    <div style="display: flex; gap: 12px; align-items: center; margin-top: 8px;">
+        <button type="submit"
+                style="padding: 8px 20px; background: var(--verity-blue-dark);
+                       color: white; border: none; border-radius: 3px; cursor: pointer;">
+            Save
+        </button>
+        <a href="/studio/compose/tools"
+           style="color: var(--verity-text-light);">Cancel</a>
+    </div>
+</form>
+
+<div id="save-status" style="margin-top: 12px;"></div>
+
+{% endblock %}

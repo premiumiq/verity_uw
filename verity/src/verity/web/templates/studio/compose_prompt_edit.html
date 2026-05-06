@@ -1,0 +1,114 @@
+{#
+  Compose → Prompts → <name> → Edit v<label>.
+
+  Only reachable for draft versions. The edit form posts to the
+  ``/save`` handler via HTMX; the response is a partial that updates
+  the #save-status region.
+
+  The hidden ``expected_updated_at`` field carries the
+  optimistic-concurrency stamp the page captured on GET. If a
+  concurrent save advanced the row's stamp, the server returns the
+  conflict partial instead of saving.
+#}
+{% extends "studio/_base.html" %}
+
+{% block title %}Edit {{ prompt.name }} v{{ version.version_label }} — Verity Studio{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/studio/compose">Compose</a>
+    <span class="separator">›</span>
+    <a href="/studio/compose/prompts">Prompts</a>
+    <span class="separator">›</span>
+    <a href="/studio/compose/prompts/{{ prompt.name }}">{{ prompt.name }}</a>
+    <span class="separator">›</span>
+    <span>Edit v{{ version.version_label }}</span>
+{% endblock %}
+
+{% block page_title %}
+    Edit {{ prompt.name }}
+    <span style="font-size: 0.7em; color: var(--verity-text-light); font-weight: normal;">
+        v{{ version.version_label }}
+    </span>
+    <span style="font-size: 0.55em; padding: 2px 8px; background: var(--verity-blue-pale);
+                 color: var(--verity-blue-dark); border-radius: 3px;
+                 vertical-align: middle; margin-left: 8px;">
+        draft
+    </span>
+{% endblock %}
+
+{% block content %}
+
+{% include "studio/_partials/where_used_panel.html" %}
+
+<form hx-post="/studio/compose/prompts/{{ prompt.name }}/versions/{{ version.id }}/save"
+      hx-target="#save-status"
+      hx-swap="outerHTML"
+      class="verity-card"
+      style="display: flex; flex-direction: column; gap: 16px; margin-top: 16px;">
+
+    <input type="hidden"
+           name="expected_updated_at"
+           value="{{ updated_at_iso }}">
+
+    <label>
+        <strong style="display: block; margin-bottom: 4px;">Content</strong>
+        <textarea name="content"
+                  rows="20"
+                  style="width: 100%; font-family: ui-monospace, monospace;
+                         padding: 8px; border: 1px solid var(--verity-border);
+                         border-radius: 3px;">{{ version.content }}</textarea>
+    </label>
+
+    <div style="display: flex; gap: 16px;">
+        <label style="flex: 1;">
+            <strong style="display: block; margin-bottom: 4px;">API role</strong>
+            <select name="api_role" style="width: 100%; padding: 6px;">
+                <option value="system" {% if version.api_role|string == 'system' %}selected{% endif %}>system</option>
+                <option value="user" {% if version.api_role|string == 'user' %}selected{% endif %}>user</option>
+                <option value="assistant_prefill" {% if version.api_role|string == 'assistant_prefill' %}selected{% endif %}>assistant_prefill</option>
+            </select>
+        </label>
+
+        <label style="flex: 1;">
+            <strong style="display: block; margin-bottom: 4px;">Governance tier</strong>
+            <select name="governance_tier" style="width: 100%; padding: 6px;">
+                <option value="behavioural" {% if version.governance_tier|string == 'behavioural' %}selected{% endif %}>behavioural</option>
+                <option value="contextual" {% if version.governance_tier|string == 'contextual' %}selected{% endif %}>contextual</option>
+                <option value="formatting" {% if version.governance_tier|string == 'formatting' %}selected{% endif %}>formatting</option>
+            </select>
+        </label>
+    </div>
+
+    <label>
+        <strong style="display: block; margin-bottom: 4px;">Change summary</strong>
+        <input type="text"
+               name="change_summary"
+               value="{{ version.change_summary or '' }}"
+               placeholder="What changed and why?"
+               style="width: 100%; padding: 6px;">
+    </label>
+
+    <label>
+        <strong style="display: block; margin-bottom: 4px;">Author</strong>
+        <input type="text"
+               name="author_name"
+               value="{{ version.author_name or '' }}"
+               placeholder="Your name"
+               style="width: 100%; padding: 6px;">
+    </label>
+
+    <div style="display: flex; gap: 12px; align-items: center;">
+        <button type="submit"
+                style="padding: 8px 20px; background: var(--verity-blue-dark);
+                       color: white; border: none; border-radius: 3px; cursor: pointer;">
+            Save
+        </button>
+        <a href="/studio/compose/prompts/{{ prompt.name }}"
+           style="color: var(--verity-text-light);">Cancel</a>
+    </div>
+</form>
+
+<div id="save-status" style="margin-top: 12px;"></div>
+
+{% endblock %}

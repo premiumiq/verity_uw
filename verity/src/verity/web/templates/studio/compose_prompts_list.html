@@ -1,0 +1,107 @@
+{#
+  Compose → Prompts list.
+
+  Each row carries enough state for an SME to triage at a glance:
+  total versions, current champion (if any), live draft count,
+  and last-modified timestamp. Click anywhere on a row to drill
+  into the per-prompt detail page.
+#}
+{% extends "studio/_base.html" %}
+
+{% block title %}Prompts — Verity Studio{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/studio/compose">Compose</a>
+    <span class="separator">›</span>
+    <span>Prompts</span>
+{% endblock %}
+
+{% block page_title %}Prompts{% endblock %}
+
+{% block content %}
+
+<style>
+    .prompt-row-meta {
+        font-size: 0.85rem;
+    }
+    .badge {
+        display: inline-block;
+        padding: 1px 8px;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        border-radius: 2px;
+        font-weight: 500;
+    }
+    .badge-champion { background: #E8F0E9; color: #4D6E54; }
+    .badge-draft    { background: #EDEDED; color: #4D4D4D; }
+    .badge-empty    { color: var(--verity-text-light); font-style: italic; }
+</style>
+
+<p style="max-width: 720px; color: var(--verity-text); margin-bottom: 16px;">
+    The prompt library. Each prompt has one or more versions —
+    behavioural prompts that define AI reasoning, contextual prompts
+    that structure runtime input, or formatting prompts that control
+    output shape.
+</p>
+
+{% set total = prompts|length %}
+{% set with_drafts = prompts|selectattr('draft_count')|list|length %}
+{% set with_champion = prompts|selectattr('has_champion')|list|length %}
+
+<p style="color: var(--verity-text-light); font-size: 0.9rem; margin-bottom: 16px;">
+    <strong>{{ total }}</strong> prompt{{ '' if total == 1 else 's' }} ·
+    <strong>{{ with_drafts }}</strong> with editable draft{{ '' if with_drafts == 1 else 's' }} ·
+    <strong>{{ with_champion }}</strong> with champion
+</p>
+
+{% if prompts %}
+<table class="verity-table sortable-table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Display name</th>
+            <th>Versions</th>
+            <th>Champion</th>
+            <th>Drafts</th>
+            <th>Last modified</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for p in prompts %}
+        <tr class="clickable"
+            onclick="window.location='/studio/compose/prompts/{{ p.name }}'">
+            <td><strong>{{ p.name }}</strong></td>
+            <td>{{ p.display_name }}</td>
+            <td class="prompt-row-meta">{{ p.version_count or 0 }}</td>
+            <td>
+                {% if p.champion_label %}
+                    <span class="badge badge-champion">v{{ p.champion_label }}</span>
+                {% else %}
+                    <span class="badge-empty">—</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if p.draft_count %}
+                    <span class="badge badge-draft">
+                        {{ p.draft_count }} draft{{ '' if p.draft_count == 1 else 's' }}
+                    </span>
+                {% else %}
+                    <span class="badge-empty">—</span>
+                {% endif %}
+            </td>
+            <td class="prompt-row-meta" style="color: var(--verity-text-light);">
+                {% if p.last_modified %}
+                    {{ p.last_modified.strftime('%Y-%m-%d %H:%M') }}
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p style="color: var(--verity-text-light);">No prompts in the library yet.</p>
+{% endif %}
+
+{% endblock %}

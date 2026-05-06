@@ -1,0 +1,54 @@
+{#
+  Compose → Inference configs list. Click a row to edit.
+#}
+{% extends "studio/_base.html" %}
+
+{% block title %}Inference configs — Verity Studio{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/studio/compose">Compose</a>
+    <span class="separator">›</span>
+    <span>Inference configs</span>
+{% endblock %}
+
+{% block page_title %}Inference configs{% endblock %}
+
+{% block content %}
+
+<p style="max-width: 720px; color: var(--verity-text); margin-bottom: 16px;">
+    Inference configs bundle the LLM-call parameters — model, temperature,
+    max_tokens, and any extended parameters (thinking, caching, batch).
+    Configs are not versioned: every edit takes effect immediately for
+    every agent_version and task_version that references the config.
+</p>
+
+{% if configs %}
+<table class="verity-table sortable-table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Display name</th>
+            <th>Model</th>
+            <th>Temperature</th>
+            <th>Max tokens</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for c in configs %}
+        <tr class="clickable"
+            onclick="window.location='/studio/compose/configs/{{ c.name }}'">
+            <td><strong>{{ c.name }}</strong></td>
+            <td>{{ c.display_name }}</td>
+            <td><code>{{ c.model_name }}</code></td>
+            <td>{{ c.temperature if c.temperature is not none else '' }}</td>
+            <td>{{ c.max_tokens or '' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p style="color: var(--verity-text-light);">No inference configs registered yet.</p>
+{% endif %}
+
+{% endblock %}
