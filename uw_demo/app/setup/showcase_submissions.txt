@@ -1,0 +1,45 @@
+# ─────────────────────────────────────────────────────────────────
+# SHOWCASE SUBMISSION ALLOWLIST
+# ─────────────────────────────────────────────────────────────────
+#
+# Submissions listed UNCOMMENTED below are seeded with the full
+# column set — every broker-stated field on the submission row
+# is pre-populated. These demo the "AI already extracted
+# everything" path: open the submission and the Submission
+# Details tab is fully populated.
+#
+# Submissions whose lines begin with `#` are treated as workflow
+# rows and seeded MINIMALLY — only named_insured, lob, sic_code,
+# and sic_description (the intake metadata that arrives in the
+# broker email body before any document is opened) plus loss
+# history. Every document-extractable column is left NULL so the
+# user walks Discover Documents → Extract → Review without
+# pre-seeded values shadowing AI extractions in the audit log or
+# the sparkle UX.
+#
+# To change the showcase set, comment / uncomment a line below.
+# No code change is required — seed_uw.py reads this file at
+# import time.
+#
+# Format:
+#   <uuid>  # <named_insured> (<LOB>)
+#
+# ─────────────────────────────────────────────────────────────────
+
+00000001-0001-0001-0001-000000000001  # Acme Dynamics LLC (DO)
+#00000002-0002-0002-0002-000000000002  # TechFlow Industries Inc (DO)
+#00000003-0003-0003-0003-000000000003  # Meridian Holdings Corp (GL)
+#00000004-0004-0004-0004-000000000004  # Acme Dynamics LLC (GL)
+#00000005-0005-0005-0005-000000000005  # Brightline Analytics LLC (DO)
+#00000006-0006-0006-0006-000000000006  # Pinnacle Software Inc (DO)
+#00000007-0007-0007-0007-000000000007  # Westfield Manufacturing Co (DO)
+#00000008-0008-0008-0008-000000000008  # Cascade Precision LLC (GL)
+#00000009-0009-0009-0009-000000000009  # Ironworks Heavy Industries (GL)
+#00000010-0010-0010-0010-000000000010  # Bayview Chemical Co (GL)
+#00000011-0011-0011-0011-000000000011  # Skyline Logistics Group (GL)
+#00000012-0012-0012-0012-000000000012  # Continental Services Corp (DO)
+#00000013-0013-0013-0013-000000000013  # Granite Peak Mining LLC (GL)
+#00000014-0014-0014-0014-000000000014  # Horizon Capital Partners (DO)
+#00000015-0015-0015-0015-000000000015  # Clearwater Environmental Inc (GL)
+00000016-0016-0016-0016-000000000016  # Novatech Holdings Inc (DO)
+#00000017-0017-0017-0017-000000000017  # Redwood Timber Co (GL)

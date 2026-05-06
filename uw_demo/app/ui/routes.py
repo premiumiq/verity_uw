@@ -57,6 +57,61 @@ def _enum_value(value):
 
 
 # ══════════════════════════════════════════════════════════════
+# HITL EDIT REASON PRESETS
+# ══════════════════════════════════════════════════════════════
+# Drives the dropdown on the inline-edit form (pen → save).
+# Each entry is (id, label, send_feedback_default).
+#
+#   id                        — value submitted by the form select.
+#   label                     — what the operator sees AND what
+#                               gets stored as the audit reason.
+#   send_feedback_default     — whether picking this preset should
+#                               turn the "Send feedback to Verity"
+#                               checkbox ON (True) or OFF (False).
+#
+# Why the flag default varies: not every HITL edit is feedback the
+# Verity governance system should learn from. If the broker simply
+# didn't include a piece of info on the documents, that's a data-
+# completeness problem, not an extractor accuracy problem —
+# forwarding it would muddy the extractor's training signal.
+# Reasons that ARE about extractor accuracy (missed / wrong) flip
+# the flag on by default. The operator can still override the
+# checkbox manually after picking a preset.
+#
+# The 'other' entry is special-cased in the template: choosing it
+# reveals a free-text input. Typed reasons default to flag ON
+# because the typical reason an operator types something custom
+# is "the AI got it wrong in a way the presets don't cover".
+
+EDIT_REASONS = [
+    # (id, label, send_feedback_default)
+    ("not_extracted",
+     "Field was not extracted at all",
+     True),
+    ("not_extracted_accurately",
+     "Field was not extracted accurately",
+     True),
+    ("not_in_documents",
+     "Information not received on documents",
+     False),
+    ("broker_correction",
+     "Broker correction (email / phone)",
+     False),
+    ("uw_judgment",
+     "Override per UW judgment",
+     False),
+    ("other",
+     "Other (specify)",
+     True),
+]
+
+# Lookup by id — used by the edit handler to translate the
+# submitted preset id back into its (label, flag) pair without a
+# linear scan.
+EDIT_REASON_BY_ID = {r[0]: r for r in EDIT_REASONS}
+
+
+# ══════════════════════════════════════════════════════════════
 # DATABASE HELPERS
 # ══════════════════════════════════════════════════════════════
 
@@ -336,17 +391,28 @@ def _build_field_sections(
                 ext and ext.get("ai_value") is not None
                 and ext.get("hitl_value") is None
             )
-            # ai_not_found is TRUE when the AI ran AND has no
-            # value to report. The semantic comes from how
+            # ai_not_found is TRUE when the AI ran, had no value
+            # to report, AND no human has supplied one since.
+            # The first two conditions come from how
             # store_extraction_result writes the row:
             #   ai_found = field_name not in unextractable
             # so a row with ai_found=False AND ai_value IS NULL
             # means the AI explicitly listed this field as
-            # unextractable. ai_value is empty string with
-            # ai_found=True can also mean "extracted but empty".
+            # unextractable. ai_value="" with ai_found=True can
+            # also mean "extracted but empty".
+            #
+            # The hitl_value gate is the bug-fix: once a HITL
+            # edit has supplied a value, the field is no longer
+            # "AI never produced a value" — the user has filled
+            # it in. Without this gate the cell would keep
+            # rendering the "AI did not find this field" badge
+            # in place of the human-entered value, even though
+            # both the audit log and the hitl_value column
+            # already carried the edit.
             ai_not_found = bool(
                 ext is not None
                 and ext.get("ai_value") in (None, "")
+                and ext.get("hitl_value") is None
                 and (ext.get("ai_found") is False
                      or ext.get("review_reason") == "missing")
             )
@@ -700,6 +766,10 @@ def create_uw_routes(verity) -> APIRouter:
     router = APIRouter()
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     templates.env.finalize = _enum_value
+    # Make EDIT_REASONS available to every template without
+    # having to thread it through each route's context dict.
+    # The _field_row macro iterates this to build its dropdown.
+    templates.env.globals["edit_reasons"] = EDIT_REASONS
 
     # ── SETTINGS TOGGLE ──────────────────────────────────────
 
