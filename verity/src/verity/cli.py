@@ -5,6 +5,9 @@ Usage:
     verity serve    — Run API server
     verity web      — Run web UI (API + admin interface)
     verity setup    — Generate infrastructure configs
+    verity export   — Export an entity (with deps) as a YAML bundle
+    verity import   — Import a YAML bundle into the registry
+    verity diff     — Preview what an import would change in the DB
 """
 
 import argparse
@@ -116,6 +119,52 @@ def main():
     publish_parser.add_argument("--since", default=None)
     publish_parser.add_argument("--until", default=None)
 
+    # ── verity export — write a YAML bundle for one entity (with deps)
+    yaml_export_parser = subparsers.add_parser(
+        "export",
+        help="Export a Verity entity (and its dependencies) as a YAML bundle.",
+    )
+    yaml_export_parser.add_argument(
+        "kind",
+        choices=[
+            "agent", "task", "prompt", "tool",
+            "inference_config", "data_connector",
+        ],
+        help="Entity type to export.",
+    )
+    yaml_export_parser.add_argument("name", help="Entity name.")
+    yaml_export_parser.add_argument(
+        "--version", default=None,
+        help=(
+            "Specific version_label (e.g. '1.2.0') for agent/task/prompt. "
+            "Omit to include every version of the starting entity."
+        ),
+    )
+    yaml_export_parser.add_argument("--database-url", required=True)
+    yaml_export_parser.add_argument(
+        "--output", "-o", default=None,
+        help="File path to write to. Omit to write to stdout.",
+    )
+
+    # ── verity import — read a YAML bundle and persist it
+    yaml_import_parser = subparsers.add_parser(
+        "import",
+        help="Import a YAML bundle into the registry. New rows created as draft.",
+    )
+    yaml_import_parser.add_argument(
+        "file", nargs="?", default=None,
+        help="YAML file path. Omit to read from stdin.",
+    )
+    yaml_import_parser.add_argument("--database-url", required=True)
+
+    # ── verity diff — preview what an import would change
+    yaml_diff_parser = subparsers.add_parser(
+        "diff",
+        help="Preview what an import would change in the database (no writes).",
+    )
+    yaml_diff_parser.add_argument("file", help="YAML file path to compare against the database.")
+    yaml_diff_parser.add_argument("--database-url", required=True)
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -219,6 +268,246 @@ def main():
         else:
             compliance_parser.print_help()
             sys.exit(1)
+
+    elif args.command == "export":
+        sys.exit(asyncio.run(_run_yaml_export(args)))
+
+    elif args.command == "import":
+        sys.exit(asyncio.run(_run_yaml_import(args)))
+
+    elif args.command == "diff":
+        sys.exit(asyncio.run(_run_yaml_diff(args)))
+
+
+# ── YAML CLI handlers ────────────────────────────────────────────────────
+# These wrap the in-process Verity SDK rather than calling /api/v1/yaml/*
+# over HTTP. Power users running the CLI locally don't need a running
+# server, and an in-process call is faster and easier to script in CI.
+
+
+async def _run_yaml_export(args) -> int:
+    """Handle ``verity export <kind> <name>``.
+
+    Connects to the database, walks the dependency graph from the
+    starting entity, and writes the bundle as YAML text to either a
+    file or stdout. Returns a process exit code.
+    """
+    from pathlib import Path
+
+    from verity.client.inprocess import Verity
+    from verity.governance.yaml_io import Exporter, dumps_bundle
+
+    verity = Verity(database_url=args.database_url)
+    await verity.connect()
+    try:
+        exporter = Exporter(verity.registry)
+        method = getattr(exporter, f"export_{args.kind}")
+        if args.kind in ("agent", "task", "prompt"):
+            bundle = await method(args.name, version=args.version)
+        else:
+            if args.version is not None:
+                print(
+                    f"--version is not valid for kind '{args.kind}' "
+                    "(only agent / task / prompt are versioned).",
+                    file=sys.stderr,
+                )
+                return 2
+            bundle = await method(args.name)
+
+        if not bundle.entities:
+            print(
+                f"No {args.kind} found with name {args.name!r}.",
+                file=sys.stderr,
+            )
+            return 1
+
+        yaml_text = dumps_bundle(bundle)
+        if args.output:
+            Path(args.output).write_text(yaml_text)
+            print(f"Wrote {len(bundle.entities)} entity bundle to {args.output}", file=sys.stderr)
+        else:
+            sys.stdout.write(yaml_text)
+        return 0
+    finally:
+        await verity.close()
+
+
+async def _run_yaml_import(args) -> int:
+    """Handle ``verity import [FILE]``.
+
+    Reads YAML from a file or stdin, runs the importer, prints a
+    per-entity summary. Validation failures print structured errors
+    and exit non-zero so CI scripts can detect them.
+    """
+    import yaml as yaml_lib
+    from pathlib import Path
+
+    from pydantic import ValidationError
+
+    from verity.client.inprocess import Verity
+    from verity.governance.yaml_io import (
+        Importer,
+        ImportValidationError,
+        loads_bundle,
+    )
+
+    if args.file:
+        try:
+            yaml_text = Path(args.file).read_text()
+        except OSError as exc:
+            print(f"Could not read {args.file}: {exc}", file=sys.stderr)
+            return 2
+    else:
+        yaml_text = sys.stdin.read()
+
+    try:
+        bundle = loads_bundle(yaml_text)
+    except (yaml_lib.YAMLError, ValueError, ValidationError) as exc:
+        print(f"Could not parse YAML bundle: {exc}", file=sys.stderr)
+        return 2
+
+    verity = Verity(database_url=args.database_url)
+    await verity.connect()
+    try:
+        importer = Importer(verity.registry)
+        try:
+            result = await importer.import_bundle(bundle)
+        except ImportValidationError as exc:
+            print(
+                f"Validation failed with {len(exc.errors)} error(s):",
+                file=sys.stderr,
+            )
+            for err in exc.errors:
+                print(
+                    f"  [{err.code}] {err.path}: {err.message}",
+                    file=sys.stderr,
+                )
+            return 1
+
+        _print_import_summary(result, header_prefix="Imported")
+        return 0
+    finally:
+        await verity.close()
+
+
+async def _run_yaml_diff(args) -> int:
+    """Handle ``verity diff <file>``.
+
+    Parses the YAML bundle, runs the importer's plan-only mode, and
+    prints what would change against the current database. No writes.
+    """
+    from pathlib import Path
+
+    import yaml as yaml_lib
+    from pydantic import ValidationError
+
+    from verity.client.inprocess import Verity
+    from verity.governance.yaml_io import (
+        Importer,
+        ImportValidationError,
+        loads_bundle,
+    )
+
+    try:
+        yaml_text = Path(args.file).read_text()
+    except OSError as exc:
+        print(f"Could not read {args.file}: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        bundle = loads_bundle(yaml_text)
+    except (yaml_lib.YAMLError, ValueError, ValidationError) as exc:
+        print(f"Could not parse YAML bundle: {exc}", file=sys.stderr)
+        return 2
+
+    verity = Verity(database_url=args.database_url)
+    await verity.connect()
+    try:
+        importer = Importer(verity.registry)
+        try:
+            plan = await importer.plan_import(bundle)
+        except ImportValidationError as exc:
+            print(
+                f"Bundle has {len(exc.errors)} validation error(s) "
+                "before any diff is meaningful:",
+                file=sys.stderr,
+            )
+            for err in exc.errors:
+                print(
+                    f"  [{err.code}] {err.path}: {err.message}",
+                    file=sys.stderr,
+                )
+            return 1
+
+        _print_diff_summary(plan, file_path=args.file)
+        return 0
+    finally:
+        await verity.close()
+
+
+def _print_import_summary(result, *, header_prefix: str) -> None:
+    """Pretty-print an ImportResult to stdout.
+
+    ``header_prefix`` lets the same shape serve both the import summary
+    ("Imported …") and any future preview command.
+    """
+    n_create_h = len(result.headers_inserted)
+    n_skip_h = len(result.headers_skipped)
+    n_create_v = len(result.versions_inserted)
+    n_skip_v = len(result.versions_skipped)
+
+    print(f"{header_prefix}: "
+          f"{n_create_h + n_create_v} created, "
+          f"{n_skip_h + n_skip_v} skipped (already existed)")
+
+    if result.headers_inserted:
+        print()
+        print("Created:")
+        for kind, name in result.headers_inserted:
+            print(f"  + {kind:<18} {name}")
+        for kind, name, version in result.versions_inserted:
+            print(f"  + {kind + ' ' + name:<24} v{version}")
+
+    if result.headers_skipped or result.versions_skipped:
+        print()
+        print("Skipped (already existed):")
+        for kind, name in result.headers_skipped:
+            print(f"  = {kind:<18} {name}")
+        for kind, name, version in result.versions_skipped:
+            print(f"  = {kind + ' ' + name:<24} v{version}")
+
+
+def _print_diff_summary(plan, *, file_path: str) -> None:
+    """Render a ``verity diff`` report from a plan_import result."""
+    print(f"Diff: {file_path} vs current database")
+    print("=" * (len(file_path) + 24))
+
+    # In a plan, "inserted" means "would be created"; "skipped" means
+    # "already exists". Same struct, different framing.
+    n_create = len(plan.headers_inserted) + len(plan.versions_inserted)
+    n_skip = len(plan.headers_skipped) + len(plan.versions_skipped)
+
+    if n_create == 0:
+        print()
+        print("No changes — every entity in the bundle already exists.")
+    else:
+        print()
+        print("Would CREATE:")
+        for kind, name in plan.headers_inserted:
+            print(f"  + {kind:<18} {name}")
+        for kind, name, version in plan.versions_inserted:
+            print(f"  + {kind + ' ' + name:<24} v{version}")
+
+    if n_skip > 0:
+        print()
+        print("Would SKIP (already exists):")
+        for kind, name in plan.headers_skipped:
+            print(f"  = {kind:<18} {name}")
+        for kind, name, version in plan.versions_skipped:
+            print(f"  = {kind + ' ' + name:<24} v{version}")
+
+    print()
+    print(f"Summary: {n_create} would be created, {n_skip} would be skipped.")
 
 
 if __name__ == "__main__":

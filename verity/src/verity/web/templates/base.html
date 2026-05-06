@@ -53,7 +53,7 @@
             <img src="/admin/static/images/verity_white_logo.png"
                  alt="Verity"
                  style="height: 56px; margin-bottom: 4px;">
-            <div class="verity-subtitle">BY VERITY.ai</div>
+            <div class="verity-subtitle">AI Governance</div>
         </div>
 
         <!-- Navigation links -->
@@ -62,6 +62,25 @@
             <!-- HOME -->
             <a href="/admin/" class="verity-nav-link {% if active_page == 'home' %}active{% endif %}">
                 <span class="verity-nav-icon">◫</span> Home
+            </a>
+
+            <!-- STUDIO — authoring + governance frontend.
+                 Each link enters Studio's own sub-app, where Studio's
+                 four-mode rail takes over the sidebar. The "← Admin
+                 Console" link at the top of Studio's sidebar brings
+                 users back here. -->
+            <div class="verity-nav-section" style="margin-top: 10px;">Studio</div>
+            <a href="/studio/compose" class="verity-nav-link">
+                <span class="verity-nav-icon">✎</span> Compose
+            </a>
+            <a href="/studio/validate" class="verity-nav-link">
+                <span class="verity-nav-icon">⏵</span> Validate
+            </a>
+            <a href="/studio/deploy" class="verity-nav-link">
+                <span class="verity-nav-icon">⤴</span> Deploy
+            </a>
+            <a href="/studio/govern" class="verity-nav-link">
+                <span class="verity-nav-icon">⚖</span> Govern
             </a>
 
             <!-- REGISTRY — all governed entities -->

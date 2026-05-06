@@ -1,0 +1,249 @@
+{#
+  Compose landing — card grid for each entity type the author can
+  edit. Each card surfaces total count plus, where applicable,
+  the count of editable drafts and champions, so the SME can see
+  at a glance where attention is needed.
+
+  Cards are anchor tags so the entire surface is clickable. Inactive
+  cards (Agents/Tasks until their editor lands) render at reduced
+  opacity and don't link out.
+#}
+{% extends "studio/_base.html" %}
+
+{% block title %}Compose — Verity Studio{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <span>Compose</span>
+{% endblock %}
+
+{% block page_title %}Compose{% endblock %}
+
+{% block content %}
+
+<style>
+    .compose-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 16px;
+        margin-top: 8px;
+        max-width: 1080px;
+    }
+    .compose-card {
+        display: block;
+        padding: 20px;
+        background: var(--verity-bg);
+        border: 1px solid var(--verity-border);
+        border-radius: 6px;
+        text-decoration: none;
+        color: var(--verity-text);
+        transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+    }
+    .compose-card:hover {
+        border-color: var(--verity-blue);
+        box-shadow: 0 2px 8px rgba(64, 90, 138, 0.08);
+        transform: translateY(-1px);
+    }
+    .compose-card.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        pointer-events: none;
+    }
+    .compose-card-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 6px;
+    }
+    .compose-card-icon {
+        font-size: 1.6rem;
+        line-height: 1;
+        color: var(--verity-blue-dark);
+    }
+    .compose-card-title {
+        font-size: 1.05rem;
+        font-weight: 600;
+        color: var(--verity-text);
+    }
+    .compose-card-desc {
+        font-size: 0.82rem;
+        color: var(--verity-text-light);
+        margin-bottom: 14px;
+        min-height: 2.6em;
+    }
+    .compose-card-stats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        font-size: 0.8rem;
+    }
+    .compose-stat {
+        display: flex;
+        flex-direction: column;
+    }
+    .compose-stat-num {
+        font-size: 1.3rem;
+        font-weight: 600;
+        line-height: 1;
+        color: var(--verity-text);
+    }
+    .compose-stat-num.has-drafts {
+        color: var(--verity-blue-dark);
+    }
+    .compose-stat-num.zero {
+        color: var(--verity-text-light);
+    }
+    .compose-stat-label {
+        font-size: 0.7rem;
+        color: var(--verity-text-light);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-top: 2px;
+    }
+    .compose-card-arrow {
+        margin-top: 14px;
+        font-size: 0.85rem;
+        color: var(--verity-blue-dark);
+        font-weight: 500;
+    }
+</style>
+
+<p style="max-width: 720px; color: var(--verity-text); margin-bottom: 16px;">
+    Compose is the authoring environment for Verity packages. Cloning
+    is the primary authoring gesture: non-draft versions are
+    immutable, so editing a champion or challenger always starts by
+    creating a fresh draft.
+</p>
+
+<h2 style="margin-top: 24px; margin-bottom: 8px; font-size: 1.05rem;">
+    Library
+</h2>
+
+<div class="compose-grid">
+
+    <a href="/studio/compose/prompts" class="compose-card">
+        <div class="compose-card-header">
+            <span class="compose-card-icon">¶</span>
+            <span class="compose-card-title">Prompts</span>
+        </div>
+        <div class="compose-card-desc">
+            Behavioural, contextual, and formatting prompts.
+            Versioned. Edit drafts directly or clone champions.
+        </div>
+        <div class="compose-card-stats">
+            <div class="compose-stat">
+                <span class="compose-stat-num {% if not summary.prompt_total %}zero{% endif %}">
+                    {{ summary.prompt_total or 0 }}
+                </span>
+                <span class="compose-stat-label">total</span>
+            </div>
+            <div class="compose-stat">
+                <span class="compose-stat-num {% if summary.prompt_with_drafts %}has-drafts{% else %}zero{% endif %}">
+                    {{ summary.prompt_with_drafts or 0 }}
+                </span>
+                <span class="compose-stat-label">with drafts</span>
+            </div>
+            <div class="compose-stat">
+                <span class="compose-stat-num {% if not summary.prompt_with_champion %}zero{% endif %}">
+                    {{ summary.prompt_with_champion or 0 }}
+                </span>
+                <span class="compose-stat-label">with champion</span>
+            </div>
+        </div>
+        <div class="compose-card-arrow">Browse →</div>
+    </a>
+
+    <a href="/studio/compose/configs" class="compose-card">
+        <div class="compose-card-header">
+            <span class="compose-card-icon">⚙</span>
+            <span class="compose-card-title">Inference configs</span>
+        </div>
+        <div class="compose-card-desc">
+            Model, sampling, and extended parameters. Unversioned —
+            edits take effect immediately for every consumer.
+        </div>
+        <div class="compose-card-stats">
+            <div class="compose-stat">
+                <span class="compose-stat-num {% if not summary.config_total %}zero{% endif %}">
+                    {{ summary.config_total or 0 }}
+                </span>
+                <span class="compose-stat-label">total</span>
+            </div>
+        </div>
+        <div class="compose-card-arrow">Browse →</div>
+    </a>
+
+    <a href="/studio/compose/tools" class="compose-card">
+        <div class="compose-card-header">
+            <span class="compose-card-icon">⚒</span>
+            <span class="compose-card-title">Tools</span>
+        </div>
+        <div class="compose-card-desc">
+            In-process and MCP tool registrations. Unversioned —
+            schema, mock fixtures, and governance flags edit in place.
+        </div>
+        <div class="compose-card-stats">
+            <div class="compose-stat">
+                <span class="compose-stat-num {% if not summary.tool_total %}zero{% endif %}">
+                    {{ summary.tool_total or 0 }}
+                </span>
+                <span class="compose-stat-label">total</span>
+            </div>
+        </div>
+        <div class="compose-card-arrow">Browse →</div>
+    </a>
+
+</div>
+
+<h2 style="margin-top: 32px; margin-bottom: 8px; font-size: 1.05rem;">
+    Packages
+    <span style="color: var(--verity-text-light); font-size: 0.7rem;
+                 font-weight: normal; letter-spacing: 0.04em;
+                 text-transform: uppercase; margin-left: 8px;">
+        coming next
+    </span>
+</h2>
+
+<div class="compose-grid">
+
+    <span class="compose-card disabled">
+        <div class="compose-card-header">
+            <span class="compose-card-icon">⬡</span>
+            <span class="compose-card-title">Agents</span>
+        </div>
+        <div class="compose-card-desc">
+            Full package editor with prompts, tools, source/target
+            wiring, and sub-agent delegations.
+        </div>
+        <div class="compose-card-stats">
+            <div class="compose-stat">
+                <span class="compose-stat-num">
+                    {{ summary.agent_total or 0 }}
+                </span>
+                <span class="compose-stat-label">total</span>
+            </div>
+        </div>
+    </span>
+
+    <span class="compose-card disabled">
+        <div class="compose-card-header">
+            <span class="compose-card-icon">☐</span>
+            <span class="compose-card-title">Tasks</span>
+        </div>
+        <div class="compose-card-desc">
+            Single-call, structured-output package editor with
+            prompts, tools, and source/target wiring.
+        </div>
+        <div class="compose-card-stats">
+            <div class="compose-stat">
+                <span class="compose-stat-num">
+                    {{ summary.task_total or 0 }}
+                </span>
+                <span class="compose-stat-label">total</span>
+            </div>
+        </div>
+    </span>
+
+</div>
+
+{% endblock %}

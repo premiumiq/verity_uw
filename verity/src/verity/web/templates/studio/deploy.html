@@ -1,0 +1,33 @@
+{#
+  Deploy — drive lifecycle promotion.
+#}
+{% extends "studio/_base.html" %}
+
+{% block title %}Deploy — Verity Studio{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <span>Deploy</span>
+{% endblock %}
+
+{% block page_title %}Deploy{% endblock %}
+
+{% block content %}
+
+<p style="max-width: 720px; color: var(--verity-text); margin-bottom: 16px;">
+    Deploy is where a draft moves through the seven-state lifecycle:
+    <code>draft → candidate → staging → shadow → challenger →
+    champion</code>. Every transition records an
+    <code>approval_record</code> with the approver, rationale, and
+    (when attached) a validation_run as evidence. Multi-select bulk
+    promotion is supported, but never to <code>champion</code> —
+    champion promotion is always single-entity, single-rationale.
+</p>
+
+<p style="color: var(--verity-text-light);">
+    The Deploy workspace will go here. Pending candidates list,
+    promote-with-batch-evidence gesture, diff against current champion,
+    and the approval modal.
+</p>
+
+{% endblock %}

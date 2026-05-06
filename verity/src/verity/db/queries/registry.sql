@@ -512,6 +512,118 @@ SELECT * FROM inference_config WHERE active = TRUE ORDER BY name;
 SELECT * FROM inference_config WHERE name = %(config_name)s;
 
 
+-- name: update_inference_config
+-- Mutable-field update. Inference configs are not versioned, so this
+-- modifies the row in place. Optimistic-concurrency guard mirrors
+-- the version updates: NULL ``expected_updated_at`` skips the check
+-- (legacy callers); a non-NULL value must match the row's current
+-- updated_at or the UPDATE matches zero rows.
+UPDATE inference_config SET
+    display_name    = COALESCE(%(display_name)s,                    display_name),
+    description     = COALESCE(%(description)s,                     description),
+    intended_use    = COALESCE(%(intended_use)s,                    intended_use),
+    model_name      = COALESCE(%(model_name)s,                      model_name),
+    temperature     = COALESCE(%(temperature)s::numeric(4,3),       temperature),
+    max_tokens      = COALESCE(%(max_tokens)s::integer,             max_tokens),
+    top_p           = COALESCE(%(top_p)s::numeric(4,3),             top_p),
+    top_k           = COALESCE(%(top_k)s::integer,                  top_k),
+    stop_sequences  = COALESCE(%(stop_sequences)s::text[],          stop_sequences),
+    extended_params = COALESCE(%(extended_params)s::jsonb,          extended_params),
+    updated_at      = NOW()
+WHERE id = %(config_id)s::uuid
+  AND (%(expected_updated_at)s::timestamp IS NULL
+       OR updated_at = %(expected_updated_at)s::timestamp)
+RETURNING id, name, display_name, updated_at;
+
+
+-- name: get_inference_config_status_for_concurrency
+-- Used by the Studio save handler to distinguish "row not found" from
+-- "stale stamp" when the UPDATE returns zero rows.
+SELECT id, name, updated_at
+FROM inference_config
+WHERE id = %(config_id)s::uuid;
+
+
+-- name: update_tool
+-- In-place edit for a tool row. Tools are global and unversioned, so
+-- this modifies the row directly; saves take effect for every
+-- agent_version / task_version that authorises the tool the next
+-- time they run.
+UPDATE tool SET
+    display_name              = COALESCE(%(display_name)s,                                  display_name),
+    description               = COALESCE(%(description)s,                                   description),
+    input_schema              = COALESCE(%(input_schema)s::jsonb,                           input_schema),
+    output_schema             = COALESCE(%(output_schema)s::jsonb,                          output_schema),
+    transport                 = COALESCE(%(transport)s,                                     transport),
+    mcp_server_name           = COALESCE(%(mcp_server_name)s,                               mcp_server_name),
+    mcp_tool_name             = COALESCE(%(mcp_tool_name)s,                                 mcp_tool_name),
+    implementation_path       = COALESCE(%(implementation_path)s,                           implementation_path),
+    mock_mode_enabled         = COALESCE(%(mock_mode_enabled)s::boolean,                    mock_mode_enabled),
+    mock_response_key         = COALESCE(%(mock_response_key)s,                             mock_response_key),
+    mock_responses            = COALESCE(%(mock_responses)s::jsonb,                         mock_responses),
+    data_classification_max   = COALESCE(%(data_classification_max)s::data_classification,  data_classification_max),
+    is_write_operation        = COALESCE(%(is_write_operation)s::boolean,                   is_write_operation),
+    requires_confirmation     = COALESCE(%(requires_confirmation)s::boolean,                requires_confirmation),
+    tags                      = COALESCE(%(tags)s::text[],                                  tags),
+    updated_at                = NOW()
+WHERE id = %(tool_id)s::uuid
+  AND (%(expected_updated_at)s::timestamp IS NULL
+       OR updated_at = %(expected_updated_at)s::timestamp)
+RETURNING id, name, display_name, updated_at;
+
+
+-- name: get_tool_status_for_concurrency
+SELECT id, name, updated_at
+FROM tool
+WHERE id = %(tool_id)s::uuid;
+
+
+-- name: studio_compose_summary
+-- One row of aggregate counts powering the Compose landing cards:
+-- total entities of each kind, plus draft/champion breakdown for the
+-- versioned ones (prompts here; tasks/agents arrive later).
+SELECT
+    (SELECT COUNT(*) FROM governance.prompt)                                                        AS prompt_total,
+    (SELECT COUNT(*) FROM (
+        SELECT p.id
+        FROM governance.prompt p
+        JOIN governance.prompt_version pv ON pv.prompt_id = p.id
+        WHERE pv.lifecycle_state = 'draft'
+        GROUP BY p.id
+    ) d)                                                                                            AS prompt_with_drafts,
+    (SELECT COUNT(*) FROM (
+        SELECT p.id
+        FROM governance.prompt p
+        JOIN governance.prompt_version pv ON pv.prompt_id = p.id
+        WHERE pv.lifecycle_state = 'champion'
+        GROUP BY p.id
+    ) c)                                                                                            AS prompt_with_champion,
+    (SELECT COUNT(*) FROM governance.inference_config WHERE active = TRUE)                          AS config_total,
+    (SELECT COUNT(*) FROM governance.tool)                                                          AS tool_total,
+    (SELECT COUNT(*) FROM governance.agent)                                                         AS agent_total,
+    (SELECT COUNT(*) FROM governance.task)                                                          AS task_total;
+
+
+-- name: list_prompts_with_state_summary
+-- Per-prompt row enriched with version-state aggregates so the
+-- prompts list can render "5 versions / champion v2.1.0 / 1 draft"
+-- without N+1 follow-up queries.
+SELECT
+    p.id,
+    p.name,
+    p.display_name,
+    p.description,
+    COUNT(pv.id)                                                  AS version_count,
+    COUNT(*) FILTER (WHERE pv.lifecycle_state = 'draft')          AS draft_count,
+    bool_or(pv.lifecycle_state = 'champion')                      AS has_champion,
+    MAX(pv.version_label) FILTER (WHERE pv.lifecycle_state = 'champion')  AS champion_label,
+    MAX(pv.updated_at)                                            AS last_modified
+FROM governance.prompt p
+LEFT JOIN governance.prompt_version pv ON pv.prompt_id = p.id
+GROUP BY p.id, p.name, p.display_name, p.description
+ORDER BY p.name;
+
+
 -- name: get_config_usage
 -- Which agents and tasks use a specific inference config (champion versions only).
 SELECT
@@ -734,3 +846,50 @@ LEFT JOIN agent ca ON ca.id = cav.agent_id
 WHERE d.child_agent_name = %(agent_name)s
    OR ca.name = %(agent_name)s
 ORDER BY pa.name, pav.major_version DESC, pav.minor_version DESC;
+
+
+-- ── WHERE-USED REVERSE LOOKUP ────────────────────────────────
+-- Studio's safe-edit guarantee asks "which agent/task versions
+-- consume this asset?" before allowing an in-place save on a
+-- shared row. The governance.entity_consumers view (defined in
+-- schema.sql) captures the FK-based edges; this query filters
+-- by (used_type, used_id), de-duplicates across multiple paths,
+-- and joins through to the consumer's display fields so the UI
+-- can render "Used by triage_agent v2.3.1 [champion]" without a
+-- second round-trip. See docs/plans/studio-build-plan.md §2.13.
+
+-- name: get_entity_consumers
+WITH consumers AS (
+    -- DISTINCT collapses duplicates that arise when a connector
+    -- is referenced via multiple paths (e.g. both source and
+    -- target on the same task_version).
+    SELECT DISTINCT consumer_type, consumer_id
+    FROM governance.entity_consumers
+    WHERE used_type = %(used_type)s
+      AND used_id   = %(used_id)s::uuid
+)
+SELECT
+    'agent_version'::text       AS consumer_type,
+    c.consumer_id,
+    a.name                      AS consumer_name,
+    av.version_label,
+    av.lifecycle_state::text    AS lifecycle_state
+FROM consumers c
+JOIN governance.agent_version av ON av.id = c.consumer_id
+JOIN governance.agent a          ON a.id  = av.agent_id
+WHERE c.consumer_type = 'agent_version'
+
+UNION ALL
+
+SELECT
+    'task_version'::text,
+    c.consumer_id,
+    t.name,
+    tv.version_label,
+    tv.lifecycle_state::text
+FROM consumers c
+JOIN governance.task_version tv ON tv.id = c.consumer_id
+JOIN governance.task t          ON t.id  = tv.task_id
+WHERE c.consumer_type = 'task_version'
+
+ORDER BY lifecycle_state, consumer_name, version_label;

@@ -1,0 +1,54 @@
+{#
+  Compose → Tools list. Click a row to edit.
+#}
+{% extends "studio/_base.html" %}
+
+{% block title %}Tools — Verity Studio{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/studio/compose">Compose</a>
+    <span class="separator">›</span>
+    <span>Tools</span>
+{% endblock %}
+
+{% block page_title %}Tools{% endblock %}
+
+{% block content %}
+
+<p style="max-width: 720px; color: var(--verity-text); margin-bottom: 16px;">
+    Tools are the integrations agents and tasks can call —
+    in-process Python functions or MCP-server endpoints. Tools are
+    not versioned: editing a tool's input/output schema, transport,
+    or mock fixtures takes effect immediately for every consumer.
+</p>
+
+{% if tools %}
+<table class="verity-table sortable-table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Display name</th>
+            <th>Transport</th>
+            <th>Write op?</th>
+            <th>Mock mode</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for t in tools %}
+        <tr class="clickable"
+            onclick="window.location='/studio/compose/tools/{{ t.name }}'">
+            <td><strong>{{ t.name }}</strong></td>
+            <td>{{ t.display_name }}</td>
+            <td><code>{{ t.transport }}</code></td>
+            <td>{{ "yes" if t.is_write_operation else "no" }}</td>
+            <td>{{ "yes" if t.mock_mode_enabled else "no" }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p style="color: var(--verity-text-light);">No tools registered yet.</p>
+{% endif %}
+
+{% endblock %}

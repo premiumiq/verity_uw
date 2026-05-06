@@ -1,0 +1,167 @@
+{#
+  Compose → Inference configs → <name>: edit form for the in-place
+  config row.
+
+  Configs are unversioned, so the detail page IS the edit form.
+  Every save propagates immediately to every agent_version and
+  task_version that references the config — the where-used panel
+  surfaces the consumer list (and their lifecycle states) so the
+  author can see the blast radius before saving.
+#}
+{% extends "studio/_base.html" %}
+
+{% block title %}{{ config.name }} — Verity Studio{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/studio/compose">Compose</a>
+    <span class="separator">›</span>
+    <a href="/studio/compose/configs">Inference configs</a>
+    <span class="separator">›</span>
+    <span>{{ config.name }}</span>
+{% endblock %}
+
+{% block page_title %}
+    {{ config.display_name }}
+    <span style="color: var(--verity-text-light); font-size: 0.7em; font-weight: normal;">
+        ({{ config.name }})
+    </span>
+{% endblock %}
+
+{% block content %}
+
+{% include "studio/_partials/where_used_panel.html" %}
+
+{% set has_promoted_consumer = consumers and consumers|selectattr('lifecycle_state', 'in', ['champion', 'challenger'])|list|length > 0 %}
+
+{% if has_promoted_consumer %}
+<div style="padding: 12px 16px; margin-bottom: 16px;
+            background: #F9F0DA; color: #8A6925;
+            border-radius: 3px; border-left: 3px solid #E3B447;">
+    <strong>Promoted consumer.</strong>
+    Saving will affect the production behaviour of every champion or
+    challenger version listed above. Configs are not versioned —
+    there is no clone-to-draft alternative. Consider creating a new
+    config with a different name if you only want to change behaviour
+    for one consumer.
+</div>
+{% endif %}
+
+<form hx-post="/studio/compose/configs/{{ config.name }}/save"
+      hx-target="#save-status"
+      hx-swap="outerHTML"
+      class="verity-card"
+      style="display: flex; flex-direction: column; gap: 16px;">
+
+    <input type="hidden"
+           name="expected_updated_at"
+           value="{{ updated_at_iso }}">
+
+    <div style="display: flex; gap: 16px;">
+        <label style="flex: 1;">
+            <strong style="display: block; margin-bottom: 4px;">Display name</strong>
+            <input type="text"
+                   name="display_name"
+                   value="{{ config.display_name }}"
+                   style="width: 100%; padding: 6px;">
+        </label>
+
+        <label style="flex: 1;">
+            <strong style="display: block; margin-bottom: 4px;">Model</strong>
+            <input type="text"
+                   name="model_name"
+                   value="{{ config.model_name }}"
+                   placeholder="e.g. claude-sonnet-4-20250514"
+                   style="width: 100%; padding: 6px; font-family: ui-monospace, monospace;">
+        </label>
+    </div>
+
+    <label>
+        <strong style="display: block; margin-bottom: 4px;">Description</strong>
+        <textarea name="description"
+                  rows="2"
+                  style="width: 100%; padding: 6px;">{{ config.description or '' }}</textarea>
+    </label>
+
+    <label>
+        <strong style="display: block; margin-bottom: 4px;">Intended use</strong>
+        <textarea name="intended_use"
+                  rows="2"
+                  style="width: 100%; padding: 6px;">{{ config.intended_use or '' }}</textarea>
+    </label>
+
+    <h3 style="margin: 8px 0 4px 0; font-size: 0.95rem;">Sampling parameters</h3>
+
+    <div style="display: flex; gap: 16px;">
+        <label style="flex: 1;">
+            <strong style="display: block; margin-bottom: 4px;">Temperature</strong>
+            <input type="text"
+                   name="temperature"
+                   value="{{ config.temperature if config.temperature is not none else '' }}"
+                   placeholder="0.0"
+                   style="width: 100%; padding: 6px;">
+        </label>
+
+        <label style="flex: 1;">
+            <strong style="display: block; margin-bottom: 4px;">Max tokens</strong>
+            <input type="text"
+                   name="max_tokens"
+                   value="{{ config.max_tokens or '' }}"
+                   placeholder="4096"
+                   style="width: 100%; padding: 6px;">
+        </label>
+
+        <label style="flex: 1;">
+            <strong style="display: block; margin-bottom: 4px;">Top P</strong>
+            <input type="text"
+                   name="top_p"
+                   value="{{ config.top_p if config.top_p is not none else '' }}"
+                   placeholder="(unset)"
+                   style="width: 100%; padding: 6px;">
+        </label>
+
+        <label style="flex: 1;">
+            <strong style="display: block; margin-bottom: 4px;">Top K</strong>
+            <input type="text"
+                   name="top_k"
+                   value="{{ config.top_k or '' }}"
+                   placeholder="(unset)"
+                   style="width: 100%; padding: 6px;">
+        </label>
+    </div>
+
+    <label>
+        <strong style="display: block; margin-bottom: 4px;">Stop sequences</strong>
+        <textarea name="stop_sequences"
+                  rows="3"
+                  placeholder="One sequence per line. Leave empty for none."
+                  style="width: 100%; padding: 6px; font-family: ui-monospace, monospace;">{{ stop_sequences_text }}</textarea>
+    </label>
+
+    <label>
+        <strong style="display: block; margin-bottom: 4px;">
+            Extended parameters
+            <span style="font-weight: normal; color: var(--verity-text-light);">
+                (JSON — thinking, caching, batch, etc.)
+            </span>
+        </strong>
+        <textarea name="extended_params"
+                  rows="6"
+                  placeholder='{"thinking": {"type": "enabled", "budget_tokens": 16000}}'
+                  style="width: 100%; padding: 6px; font-family: ui-monospace, monospace;">{{ extended_params_text }}</textarea>
+    </label>
+
+    <div style="display: flex; gap: 12px; align-items: center;">
+        <button type="submit"
+                style="padding: 8px 20px; background: var(--verity-blue-dark);
+                       color: white; border: none; border-radius: 3px; cursor: pointer;">
+            Save
+        </button>
+        <a href="/studio/compose/configs"
+           style="color: var(--verity-text-light);">Cancel</a>
+    </div>
+</form>
+
+<div id="save-status" style="margin-top: 12px;"></div>
+
+{% endblock %}

@@ -14,6 +14,15 @@
 -- didn't supply — the existing value is preserved. Non-draft rows
 -- never match the WHERE, so UPDATE returns zero rows and the SDK
 -- surfaces a 409.
+--
+-- Optimistic concurrency: each UPDATE also enforces an
+-- expected_updated_at guard. When the SDK passes the stamp the
+-- client last read, the SQL only matches if the row's current
+-- updated_at still equals that stamp. If the stamp was bumped by
+-- a concurrent save, the UPDATE matches zero rows and the API
+-- layer surfaces a 409 stale_write. Passing NULL (legacy callers
+-- and callers who don't care) skips the check. See
+-- docs/plans/studio-build-plan.md §2.14.
 
 -- name: update_agent_version_draft
 UPDATE agent_version SET
@@ -27,7 +36,10 @@ UPDATE agent_version SET
     change_type          = COALESCE(%(change_type)s,                change_type),
     limitations_this_version = COALESCE(%(limitations_this_version)s, limitations_this_version),
     updated_at           = NOW()
-WHERE id = %(version_id)s::uuid AND lifecycle_state = 'draft'
+WHERE id = %(version_id)s::uuid
+  AND lifecycle_state = 'draft'
+  AND (%(expected_updated_at)s::timestamp IS NULL
+       OR updated_at = %(expected_updated_at)s::timestamp)
 RETURNING id, version_label, lifecycle_state, updated_at;
 
 
@@ -41,7 +53,10 @@ UPDATE task_version SET
     change_summary       = COALESCE(%(change_summary)s,             change_summary),
     change_type          = COALESCE(%(change_type)s,                change_type),
     updated_at           = NOW()
-WHERE id = %(version_id)s::uuid AND lifecycle_state = 'draft'
+WHERE id = %(version_id)s::uuid
+  AND lifecycle_state = 'draft'
+  AND (%(expected_updated_at)s::timestamp IS NULL
+       OR updated_at = %(expected_updated_at)s::timestamp)
 RETURNING id, version_label, lifecycle_state, updated_at;
 
 
@@ -52,9 +67,38 @@ UPDATE prompt_version SET
     governance_tier   = COALESCE(%(governance_tier)s::governance_tier, governance_tier),
     change_summary    = COALESCE(%(change_summary)s,    change_summary),
     sensitivity_level = COALESCE(%(sensitivity_level)s, sensitivity_level),
-    author_name       = COALESCE(%(author_name)s,       author_name)
-WHERE id = %(version_id)s::uuid AND lifecycle_state = 'draft'
-RETURNING id, version_label, lifecycle_state;
+    author_name       = COALESCE(%(author_name)s,       author_name),
+    updated_at        = NOW()
+WHERE id = %(version_id)s::uuid
+  AND lifecycle_state = 'draft'
+  AND (%(expected_updated_at)s::timestamp IS NULL
+       OR updated_at = %(expected_updated_at)s::timestamp)
+RETURNING id, version_label, lifecycle_state, updated_at;
+
+
+-- ── CONCURRENCY-FAILURE CLASSIFIERS ──────────────────────────
+-- When a draft UPDATE returns zero rows, the API layer needs to
+-- distinguish three cases:
+--   1. Row not found            → 404
+--   2. Row exists but not draft → 409 lifecycle conflict
+--   3. Row in draft, stale stamp → 409 stale_write
+-- These three lookups return the minimum the API needs to make
+-- that determination — current lifecycle_state and updated_at.
+
+-- name: get_agent_version_status_for_concurrency
+SELECT id, lifecycle_state, updated_at
+FROM agent_version
+WHERE id = %(version_id)s::uuid;
+
+-- name: get_task_version_status_for_concurrency
+SELECT id, lifecycle_state, updated_at
+FROM task_version
+WHERE id = %(version_id)s::uuid;
+
+-- name: get_prompt_version_status_for_concurrency
+SELECT id, lifecycle_state, updated_at
+FROM prompt_version
+WHERE id = %(version_id)s::uuid;
 
 
 -- ── DRAFT-STATE DELETES WITH CASCADE ─────────────────────────

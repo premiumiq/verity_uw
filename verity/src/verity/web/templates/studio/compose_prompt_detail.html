@@ -1,0 +1,132 @@
+{#
+  Compose → Prompts → <name>: header card, where-used panel, and a
+  card per version that shows its content inline.
+
+  Each version card has one action:
+    - draft  → "Edit →" (links to the edit form)
+    - other  → "Clone to Draft →" (POST to clone-to-draft, which
+                redirects into the new draft's edit form)
+
+  Showing content directly on the detail page lets reviewers read
+  the prompt without clicking through, and lets authors confirm
+  what they're about to clone before they commit.
+#}
+{% extends "studio/_base.html" %}
+
+{% block title %}{{ prompt.name }} — Verity Studio{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/studio/compose">Compose</a>
+    <span class="separator">›</span>
+    <a href="/studio/compose/prompts">Prompts</a>
+    <span class="separator">›</span>
+    <span>{{ prompt.name }}</span>
+{% endblock %}
+
+{% block page_title %}{{ prompt.display_name }}{% endblock %}
+
+{% block content %}
+
+<div class="verity-card" style="margin-bottom: 16px;">
+    <p><strong>Name:</strong> {{ prompt.name }}</p>
+    <p style="margin-top: 6px;"><strong>Description:</strong> {{ prompt.description }}</p>
+</div>
+
+{% include "studio/_partials/where_used_panel.html" %}
+
+<h2 style="margin-top: 24px; margin-bottom: 12px; font-size: 1.1rem;">
+    Versions
+    <span style="color: var(--verity-text-light); font-size: 0.85rem; font-weight: normal;">
+        ({{ versions|length }})
+    </span>
+</h2>
+
+{% if versions %}
+    {% for v in versions %}
+    <div style="margin-bottom: 16px; padding: 16px;
+                border: 1px solid var(--verity-border); border-radius: 4px;
+                background: var(--verity-bg);">
+
+        <div style="display: flex; justify-content: space-between;
+                    align-items: center; margin-bottom: 8px;">
+            <h3 style="margin: 0; font-size: 1rem;">
+                v{{ v.version_label }}
+                <span style="display: inline-block; padding: 1px 8px;
+                             margin-left: 6px; font-size: 0.7rem;
+                             text-transform: uppercase; letter-spacing: 0.04em;
+                             border-radius: 2px;
+                             {% if v.lifecycle_state == 'champion' %}
+                                background: #E8F0E9; color: #4D6E54;
+                             {% elif v.lifecycle_state == 'challenger' %}
+                                background: #F9F0DA; color: #8A6925;
+                             {% elif v.lifecycle_state == 'draft' %}
+                                background: #EDEDED; color: #4D4D4D;
+                             {% else %}
+                                background: #E8EEF8; color: #405A8A;
+                             {% endif %}">
+                    {{ v.lifecycle_state }}
+                </span>
+            </h3>
+
+            <div>
+                {% if v.lifecycle_state == 'draft' %}
+                    <a href="/studio/compose/prompts/{{ prompt.name }}/versions/{{ v.id }}/edit"
+                       style="padding: 6px 14px; background: var(--verity-blue-dark);
+                              color: white; text-decoration: none;
+                              border-radius: 3px; font-size: 0.85rem;">
+                        Edit →
+                    </a>
+                {% else %}
+                    <form method="post"
+                          action="/studio/compose/prompts/{{ prompt.name }}/versions/{{ v.id }}/clone-to-draft"
+                          style="display: inline; margin: 0;">
+                        <button type="submit"
+                                style="padding: 6px 14px; background: var(--verity-blue-dark);
+                                       color: white; border: none;
+                                       border-radius: 3px; font-size: 0.85rem;
+                                       cursor: pointer;">
+                            Clone to Draft →
+                        </button>
+                    </form>
+                {% endif %}
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 16px; font-size: 0.8rem;
+                    color: var(--verity-text-light); margin-bottom: 12px;">
+            <span><strong>Role:</strong> {{ v.api_role }}</span>
+            <span><strong>Tier:</strong> {{ v.governance_tier }}</span>
+            {% if v.author_name %}
+                <span><strong>Author:</strong> {{ v.author_name }}</span>
+            {% endif %}
+            {% if v.updated_at %}
+                <span><strong>Updated:</strong> {{ v.updated_at.isoformat() }}</span>
+            {% endif %}
+        </div>
+
+        {% if v.change_summary %}
+        <p style="margin: 6px 0; font-size: 0.85rem; color: var(--verity-text);">
+            <em>{{ v.change_summary }}</em>
+        </p>
+        {% endif %}
+
+        <details style="margin-top: 8px;">
+            <summary style="cursor: pointer; color: var(--verity-blue-dark);
+                            font-size: 0.85rem;">
+                View content ({{ v.content|length }} chars)
+            </summary>
+            <pre style="margin-top: 8px; padding: 12px;
+                        background: var(--verity-bg-alt);
+                        white-space: pre-wrap; word-break: break-word;
+                        font-family: ui-monospace, monospace;
+                        font-size: 0.8rem; max-height: 400px;
+                        overflow-y: auto; border-radius: 3px;">{{ v.content }}</pre>
+        </details>
+    </div>
+    {% endfor %}
+{% else %}
+<p style="color: var(--verity-text-light);">No versions yet.</p>
+{% endif %}
+
+{% endblock %}

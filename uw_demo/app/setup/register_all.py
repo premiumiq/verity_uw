@@ -8,7 +8,7 @@ This script populates the Verity database with demo-ready data:
 - 8 prompts with versioned content
 - 2 multi-step workflows (orchestrated in uw_demo/app/workflows.py, not registered as Verity entities)
 - Test suites, approval records, model cards, validation runs
-- Pre-seeded decision logs and overrides for UI browsing
+- Pre-seeded decision logs for UI browsing
 
 IDEMPOTENT: Drops all tables and re-creates from scratch on every run.
 USES SDK: All registrations go through verity.registry.* and verity.lifecycle.*
@@ -157,13 +157,30 @@ async def main():
         # Step 16 removed: test execution logs are no longer pre-seeded.
         # Test results should come from actual test runs via the UI, not fake data.
 
-        # ── STEP 17: Decision Logs + Overrides ────────────────
-        print("Step 17: Seeding decision logs and overrides...")
+        # ── STEP 17: Decision Logs ────────────────────────────
+        print("Step 17: Seeding decision logs...")
         await seed_decisions(verity, agent_versions, task_versions)
 
         # ── STEP 18: Seed Verity platform settings ────────────
         print("Step 18: Seeding Verity platform settings...")
         await seed_platform_settings(verity)
+
+        # ── STEP 18b: Seed compliance metamodel ───────────────
+        # Three idempotent passes that populate the L3 compliance
+        # metamodel and L2 reporting bridges. Without these, the
+        # /admin/compliance/* pages render empty. The functions are
+        # the same ones the `verity compliance seed-*` CLI invokes.
+        # Embedding generation (`reembed`) is intentionally NOT run
+        # here — it makes API calls and costs money. Run manually
+        # later with: python -m verity.cli compliance reembed
+        print("Step 18b: Seeding compliance metamodel...")
+        from verity.setup import seed_compliance as _seed_compliance
+        static_counts = await _seed_compliance.seed_static(DB_URL)
+        print(f"  + static: {static_counts}")
+        data_counts = await _seed_compliance.seed_data(DB_URL)
+        print(f"  + data:   {data_counts}")
+        reports_counts = await _seed_compliance.seed_reports(DB_URL)
+        print(f"  + reports:{reports_counts}")
 
         # ── STEP 19: Seed UW database ─────────────────────────
         # drop_existing=True wipes uw_db so every register_all run
@@ -2237,7 +2254,7 @@ async def seed_test_results(verity, test_suites, agent_versions, task_versions):
 # ══════════════════════════════════════════════════════════════
 
 async def seed_decisions(verity, agent_versions, task_versions):
-    """Pre-seed 16 decision logs (4 submissions × 4 steps) + 2 overrides."""
+    """Pre-seed 16 decision logs (4 submissions × 4 steps)."""
 
     # Submission IDs — fixed UUIDs for consistency
     submissions = [
@@ -2291,7 +2308,6 @@ async def seed_decisions(verity, agent_versions, task_versions):
     seed_started_at = datetime.now(timezone.utc)
 
     decision_count = 0
-    override_decisions = []
 
     for sub in submissions:
         workflow_run_id = WORKFLOW_RUN_IDS[sub["id"]]
@@ -2301,7 +2317,7 @@ async def seed_decisions(verity, agent_versions, task_versions):
             from verity.models.decision import DecisionLogCreate
             from verity.models.lifecycle import DeploymentChannel, EntityType as ET
 
-            log_result = await verity.decisions.log_decision(DecisionLogCreate(
+            await verity.decisions.log_decision(DecisionLogCreate(
                 entity_type=ET(entity_type),
                 entity_version_id=version_id,
                 prompt_version_ids=[],
@@ -2326,54 +2342,9 @@ async def seed_decisions(verity, agent_versions, task_versions):
                 status="complete",
             ))
 
-            # Track triage decisions for SUB-002 and appetite for SUB-003 (will override)
-            if sub["id"] == submissions[1]["id"] and step_name == "triage_submission":
-                override_decisions.append(("triage", log_result["decision_log_id"], version_id, sub["id"]))
-            if sub["id"] == submissions[2]["id"] and step_name == "assess_appetite":
-                override_decisions.append(("appetite", log_result["decision_log_id"], version_id, sub["id"]))
-
             decision_count += 1
 
     print(f"  + {decision_count} decision logs (4 submissions × 4 steps)")
-
-    # Demo HITL overrides — written into hitl_override (the new
-    # per-field, JSONPath-anchored table). The /admin/overrides
-    # page reads from hitl_override; these rows make the page
-    # non-empty out of the box and demonstrate the AI-vs-human
-    # value pattern.
-    for override_type, decision_id, version_id, sub_id in override_decisions:
-        if override_type == "triage":
-            # Senior UW disagreed with the AI's Amber → set Green.
-            await verity.record_hitl_override(
-                decision_log_id  = decision_id,
-                output_path      = "$.risk_score",
-                ai_value         = "Amber",
-                ai_found         = True,
-                hitl_value       = "Green",
-                application      = "uw_demo",
-                entity_type      = "submission",
-                entity_reference = sub_id,
-                fact_type        = "risk_score",
-                created_by       = "David Park",
-                reason           = "Regulatory investigation is routine SEC review, not enforcement action. Downgrading from Amber to Green based on direct discussion with insured's counsel.",
-            )
-        elif override_type == "appetite":
-            # VP UW approved an exception to §4.1 SIC code exclusion.
-            await verity.record_hitl_override(
-                decision_log_id  = decision_id,
-                output_path      = "$.determination",
-                ai_value         = "outside_appetite",
-                ai_found         = True,
-                hitl_value       = "within_appetite",
-                application      = "uw_demo",
-                entity_type      = "submission",
-                entity_reference = sub_id,
-                fact_type        = "appetite_determination",
-                created_by       = "Lisa Wong",
-                reason           = "Long-standing client relationship with strong premium history. Management exception protocol applied to §4.1 SIC code exclusion.",
-            )
-
-    print(f"  + {len(override_decisions)} HITL overrides (hitl_override)")
 
 
 # ══════════════════════════════════════════════════════════════

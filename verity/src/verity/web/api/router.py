@@ -31,6 +31,8 @@ from verity.web.api.overrides import build_overrides_router
 from verity.web.api.runs import build_runs_router
 from verity.web.api.runtime import build_runtime_router
 from verity.web.api.usage import build_usage_router
+from verity.web.api.where_used import build_where_used_router
+from verity.web.api.yaml_io import build_yaml_io_router
 
 
 def build_api_router(verity) -> APIRouter:
@@ -70,6 +72,15 @@ def build_api_router(verity) -> APIRouter:
     # Draft edit — PATCH/PUT/DELETE for in-place edits on draft versions,
     # plus POST .../clone to produce a new draft from any prior version.
     router.include_router(build_draft_edit_router(verity))
+
+    # Where-used — reverse lookup of which agent/task versions consume
+    # a given asset (prompt / tool / inference_config / data_connector).
+    # Foundation of Studio's safe-edit guarantee.
+    router.include_router(build_where_used_router(verity))
+
+    # YAML — export a Verity entity (with transitive deps) as a YAML
+    # bundle. Slice 4B will add the matching import endpoint.
+    router.include_router(build_yaml_io_router(verity))
 
     # Models — catalog CRUD + SCD-2 price history.
     router.include_router(build_models_router(verity))
