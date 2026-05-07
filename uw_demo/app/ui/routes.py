@@ -333,6 +333,43 @@ async def _get_stage_counts() -> dict[str, int]:
             return {row[0]: row[1] for row in rows}
 
 
+def _resolve_int_field(
+    sub: dict,
+    ext_by_name: dict,
+    field_name: str,
+) -> int | None:
+    """Apply the displayed-value precedence used by the Details
+    section (HITL → AI → submission column) and coerce the
+    result into an int.
+
+    The submission row stores these card fields as BIGINT /
+    INTEGER, but submission_extraction.{ai,hitl}_value is TEXT —
+    so any value that came in via extraction or HITL edit is a
+    string. The KPI cards' Jinja formatter
+    (`"${:,.0f}".format(...)`) needs an int, so we coerce here
+    and fall back to None on anything we can't parse (which the
+    template's truthy check then renders as '—').
+    """
+    ext = ext_by_name.get(field_name)
+    if ext and ext.get("hitl_value") is not None:
+        raw = ext["hitl_value"]
+    elif ext and ext.get("ai_value") is not None:
+        raw = ext["ai_value"]
+    else:
+        # No extraction touched this field — fall through to
+        # whatever the submission row holds (already typed).
+        return sub.get(field_name)
+    if raw in (None, ""):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        # An extraction value that isn't an int (e.g. a range
+        # like "$40-45M" the extractor flagged low-confidence).
+        # Render '—' rather than crash the template.
+        return None
+
+
 def _build_field_sections(
     sub: dict,
     extractions: list[dict],
@@ -862,6 +899,27 @@ def create_uw_routes(verity) -> APIRouter:
         # the same helper. Documents are passed so the sparkle
         # tooltip can name the source file.
         sections = _build_field_sections(sub, extractions, documents)
+
+        # KPI cards at the top of the page (Annual Revenue,
+        # Employees, Limits Requested, Prior Premium) historically
+        # read straight off `sub.<col>`. After the move to a
+        # minimal seed, those columns are NULL on workflow rows
+        # even when the AI has extracted the value or the user has
+        # made a HITL edit — so the cards rendered as '—' while the
+        # Submission Details section below them showed the real
+        # value. Apply the same hitl→ai→sub precedence the Details
+        # section uses, coerce extraction strings (TEXT in
+        # submission_extraction) back into ints (BIGINT/INTEGER on
+        # submission), and write the resolved value back onto sub
+        # so the existing template needs no change.
+        ext_by_name = {e["field_name"]: e for e in extractions}
+        for card_field in (
+            "annual_revenue", "employee_count",
+            "limits_requested", "prior_premium",
+        ):
+            sub[card_field] = _resolve_int_field(
+                sub, ext_by_name, card_field,
+            )
 
         next_action = _compute_next_action(
             submission_id, cur_stage, cur_status, has_docs=doc_count > 0,
@@ -1575,9 +1633,25 @@ def create_uw_routes(verity) -> APIRouter:
         submission_id: str,
         field_name: str,
         hitl_value: str = Form(...),
-        reason: str = Form(""),
+        reason_preset: str = Form(""),
+        reason_other: str = Form(""),
         send_feedback: str = Form(""),
     ):
+        # Resolve the reason text from the dropdown + optional
+        # typed input. The form always sends BOTH fields; we
+        # pick which one to use based on which preset was
+        # selected. If the operator chose a real preset we use
+        # its label as the audit reason; if they chose "other"
+        # we use whatever they typed; if they somehow picked
+        # nothing we fall back to empty (and validation below
+        # blocks the save when feedback is being forwarded).
+        if reason_preset == "other":
+            reason = reason_other.strip()
+        elif reason_preset in EDIT_REASON_BY_ID:
+            reason = EDIT_REASON_BY_ID[reason_preset][1]
+        else:
+            reason = ""
+
         # Treat any non-empty checkbox value as "on". HTML omits
         # unchecked checkboxes from the form body entirely.
         forward_to_verity = bool(send_feedback)
