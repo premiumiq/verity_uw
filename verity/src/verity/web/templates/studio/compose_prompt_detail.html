@@ -72,20 +72,14 @@
             <div>
                 {% if v.lifecycle_state == 'draft' %}
                     <a href="/studio/compose/prompts/{{ prompt.name }}/versions/{{ v.id }}/edit"
-                       style="padding: 6px 14px; background: var(--verity-blue-dark);
-                              color: white; text-decoration: none;
-                              border-radius: 3px; font-size: 0.85rem;">
+                       class="verity-btn verity-btn-primary">
                         Edit →
                     </a>
                 {% else %}
                     <form method="post"
                           action="/studio/compose/prompts/{{ prompt.name }}/versions/{{ v.id }}/clone-to-draft"
                           style="display: inline; margin: 0;">
-                        <button type="submit"
-                                style="padding: 6px 14px; background: var(--verity-blue-dark);
-                                       color: white; border: none;
-                                       border-radius: 3px; font-size: 0.85rem;
-                                       cursor: pointer;">
+                        <button type="submit" class="verity-btn verity-btn-primary">
                             Clone to Draft →
                         </button>
                     </form>

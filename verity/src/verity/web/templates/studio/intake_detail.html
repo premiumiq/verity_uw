@@ -235,7 +235,7 @@
         </div>
         <div>
           <button type="submit"
-                  class="px-4 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded">
+                  class="verity-btn verity-btn-primary">
             Save triage
           </button>
         </div>
@@ -331,7 +331,7 @@
 
           <div class="flex items-center gap-3 pt-2">
             <button type="submit"
-                    class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded">
+                    class="verity-btn verity-btn-primary">
               Save changes
             </button>
             <a href="/studio/intake/{{ intake.application_code }}/{{ intake.code }}?tab=overview"
@@ -504,11 +504,11 @@
                     </div>
                     <div class="col-span-1 flex flex-col gap-1">
                       <button type="submit" title="Save"
-                              class="px-2 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded">
+                              class="verity-btn verity-btn-primary verity-btn-sm">
                         Save
                       </button>
                       <a href="/studio/intake/{{ intake.application_code }}/{{ intake.code }}?tab=requirements"
-                         class="px-2 py-1.5 text-xs text-zinc-600 hover:text-zinc-900 text-center border border-zinc-200 rounded">
+                         class="verity-btn verity-btn-secondary verity-btn-sm" style="justify-content: center;">
                         Cancel
                       </a>
                     </div>
@@ -590,7 +590,7 @@
           <div id="redundancy-target"></div>
           <div>
             <button type="submit"
-                    class="px-4 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded">
+                    class="verity-btn verity-btn-primary">
               Add requirement
             </button>
           </div>
@@ -662,11 +662,11 @@
                       </div>
                       <div class="col-span-1 flex flex-col gap-1">
                         <button type="submit"
-                                class="px-2 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded">
+                                class="verity-btn verity-btn-primary verity-btn-sm">
                           Save
                         </button>
                         <a href="/studio/intake/{{ intake.application_code }}/{{ intake.code }}?tab=plan"
-                           class="px-2 py-1.5 text-xs text-zinc-600 hover:text-zinc-900 text-center border border-zinc-200 rounded">
+                           class="verity-btn verity-btn-secondary verity-btn-sm" style="justify-content: center;">
                           Cancel
                         </a>
                       </div>
@@ -718,8 +718,7 @@
       <div class="flex flex-wrap gap-3 items-center">
         {% if is_action_allowed(persona, 'generate_plan') %}
           <form method="POST" action="/studio/intake/{{ intake.application_code }}/{{ intake.code }}/plan/generate" class="inline">
-            <button type="submit"
-                    class="px-3 py-1.5 text-sm font-medium text-zinc-800 bg-zinc-100 hover:bg-zinc-200 border border-zinc-300 rounded">
+            <button type="submit" class="verity-btn verity-btn-secondary">
               Re-run plan generator
             </button>
             <span class="text-xs text-zinc-500 ml-2">Skips rows that already exist.</span>
@@ -800,7 +799,7 @@
             </div>
             <div>
               <button type="submit"
-                      class="px-4 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded">
+                      class="verity-btn verity-btn-primary">
                 Add plan row
               </button>
             </div>
@@ -890,7 +889,7 @@
         </label>
         <div>
           <button type="submit"
-                  class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded">
+                  class="verity-btn verity-btn-primary">
             Save assessment
           </button>
         </div>
@@ -976,26 +975,45 @@
                 </span>
               </div>
 
-              <form method="POST" action="/studio/intake/{{ intake.application_code }}/{{ intake.code }}/approvals/{{ a.id }}/signoff"
-                    class="grid grid-cols-2 gap-2 text-sm">
-                <select name="decision" required class="px-2 py-1.5 border rounded col-span-2">
-                  <option value="approved">approved</option>
-                  <option value="rejected">rejected</option>
-                  <option value="requested_changes">requested_changes</option>
-                  <option value="abstained">abstained</option>
-                </select>
-                <input name="approver_name" required placeholder="Your name"
-                       class="px-2 py-1.5 border rounded col-span-1">
-                <input name="approver_email" type="email" placeholder="Your email"
-                       class="px-2 py-1.5 border rounded col-span-1">
-                <input name="comment" placeholder="Comment (optional)"
-                       class="px-2 py-1.5 border rounded col-span-2">
-                <input name="evidence_url" placeholder="Evidence URL (optional)"
-                       class="px-2 py-1.5 border rounded col-span-2">
-                <button type="submit"
-                        class="col-span-2 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded">
-                  Record signoff as {{ persona_value | replace('_',' ') | title }}
-                </button>
+              <form method="POST"
+                    action="/studio/intake/{{ intake.application_code }}/{{ intake.code }}/approvals/{{ a.id }}/signoff"
+                    class="space-y-3 text-sm">
+                <div>
+                  <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Decision</label>
+                  <select name="decision" required class="w-full px-2 py-1.5 border rounded text-sm">
+                    <option value="approved">approved</option>
+                    <option value="rejected">rejected</option>
+                    <option value="requested_changes">requested_changes</option>
+                    <option value="abstained">abstained</option>
+                  </select>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Your name</label>
+                    <input name="approver_name" required
+                           class="w-full px-2 py-1.5 border rounded text-sm">
+                  </div>
+                  <div>
+                    <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Your email</label>
+                    <input name="approver_email" type="email"
+                           class="w-full px-2 py-1.5 border rounded text-sm">
+                  </div>
+                </div>
+                <div>
+                  <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Comment (optional)</label>
+                  <textarea name="comment" rows="2"
+                            class="w-full px-2 py-1.5 border rounded text-sm"></textarea>
+                </div>
+                <div>
+                  <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Evidence URL (optional)</label>
+                  <input name="evidence_url" placeholder="https://…"
+                         class="w-full px-2 py-1.5 border rounded text-sm">
+                </div>
+                <div>
+                  <button type="submit" class="verity-btn verity-btn-primary">
+                    Record signoff as {{ persona_value | replace('_',' ') | title }}
+                  </button>
+                </div>
               </form>
             {% else %}
               {# Persona doesn't match a required role — show why and how to fix. #}

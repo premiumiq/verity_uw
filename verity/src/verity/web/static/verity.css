@@ -354,7 +354,6 @@ a:hover {
 .verity-badge-candidate  { background: var(--verity-blue-pale);   color: var(--verity-blue-deep); }
 .verity-badge-staging    { background: var(--verity-blue-light);  color: var(--verity-blue-dark); }
 .verity-badge-shadow     { background: var(--verity-amber-light); color: #816014; }
-.verity-badge-challenger { background: var(--verity-amber-light); color: #816014; }
 .verity-badge-champion   { background: var(--verity-green-light); color: #3E6044; }
 .verity-badge-deprecated { background: var(--verity-gray-dark);      color: var(--verity-text-light); border: 1px solid var(--verity-border); }
 
@@ -372,12 +371,9 @@ a:hover {
 .verity-badge-failed   { background: var(--verity-red-light);   color: #A23838; }
 .verity-badge-pending  { background: var(--verity-blue-light);  color: var(--verity-blue-dark); }
 
-/* Async-run lifecycle states surfaced by execution_run_current. */
-.verity-badge-submitted { background: var(--verity-blue-pale);  color: var(--verity-blue-deep); }
-.verity-badge-claimed   { background: var(--verity-blue-light); color: var(--verity-blue-dark); }
-.verity-badge-heartbeat { background: var(--verity-amber-light); color: #816014; }
-.verity-badge-released  { background: var(--verity-gray-light); color: var(--verity-text-light); }
-.verity-badge-cancelled { background: var(--verity-gray-pale);  color: var(--verity-text-light); border: 1px solid var(--verity-border); }
+/* Removed (2026-05-07): unused -challenger / -submitted / -claimed /
+   -heartbeat / -released / -cancelled async-run-state badges; no
+   template / route / partial referenced them. */
 
 
 /* ── BUTTONS ───────────────────────────────────────────────── */
@@ -747,74 +743,10 @@ a:hover {
 }
 
 
-/* ── KPI CARDS ───────────────────────────────────────────────
-   Summary metric cards for dashboards and list pages.
-*/
-
-.verity-kpi-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 12px;
-    margin-bottom: 20px;
-}
-
-.verity-kpi-card {
-    background: var(--verity-bg);
-    border: 1px solid var(--verity-border);
-    border-radius: 6px;
-    padding: 12px 16px;
-    text-align: center;
-}
-
-.verity-kpi-value {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: var(--verity-blue-deep);
-    line-height: 1.2;
-}
-
-.verity-kpi-label {
-    font-size: 0.7rem;
-    font-weight: 500;
-    color: var(--verity-text-light);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-top: 4px;
-}
-
-
-/* ── SUMMARY CARDS ROW ───────────────────────────────────────
-   Horizontal row of key metric cards (revenue, employees, etc.)
-*/
-
-.verity-summary-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 12px;
-    margin-bottom: 20px;
-}
-
-.verity-summary-card {
-    background: var(--verity-bg);
-    border: 1px solid var(--verity-border);
-    border-radius: 6px;
-    padding: 12px 16px;
-}
-
-.verity-summary-label {
-    font-size: 0.7rem;
-    font-weight: 500;
-    color: var(--verity-text-light);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.verity-summary-value {
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: var(--verity-text);
-    margin-top: 2px;
-}
+/* Removed (2026-05-07): unused .verity-kpi-* and .verity-summary-*
+   class families. No template or partial referenced them; the dashboard
+   pages that would have used them never adopted the pattern. Restore
+   from git history if a future card-grid view wants to re-adopt. */
 
 
 /* ── HTMX INDICATOR ──────────────────────────────────────────
