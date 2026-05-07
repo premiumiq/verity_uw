@@ -287,3 +287,335 @@ WHERE qc.resolved_at IS NULL
 
 ORDER BY detected_at DESC
 LIMIT 200;
+
+
+-- ============================================================
+-- INVENTORY GRAPH QUERIES
+-- Powers /admin/model-inventory/graph — three-lane network view
+-- of champion executables (agents + tasks) with their wired-up
+-- prompts, configs, tools, and inter-agent delegations.
+--
+-- "Champion" everywhere here means: only the version pointed at
+-- by current_champion_version_id on the parent agent/task. The
+-- graph shows what is *currently in production*, not the full
+-- lifecycle history.
+-- ============================================================
+
+-- name: inventory_graph_agents
+-- One row per agent with a champion. Carries everything the
+-- node card needs (display name, materiality, decision count,
+-- last validation status) plus the agent_version id used by
+-- the edge queries below to wire up prompts/configs/tools.
+SELECT
+    a.id                              AS agent_id,
+    a.name                            AS name,
+    a.display_name                    AS display_name,
+    a.materiality_tier                AS materiality_tier,
+    a.domain                          AS domain,
+    a.owner_name                      AS owner_name,
+    av.id                             AS agent_version_id,
+    av.version_label                  AS champion_version,
+    av.inference_config_id            AS inference_config_id,
+    ic.name                           AS inference_config_name,
+    ic.model_name                     AS model_name,
+    -- Last validation outcome — drives the small status dot on
+    -- the node. NULL when no validation has run yet.
+    (
+        SELECT vr.passed FROM validation_run vr
+        WHERE vr.entity_type = 'agent'
+          AND vr.entity_version_id = av.id
+        ORDER BY vr.run_at DESC LIMIT 1
+    )                                 AS last_validation_passed,
+    -- Last 30 days of decisions — drives the bubble inside the
+    -- node. Same window as the existing inventory report so the
+    -- two views stay consistent.
+    (
+        SELECT COUNT(*) FROM agent_decision_log adl
+        WHERE adl.entity_type = 'agent'
+          AND adl.entity_version_id = av.id
+          AND adl.created_at > NOW() - INTERVAL '30 days'
+    )                                 AS decision_count_30d
+FROM agent a
+JOIN agent_version av
+  ON av.id = a.current_champion_version_id
+JOIN inference_config ic
+  ON ic.id = av.inference_config_id
+ORDER BY a.materiality_tier, a.name;
+
+
+-- name: inventory_graph_tasks
+-- Same shape as inventory_graph_agents but for tasks. Tasks
+-- don't have delegation, so the graph never draws edges
+-- between two tasks.
+SELECT
+    t.id                              AS task_id,
+    t.name                            AS name,
+    t.display_name                    AS display_name,
+    t.capability_type                 AS capability_type,
+    t.materiality_tier                AS materiality_tier,
+    t.domain                          AS domain,
+    t.owner_name                      AS owner_name,
+    tv.id                             AS task_version_id,
+    tv.version_label                  AS champion_version,
+    tv.inference_config_id            AS inference_config_id,
+    ic.name                           AS inference_config_name,
+    ic.model_name                     AS model_name,
+    (
+        SELECT vr.passed FROM validation_run vr
+        WHERE vr.entity_type = 'task'
+          AND vr.entity_version_id = tv.id
+        ORDER BY vr.run_at DESC LIMIT 1
+    )                                 AS last_validation_passed,
+    (
+        SELECT COUNT(*) FROM agent_decision_log adl
+        WHERE adl.entity_type = 'task'
+          AND adl.entity_version_id = tv.id
+          AND adl.created_at > NOW() - INTERVAL '30 days'
+    )                                 AS decision_count_30d
+FROM task t
+JOIN task_version tv
+  ON tv.id = t.current_champion_version_id
+JOIN inference_config ic
+  ON ic.id = tv.inference_config_id
+ORDER BY t.materiality_tier, t.name;
+
+
+-- name: inventory_graph_prompts
+-- One row per prompt_version that is referenced by at least
+-- one champion agent_version OR task_version. Returns the
+-- *prompt*-level identity (prompt_id + display_name) plus the
+-- specific version label so the node can show "Triage System
+-- v1.0.0" without ambiguity.
+--
+-- DISTINCT ON collapses the case where a prompt_version is
+-- assigned to multiple champion entities — the join would
+-- otherwise emit duplicate rows.
+SELECT DISTINCT ON (pv.id)
+    pv.id                             AS prompt_version_id,
+    p.id                              AS prompt_id,
+    p.name                            AS name,
+    p.display_name                    AS display_name,
+    pv.version_label                  AS version_label,
+    pv.governance_tier                AS governance_tier,
+    pv.api_role                       AS api_role,
+    pv.sensitivity_level              AS sensitivity_level
+FROM prompt p
+JOIN prompt_version pv
+  ON pv.prompt_id = p.id
+JOIN entity_prompt_assignment epa
+  ON epa.prompt_version_id = pv.id
+WHERE
+    -- Prompt is in production iff it's assigned to a champion
+    -- agent_version or task_version. Two-side existence check
+    -- avoids pulling assignments that belong to draft / shadow
+    -- versions.
+    EXISTS (
+        SELECT 1 FROM agent a
+        JOIN agent_version av
+          ON av.id = a.current_champion_version_id
+        WHERE epa.entity_type = 'agent'
+          AND epa.entity_version_id = av.id
+    )
+    OR EXISTS (
+        SELECT 1 FROM task t
+        JOIN task_version tv
+          ON tv.id = t.current_champion_version_id
+        WHERE epa.entity_type = 'task'
+          AND epa.entity_version_id = tv.id
+    )
+ORDER BY pv.id, p.name;
+
+
+-- name: inventory_graph_configs
+-- One row per inference_config referenced by a champion
+-- agent_version or task_version. The graph treats configs as
+-- shared resources — two agents using the same config render
+-- as two edges to the same node.
+SELECT
+    ic.id                             AS config_id,
+    ic.name                           AS name,
+    ic.display_name                   AS display_name,
+    ic.model_name                     AS model_name,
+    ic.temperature                    AS temperature,
+    ic.max_tokens                     AS max_tokens
+FROM inference_config ic
+WHERE EXISTS (
+    SELECT 1 FROM agent a
+    JOIN agent_version av
+      ON av.id = a.current_champion_version_id
+    WHERE av.inference_config_id = ic.id
+)
+   OR EXISTS (
+    SELECT 1 FROM task t
+    JOIN task_version tv
+      ON tv.id = t.current_champion_version_id
+    WHERE tv.inference_config_id = ic.id
+)
+ORDER BY ic.name;
+
+
+-- name: inventory_graph_tools
+-- One row per tool authorised on at least one champion
+-- agent_version or task_version. Includes mcp_server_name so
+-- the tooltip can flag MCP-backed tools (transport != local).
+SELECT
+    t.id                              AS tool_id,
+    t.name                            AS name,
+    t.display_name                    AS display_name,
+    t.description                     AS description,
+    t.transport                       AS transport,
+    t.mcp_server_name                 AS mcp_server_name,
+    t.is_write_operation              AS is_write_operation
+FROM tool t
+WHERE EXISTS (
+    SELECT 1 FROM agent_version_tool avt
+    JOIN agent a
+      ON a.current_champion_version_id = avt.agent_version_id
+    WHERE avt.tool_id = t.id
+      AND avt.authorized = TRUE
+)
+   OR EXISTS (
+    SELECT 1 FROM task_version_tool tvt
+    JOIN task t2
+      ON t2.current_champion_version_id = tvt.task_version_id
+    WHERE tvt.tool_id = t.id
+      AND tvt.authorized = TRUE
+)
+ORDER BY t.name;
+
+
+-- name: inventory_graph_edges_executable_prompt
+-- agent/task → prompt edges. entity_type column lets the
+-- client pick the right "from" lane without a second lookup.
+-- entity_id is the parent (agent.id or task.id) — what the
+-- node id is in the front-end graph data.
+SELECT
+    epa.entity_type                   AS source_entity_type,
+    CASE WHEN epa.entity_type = 'agent'
+         THEN a.id ELSE t.id END      AS source_entity_id,
+    epa.prompt_version_id             AS prompt_version_id,
+    epa.api_role                      AS api_role,
+    epa.governance_tier               AS governance_tier,
+    epa.execution_order               AS execution_order
+FROM entity_prompt_assignment epa
+LEFT JOIN agent_version av
+       ON epa.entity_type = 'agent'
+      AND av.id = epa.entity_version_id
+LEFT JOIN agent a
+       ON a.current_champion_version_id = av.id
+LEFT JOIN task_version tv
+       ON epa.entity_type = 'task'
+      AND tv.id = epa.entity_version_id
+LEFT JOIN task t
+       ON t.current_champion_version_id = tv.id
+WHERE
+    -- Filter to assignments whose entity_version IS the current
+    -- champion. The two LEFT JOINs above produce a NULL on the
+    -- non-matching side; the WHERE keeps only rows where the
+    -- matching side resolves to a champion.
+    (epa.entity_type = 'agent' AND a.id IS NOT NULL)
+ OR (epa.entity_type = 'task'  AND t.id IS NOT NULL);
+
+
+-- name: inventory_graph_edges_executable_config
+-- agent/task → config edges. One row per champion entity
+-- (every agent/task has exactly one inference_config_id, so
+-- this is a 1:1 emission per executable).
+SELECT
+    'agent'::text                     AS source_entity_type,
+    a.id                              AS source_entity_id,
+    av.inference_config_id            AS config_id
+FROM agent a
+JOIN agent_version av
+  ON av.id = a.current_champion_version_id
+UNION ALL
+SELECT
+    'task'::text                      AS source_entity_type,
+    t.id                              AS source_entity_id,
+    tv.inference_config_id            AS config_id
+FROM task t
+JOIN task_version tv
+  ON tv.id = t.current_champion_version_id;
+
+
+-- name: inventory_graph_edges_executable_tool
+-- agent/task → tool edges. Pulls the authorised flag through
+-- so the front-end can distinguish a wired-but-disabled
+-- relationship if we ever surface that.
+SELECT
+    'agent'::text                     AS source_entity_type,
+    a.id                              AS source_entity_id,
+    avt.tool_id                       AS tool_id,
+    avt.authorized                    AS authorized
+FROM agent_version_tool avt
+JOIN agent a
+  ON a.current_champion_version_id = avt.agent_version_id
+UNION ALL
+SELECT
+    'task'::text                      AS source_entity_type,
+    t.id                              AS source_entity_id,
+    tvt.tool_id                       AS tool_id,
+    tvt.authorized                    AS authorized
+FROM task_version_tool tvt
+JOIN task t
+  ON t.current_champion_version_id = tvt.task_version_id;
+
+
+-- name: inventory_graph_edges_delegation
+-- agent → child agent edges, drawn within the Executables
+-- lane. The schema allows two ways to point at the child:
+--   * child_agent_name      — name-based pin (any version)
+--   * child_agent_version_id — pinned to a specific version
+-- For the production graph we only care about which AGENTS
+-- delegate to which AGENTS, not the version the parent pinned
+-- to. Both forms collapse to the parent agent.id of the child.
+SELECT
+    parent_agent.id                   AS parent_agent_id,
+    child_agent.id                    AS child_agent_id,
+    avd.scope                         AS scope,
+    avd.authorized                    AS authorized
+FROM agent_version_delegation avd
+-- Parent must be a champion version of its agent.
+JOIN agent_version parent_av
+  ON parent_av.id = avd.parent_agent_version_id
+JOIN agent parent_agent
+  ON parent_agent.current_champion_version_id = parent_av.id
+-- Child resolves either via the named pin or the version pin.
+JOIN agent child_agent
+  ON child_agent.id = COALESCE(
+        (SELECT agent_id FROM agent_version
+          WHERE id = avd.child_agent_version_id),
+        (SELECT id FROM agent
+          WHERE name = avd.child_agent_name)
+     )
+WHERE avd.authorized = TRUE;
+
+
+-- name: inventory_graph_applications
+-- One row per application — small helper that powers the
+-- "Filter by application" dropdown on the graph page. Listed
+-- by display_name for predictable ordering in the UI.
+SELECT
+    id                                AS id,
+    name                              AS name,
+    display_name                      AS display_name
+FROM application
+ORDER BY display_name;
+
+
+-- name: inventory_graph_application_membership
+-- Many-to-many: which application(s) each registered entity
+-- belongs to. The graph applies this in two passes — direct
+-- for entities of types in application_entity (agent / task /
+-- prompt / tool), and inherited for configs (a config belongs
+-- to every application that owns an executable wired to it).
+--
+-- Each row is keyed by (entity_type, entity_id, application_id).
+-- entity_id matches: agent.id, task.id, prompt.id, tool.id —
+-- never an _version row, since application membership lives
+-- at the registered-entity level.
+SELECT
+    ae.entity_type                    AS entity_type,
+    ae.entity_id                      AS entity_id,
+    ae.application_id                 AS application_id
+FROM application_entity ae;

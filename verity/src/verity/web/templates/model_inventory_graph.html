@@ -1,0 +1,126 @@
+{#
+  MODEL INVENTORY — PRODUCTION GRAPH
+
+  Three-lane network diagram of champion executables (agents +
+  tasks) with their wired-up prompts, configs, and tools. The
+  whole thing is data-driven: this template is just the page
+  shell. inventory_graph.js fetches /admin/model-inventory/graph-data
+  on load and renders nodes + edges into the #inventory-graph div
+  using Cytoscape.js.
+
+  Filters and visibility toggles live in the top bar; they
+  manipulate the already-loaded graph data client-side, so flipping
+  filters does not round-trip the server.
+
+  URL state: filters and selection are written to the URL query
+  string by the script (e.g. ?app=uw_demo&hide=tools), so the
+  current view is shareable.
+#}
+{% extends "base.html" %}
+
+{% block title %}Production Graph — Model Inventory{% endblock %}
+
+{% block breadcrumbs %}
+    <span class="separator">›</span>
+    <a href="/admin/model-inventory">Model Inventory</a>
+    <span class="separator">›</span>
+    <span>Production Graph</span>
+{% endblock %}
+
+{% block page_title %}Model Inventory{% endblock %}
+
+{% block content %}
+
+{# Cytoscape.js for the network diagram. Pinned to a v3.x release
+   from a CDN to match the project's no-build-step convention.
+   Same approach as the Tailwind / HTMX includes in base.html.
+
+   cytoscape-node-html-label is a small companion plugin that lets
+   us render each node's content as HTML — needed for the decision-
+   count bubble inside executable nodes (Cytoscape native labels
+   are plain text). It auto-registers itself when loaded after
+   the main Cytoscape script. #}
+<script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+<script src="https://unpkg.com/cytoscape-node-html-label@1.2.2/dist/cytoscape-node-html-label.min.js"></script>
+
+{# Page-specific stylesheet. Defined in static/inventory_graph.css. #}
+<link rel="stylesheet" href="/admin/static/inventory_graph.css">
+
+{# ── SUBNAV: Report | Production Graph ────────────────────── #}
+<div class="inventory-subnav">
+    <a href="/admin/model-inventory"
+       class="inventory-subnav-tab {% if inventory_subtab == 'report' %}active{% endif %}">
+        Report
+    </a>
+    <a href="/admin/model-inventory/graph"
+       class="inventory-subnav-tab {% if inventory_subtab == 'graph' %}active{% endif %}">
+        Production Graph
+    </a>
+</div>
+
+<div style="margin-bottom: 16px; font-size: 0.85rem; color: var(--verity-text-light);">
+    Champion versions only — what is currently in production.
+    Hover for details, click to highlight dependencies, double-click to open the entity.
+</div>
+
+{# ── TOP CONTROL BAR ────────────────────────────────────── #}
+<div class="inventory-graph-controls">
+
+    {# Application filter. Multi-select via a dropdown of
+       checkboxes. The script populates the option list from
+       the /graph-data endpoint's `applications` array, then
+       reads selection state on every change. #}
+    <div class="inventory-graph-control-group">
+        <label class="inventory-graph-control-label">Application</label>
+        <details class="inventory-graph-dropdown" id="app-filter-dropdown">
+            <summary>All applications</summary>
+            <div class="inventory-graph-dropdown-body" id="app-filter-options">
+                {# Filled by inventory_graph.js after data fetch. #}
+            </div>
+        </details>
+    </div>
+
+    {# Show / Legend. Each row is a checkbox toggling a node
+       TYPE on/off plus a colour swatch + glyph that doubles as
+       the legend for that type. Rendered into #node-type-legend
+       by inventory_graph.js so the swatch colours and glyphs
+       come from a single source of truth (TYPE_COLOR, ICONS).
+       Edges aren't toggleable — they follow whether both their
+       endpoint nodes are currently visible. #}
+    <div class="inventory-graph-control-group inventory-graph-legend-group">
+        <label class="inventory-graph-control-label">Show / Legend</label>
+        <div class="inventory-graph-legend" id="node-type-legend">
+            {# Filled by inventory_graph.js after data fetch. #}
+        </div>
+    </div>
+
+    <div class="inventory-graph-control-group inventory-graph-control-actions">
+        <button type="button" id="reset-view"
+                class="inventory-graph-btn"
+                title="Re-fit and clear selection">
+            Reset view
+        </button>
+    </div>
+</div>
+
+{# Lane titles removed — the legend on the control bar
+   already conveys what each colour family means, so the
+   floating "Executables / Prompts & Configs / Tools"
+   headers were just visual noise above the canvas. #}
+
+{# ── GRAPH CANVAS ─────────────────────────────────────────
+    Cytoscape draws into this div. Height fixed in CSS so the
+    canvas never collapses to zero on first render. #}
+<div id="inventory-graph"></div>
+
+{# ── DETAIL TOOLTIP ───────────────────────────────────────
+    Floats over the canvas on hover (driven by the script's
+    cy.on('mouseover','node', ...) handler). Hidden by default. #}
+<div id="inventory-graph-tooltip" class="inventory-graph-tooltip" hidden></div>
+
+{# Inline JSON island carries no data — the JS does its own
+   fetch — but we use this script tag as the bottom-of-page
+   trigger to load the page module after the DOM is parsed. #}
+<script src="/admin/static/inventory_graph.js" defer></script>
+
+{% endblock %}

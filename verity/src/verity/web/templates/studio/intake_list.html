@@ -1,0 +1,134 @@
+{% extends 'studio/_base.html' %}
+
+{% block title %}Intake · Verity Studio{% endblock %}
+{% block page_title %}Intake — Use Case Inventory{% endblock %}
+{% block breadcrumbs %}
+  <span class="verity-breadcrumb-sep">/</span>
+  <span>Intake</span>
+{% endblock %}
+
+{% block content %}
+
+{# ── HEADER ROW ────────────────────────────────────────────── #}
+<div class="flex items-center justify-between mb-6">
+  <p class="text-sm text-zinc-600 max-w-2xl">
+    Every AI use case starts here. An intake records the business
+    purpose, risk classification, and approvals before any agent or
+    task is built. See the design at
+    <code>docs/architecture/governance-intake.md</code>.
+  </p>
+  {% if is_action_allowed(persona, 'create_intake') %}
+    <a href="/studio/intake/new"
+       class="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium
+              text-white bg-blue-600 hover:bg-blue-700 rounded shadow-sm">
+      <span class="text-base leading-none">+</span> New Intake
+    </a>
+  {% endif %}
+</div>
+
+{# ── APPLICATION FILTER ────────────────────────────────────── #}
+{# GET form with a single select; submitting just reloads with
+   ?application_code=… in the query string. Server filters via the
+   existing list_intakes_filtered query. #}
+<form method="GET" action="/studio/intake"
+      class="flex items-center gap-3 mb-5 text-sm">
+  <label class="text-xs uppercase tracking-wider text-zinc-500">Application</label>
+  <select name="application_code"
+          onchange="this.form.submit()"
+          class="px-3 py-1.5 border border-zinc-300 rounded text-sm bg-white">
+    <option value="">All applications</option>
+    {% for app in applications %}
+      <option value="{{ app.name }}"
+              {% if filter_app == app.name %}selected{% endif %}>
+        {{ app.display_name }} ({{ app.name }})
+      </option>
+    {% endfor %}
+  </select>
+  {% if filter_app %}
+    <a href="/studio/intake" class="text-xs text-zinc-500 hover:text-zinc-900 underline">
+      clear filter
+    </a>
+  {% endif %}
+  <span class="text-xs text-zinc-500">
+    showing {{ intakes | length }} intake{{ '' if intakes|length == 1 else 's' }}
+  </span>
+</form>
+
+{# ── COUNT CARDS ───────────────────────────────────────────── #}
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+  {% for tier_label, tier_key, color in [
+      ('High Risk',     'high',         'bg-red-50 border-red-200 text-red-800'),
+      ('Limited Risk',  'limited',      'bg-amber-50 border-amber-200 text-amber-800'),
+      ('Minimal Risk',  'minimal',      'bg-emerald-50 border-emerald-200 text-emerald-800'),
+      ('Unacceptable',  'unacceptable', 'bg-zinc-100 border-zinc-300 text-zinc-700'),
+  ] %}
+    <div class="p-3 rounded border {{ color }}">
+      <div class="text-2xl font-semibold">
+        {{ counts.by_risk_tier.get(tier_key, 0) }}
+      </div>
+      <div class="text-xs uppercase tracking-wider">{{ tier_label }}</div>
+    </div>
+  {% endfor %}
+</div>
+
+{# ── LIST TABLE ────────────────────────────────────────────── #}
+<div class="overflow-x-auto rounded border border-zinc-200">
+  <table class="w-full text-sm">
+    <thead class="bg-zinc-50 text-zinc-600 text-xs uppercase">
+      <tr>
+        <th class="text-left px-3 py-2">Application</th>
+        <th class="text-left px-3 py-2">Title</th>
+        <th class="text-left px-3 py-2">Owner</th>
+        <th class="text-left px-3 py-2">Risk</th>
+        <th class="text-left px-3 py-2">NAIC</th>
+        <th class="text-left px-3 py-2">Status</th>
+        <th class="text-left px-3 py-2">Submitted</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for i in intakes %}
+        <tr class="border-t border-zinc-100 hover:bg-zinc-50">
+          <td class="px-3 py-2">
+            <a href="/studio/intake/{{ i.application_code }}/{{ i.code }}"
+               class="font-mono text-blue-700 hover:underline">{{ i.application_code }}/{{ i.code }}</a>
+          </td>
+          <td class="px-3 py-2">{{ i.title }}</td>
+          <td class="px-3 py-2 text-zinc-700">
+            {{ i.business_owner_name }}
+            {% if i.requesting_team %}
+              <div class="text-xs text-zinc-500">{{ i.requesting_team }}</div>
+            {% endif %}
+          </td>
+          <td class="px-3 py-2">
+            <span class="inline-block text-xs font-medium px-2 py-0.5 rounded
+              {% if i.ai_risk_tier == 'high' %}bg-red-100 text-red-800
+              {% elif i.ai_risk_tier == 'limited' %}bg-amber-100 text-amber-800
+              {% elif i.ai_risk_tier == 'minimal' %}bg-emerald-100 text-emerald-800
+              {% else %}bg-zinc-100 text-zinc-700{% endif %}">
+              {{ i.ai_risk_tier }}
+            </span>
+          </td>
+          <td class="px-3 py-2 text-xs text-zinc-700">{{ i.naic_materiality }}</td>
+          <td class="px-3 py-2">
+            <span class="inline-block text-xs px-2 py-0.5 rounded bg-zinc-100 text-zinc-800">
+              {{ i.status }}
+            </span>
+          </td>
+          <td class="px-3 py-2 text-xs text-zinc-500">
+            {{ i.intake_at.strftime('%Y-%m-%d') if i.intake_at else '' }}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7" class="px-3 py-8 text-center text-zinc-500 text-sm">
+          No intakes yet. {% if is_action_allowed(persona, 'create_intake') %}
+            <a href="/studio/intake/new" class="text-blue-700 hover:underline">Submit one</a>.
+          {% else %}
+            Switch to a Business Owner or AI Governance persona to create one.
+          {% endif %}
+        </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

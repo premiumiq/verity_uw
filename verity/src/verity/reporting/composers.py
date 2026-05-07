@@ -49,6 +49,88 @@ def _humanize_asset(row: dict[str, Any]) -> dict[str, Any]:
     return r
 
 
+# =============================================================================
+# Intake context resolution — joins a registry entity to its parent intake
+# so reports can surface the use-case context (HITL strategy, risk tier,
+# business owner, intake code/title) alongside the entity itself.
+# =============================================================================
+
+async def _resolve_intake_context_for_entities(
+    verity, entity_type: str, entity_ids: list[str]
+) -> dict[str, dict[str, Any]]:
+    """Map entity_id -> intake context (or {} when no intake link).
+
+    The intake_entity_link table points at the entity HEADER (agent, task,
+    prompt), not at a specific version. So lookups use the entity_id from
+    v_entity_version (which is the header id, despite the column name).
+
+    When an entity is linked to multiple intakes, the most-recent live or
+    approved intake wins. This is the right tiebreaker for reports —
+    auditors want the operative use-case context, not historical ones.
+    """
+    if not entity_ids:
+        return {}
+    rows = await verity.db.fetch_all_raw(
+        """
+        WITH ranked AS (
+            SELECT
+                l.entity_id,
+                i.code              AS intake_code,
+                i.title             AS intake_title,
+                i.ai_risk_tier::text AS intake_risk_tier,
+                i.naic_materiality::text AS intake_naic_materiality,
+                i.business_owner_name,
+                i.hitl_strategy,
+                i.hitl_review_threshold,
+                i.status::text      AS intake_status,
+                ROW_NUMBER() OVER (
+                    PARTITION BY l.entity_id
+                    ORDER BY
+                        CASE i.status::text
+                            WHEN 'live' THEN 0 WHEN 'approved' THEN 1
+                            WHEN 'in_build' THEN 2 ELSE 3 END,
+                        i.intake_at DESC
+                ) AS rn
+            FROM governance.intake_entity_link l
+            JOIN governance.intake i ON i.id = l.intake_id
+            WHERE l.entity_type = %(entity_type)s::governance.entity_type
+              AND l.entity_id = ANY(%(entity_ids)s::uuid[])
+        )
+        SELECT *
+        FROM ranked
+        WHERE rn = 1
+        """,
+        {
+            "entity_type": entity_type,
+            "entity_ids": [str(eid) for eid in entity_ids],
+        },
+    )
+    return {str(r["entity_id"]): dict(r) for r in rows}
+
+
+def _attach_intake_context(asset_row: dict[str, Any], context_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Merge intake context fields onto an asset row.
+
+    Adds (always present, '—' when missing):
+      intake_code, intake_title, intake_risk_tier, intake_naic_materiality,
+      intake_status, business_owner_name (overrides asset's own owner),
+      hitl_strategy, hitl_review_threshold
+
+    Reports can render these unconditionally without an existence check.
+    """
+    eid = str(asset_row.get("entity_id") or "")
+    ctx = context_map.get(eid) or {}
+    asset_row["intake_code"]               = ctx.get("intake_code") or "—"
+    asset_row["intake_title"]              = ctx.get("intake_title") or "—"
+    asset_row["intake_risk_tier"]          = ctx.get("intake_risk_tier") or "—"
+    asset_row["intake_naic_materiality"]   = ctx.get("intake_naic_materiality") or "—"
+    asset_row["intake_status"]             = ctx.get("intake_status") or "—"
+    asset_row["intake_business_owner"]     = ctx.get("business_owner_name") or "—"
+    asset_row["hitl_strategy"]             = ctx.get("hitl_strategy") or "Not recorded"
+    asset_row["hitl_review_threshold"]     = ctx.get("hitl_review_threshold") or "—"
+    return asset_row
+
+
 def _humanize_event(row: dict[str, Any]) -> dict[str, Any]:
     """Add `_display` fields to a v_lifecycle_event row."""
     r = dict(row)
@@ -123,6 +205,21 @@ async def compose_model_inventory(
 
     # Humanize + group by asset type so the template can sub-section.
     inventory_rows = [_humanize_asset(r) for r in inventory_rows]
+
+    # Attach intake context (HITL strategy, risk tier, business owner)
+    # to each row by joining through intake_entity_link. Per-entity-type
+    # because the link table is polymorphic on (entity_type, entity_id).
+    by_type_ids: dict[str, list[str]] = defaultdict(list)
+    for r in inventory_rows:
+        if r.get("entity_id") and r.get("entity_type") in ("agent", "task", "prompt"):
+            by_type_ids[r["entity_type"]].append(r["entity_id"])
+    context_maps: dict[str, dict[str, dict[str, Any]]] = {}
+    for et, ids in by_type_ids.items():
+        context_maps[et] = await _resolve_intake_context_for_entities(verity, et, ids)
+    for r in inventory_rows:
+        cmap = context_maps.get(r.get("entity_type"), {})
+        _attach_intake_context(r, cmap)
+
     by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for r in inventory_rows:
         by_type[r["entity_type"]].append(r)
@@ -488,6 +585,14 @@ async def compose_naic_exhibit_c(
         )
 
     target = _humanize_asset(versions[0])
+
+    # Attach intake context — HITL strategy, risk tier, business owner —
+    # so the high-risk deep-dive Word doc shows the use-case framing
+    # alongside the model. Single-entity lookup; cheap.
+    _ctx_map = await _resolve_intake_context_for_entities(
+        verity, target["entity_type"], [target["entity_id"]],
+    )
+    _attach_intake_context(target, _ctx_map)
     target_version_id = target["source_pk"]
 
     # Lifecycle history for this entity_version.
@@ -581,13 +686,247 @@ async def compose_naic_exhibit_c(
 
 
 # =============================================================================
+# Use Case Intake Inventory
+# =============================================================================
+
+async def compose_intake_inventory(
+    verity, scope: dict[str, Any]
+) -> dict[str, Any]:
+    """Enumerate every recorded use case, with realisation counts.
+
+    Optional scope:
+      intake_code     — restrict to one intake
+      ai_risk_tier    — restrict to one risk tier
+      status          — restrict to one intake status
+
+    Returns:
+      intakes                 — list of intake rows with realisation counts
+      by_risk_tier            — Counter for executive summary
+      by_status               — Counter for executive summary
+      total_count             — len(intakes)
+      high_risk_count         — count where ai_risk_tier='high'
+    """
+    rows = await verity.db.fetch_all_raw(
+        """
+        SELECT
+            v.intake_code,
+            v.intake_title,
+            v.problem_statement,
+            v.expected_benefit,
+            v.in_scope_decisions,
+            v.out_of_scope_decisions,
+            v.affected_populations,
+            v.business_owner_name,
+            v.business_owner_email,
+            v.requesting_team,
+            v.ai_risk_tier,
+            v.naic_materiality,
+            v.risk_classification_rationale,
+            v.intake_status,
+            v.intake_at,
+            v.approved_at,
+            v.retired_at,
+            v.hitl_strategy,
+            v.hitl_review_threshold,
+            (SELECT COUNT(*) FROM governance.intake_entity_link l
+              WHERE l.intake_id = v.intake_id) AS linked_entity_count,
+            (SELECT COUNT(*) FROM governance.intake_requirement r
+              WHERE r.intake_id = v.intake_id) AS requirement_count,
+            (SELECT COUNT(*) FROM governance.intake_artifact_plan p
+              WHERE p.intake_id = v.intake_id
+                AND p.status = 'realized') AS realized_plan_count,
+            (SELECT COUNT(*) FROM governance.intake_artifact_plan p
+              WHERE p.intake_id = v.intake_id
+                AND p.status = 'proposed') AS proposed_plan_count
+        FROM analytics.v_intake v
+        WHERE
+            (%(intake_code)s::text IS NULL OR v.intake_code = %(intake_code)s)
+        AND (%(ai_risk_tier)s::text IS NULL OR v.ai_risk_tier = %(ai_risk_tier)s)
+        AND (%(status)s::text IS NULL OR v.intake_status = %(status)s)
+        ORDER BY
+            CASE v.ai_risk_tier
+                WHEN 'high'         THEN 1
+                WHEN 'limited'      THEN 2
+                WHEN 'minimal'      THEN 3
+                WHEN 'unacceptable' THEN 4
+                ELSE 5
+            END,
+            v.intake_at DESC
+        """,
+        {
+            "intake_code":  scope.get("intake_code") or None,
+            "ai_risk_tier": scope.get("ai_risk_tier") or None,
+            "status":       scope.get("status") or None,
+        },
+    )
+
+    intakes = [dict(r) for r in rows]
+    # Defensive defaults for HITL on unrecorded intakes — keeps the
+    # template render stable.
+    for r in intakes:
+        r["hitl_strategy"] = r.get("hitl_strategy") or "Not recorded"
+        r["hitl_review_threshold"] = r.get("hitl_review_threshold") or "—"
+
+    by_risk_tier = Counter(r.get("ai_risk_tier") or "—" for r in intakes)
+    by_status    = Counter(r.get("intake_status") or "—" for r in intakes)
+
+    return {
+        "intakes":          intakes,
+        "by_risk_tier":     dict(by_risk_tier),
+        "by_status":        dict(by_status),
+        "total_count":      len(intakes),
+        "high_risk_count":  by_risk_tier.get("high", 0),
+        "limited_count":    by_risk_tier.get("limited", 0),
+        "minimal_count":    by_risk_tier.get("minimal", 0),
+        "approved_count":   by_status.get("approved", 0) + by_status.get("live", 0),
+    }
+
+
+# =============================================================================
+# Approval Audit Log
+# =============================================================================
+
+async def compose_approval_audit_log(
+    verity, scope: dict[str, Any]
+) -> dict[str, Any]:
+    """Per-signoff audit log scoped to an intake or program-wide.
+
+    Optional scope:
+      intake_code        — restrict to one intake
+      signed_after       — ISO 8601 datetime; signed_at >= this
+      signed_before      — ISO 8601 datetime; signed_at < this
+      signoff_role       — restrict to one approval role
+    """
+    rows = await verity.db.fetch_all_raw(
+        """
+        SELECT
+            v.intake_code,
+            v.intake_title,
+            v.ai_risk_tier,
+            v.approval_kind,
+            v.approval_request_status,
+            v.approval_summary,
+            v.opened_at,
+            v.opened_by,
+            v.opened_by_role,
+            v.decided_at,
+            v.signoff_role,
+            v.approver_name,
+            v.approver_email,
+            v.signoff_decision,
+            v.signoff_comment,
+            v.evidence_url,
+            v.signed_at
+        FROM analytics.v_intake_approval v
+        WHERE v.signoff_role IS NOT NULL  -- exclude not-yet-signed pending requests
+            AND (%(intake_code)s::text IS NULL OR v.intake_code = %(intake_code)s)
+            AND (%(signed_after)s::timestamptz IS NULL
+                 OR v.signed_at >= %(signed_after)s::timestamptz)
+            AND (%(signed_before)s::timestamptz IS NULL
+                 OR v.signed_at < %(signed_before)s::timestamptz)
+            AND (%(signoff_role)s::text IS NULL OR v.signoff_role = %(signoff_role)s)
+        ORDER BY v.signed_at DESC
+        """,
+        {
+            "intake_code":   scope.get("intake_code") or None,
+            "signed_after":  scope.get("signed_after") or None,
+            "signed_before": scope.get("signed_before") or None,
+            "signoff_role":  scope.get("signoff_role") or None,
+        },
+    )
+    signoffs = [dict(r) for r in rows]
+    by_role     = Counter(r.get("signoff_role")     or "—" for r in signoffs)
+    by_decision = Counter(r.get("signoff_decision") or "—" for r in signoffs)
+    by_kind     = Counter(r.get("approval_kind")    or "—" for r in signoffs)
+
+    return {
+        "signoffs":        signoffs,
+        "signoff_count":   len(signoffs),
+        "by_role":         dict(by_role),
+        "by_decision":     dict(by_decision),
+        "by_kind":         dict(by_kind),
+        "approved_count":  by_decision.get("approved", 0),
+        "rejected_count":  by_decision.get("rejected", 0),
+    }
+
+
+# =============================================================================
+# Impact Assessment Register
+# =============================================================================
+
+async def compose_intake_impact_assessment_register(
+    verity, scope: dict[str, Any]
+) -> dict[str, Any]:
+    """Register of intakes with their impact assessments.
+
+    Default scope: ai_risk_tier='high'. Set to 'limited' (or unset
+    via scope.include_limited=true) to widen.
+    """
+    intake_code = scope.get("intake_code") or None
+    risk_tier   = scope.get("ai_risk_tier") or "high"
+
+    rows = await verity.db.fetch_all_raw(
+        """
+        SELECT
+            v.intake_code,
+            v.intake_title,
+            v.business_owner_name,
+            v.requesting_team,
+            v.ai_risk_tier,
+            v.naic_materiality,
+            v.intake_status,
+            v.affected_populations,
+            v.hitl_strategy,
+            v.hitl_review_threshold,
+            ia.data_sources,
+            ia.potential_harms,
+            ia.mitigations,
+            ia.fairness_considerations,
+            ia.privacy_considerations,
+            ia.human_oversight_plan,
+            ia.completed_at         AS assessment_completed_at,
+            ia.completed_by         AS assessment_completed_by,
+            ia.notes                AS assessment_notes,
+            (ia.id IS NOT NULL)     AS has_assessment
+        FROM analytics.v_intake v
+        LEFT JOIN governance.intake_impact_assessment ia
+            ON ia.intake_id = v.intake_id
+        WHERE v.ai_risk_tier = %(risk_tier)s
+          AND (%(intake_code)s::text IS NULL OR v.intake_code = %(intake_code)s)
+        ORDER BY v.intake_at DESC
+        """,
+        {"risk_tier": risk_tier, "intake_code": intake_code},
+    )
+    intakes = [dict(r) for r in rows]
+    for r in intakes:
+        r["hitl_strategy"]            = r.get("hitl_strategy") or "Not recorded"
+        r["hitl_review_threshold"]    = r.get("hitl_review_threshold") or "—"
+        r["fairness_considerations"]  = r.get("fairness_considerations") or "—"
+        r["privacy_considerations"]   = r.get("privacy_considerations") or "—"
+        r["human_oversight_plan"]     = r.get("human_oversight_plan") or "—"
+
+    completed = [r for r in intakes if r["has_assessment"] and r["assessment_completed_at"]]
+    return {
+        "intakes":          intakes,
+        "intake_count":     len(intakes),
+        "completed_count":  len(completed),
+        "missing_count":    len(intakes) - len(completed),
+        "risk_tier":        risk_tier,
+    }
+
+
+# =============================================================================
 # Registry — report code → composer
 # =============================================================================
 
 COMPOSERS: dict[str, callable] = {
-    "model_inventory":             compose_model_inventory,
-    "decision_audit_trail":        compose_decision_audit_trail,    # single decision
-    "workflow_audit_trail":        compose_workflow_audit_trail,    # one workflow
-    "fairness_validation_summary": compose_fairness_validation_summary,
-    "naic_exhibit_c":              compose_naic_exhibit_c,
+    "model_inventory":                  compose_model_inventory,
+    "decision_audit_trail":             compose_decision_audit_trail,    # single decision
+    "workflow_audit_trail":             compose_workflow_audit_trail,    # one workflow
+    "fairness_validation_summary":      compose_fairness_validation_summary,
+    "naic_exhibit_c":                   compose_naic_exhibit_c,
+    # Phase B — governance intake reports.
+    "intake_inventory":                 compose_intake_inventory,
+    "approval_audit_log":               compose_approval_audit_log,
+    "intake_impact_assessment_register": compose_intake_impact_assessment_register,
 }

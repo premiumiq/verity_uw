@@ -204,3 +204,115 @@ SELECT
     ho.created_at               AS created_at,
     ho.created_at               AS ingest_ts
 FROM runtime.hitl_override ho;
+
+
+-- ── v_intake ─────────────────────────────────────────────────
+-- One row per intake (the use-case header). Powers the Intake
+-- Inventory report, the Approval Audit Log scoping, and the Impact
+-- Assessment Register. Same shape contract as v_decision /
+-- v_lifecycle_event: source_pk for traceability, event_ts for
+-- chronological filtering, ingest_ts for watermark progress.
+CREATE OR REPLACE VIEW analytics.v_intake AS
+SELECT
+    i.id::text                          AS source_pk,
+    i.id                                AS intake_id,
+    i.code                              AS intake_code,
+    i.title                             AS intake_title,
+    i.problem_statement                 AS problem_statement,
+    i.expected_benefit                  AS expected_benefit,
+    i.in_scope_decisions                AS in_scope_decisions,
+    i.out_of_scope_decisions            AS out_of_scope_decisions,
+    i.affected_populations              AS affected_populations,
+    i.business_owner_name               AS business_owner_name,
+    i.business_owner_email              AS business_owner_email,
+    i.requesting_team                   AS requesting_team,
+    i.ai_risk_tier::text                AS ai_risk_tier,
+    i.naic_materiality::text            AS naic_materiality,
+    i.risk_classification_rationale     AS risk_classification_rationale,
+    i.status::text                      AS intake_status,
+    i.intake_at                         AS intake_at,
+    i.approved_at                       AS approved_at,
+    i.retired_at                        AS retired_at,
+    i.effective_date                    AS effective_date,
+    i.next_recertification_due          AS next_recertification_due,
+    i.created_by                        AS created_by,
+    i.acting_as_role::text              AS acting_as_role,
+    -- HITL (human-in-the-loop) strategy and review trigger.
+    -- Surfaced in compliance reports for canonicals like
+    -- human_oversight_intervention, use_user_authorization_controls.
+    i.hitl_strategy                     AS hitl_strategy,
+    i.hitl_review_threshold             AS hitl_review_threshold,
+    -- Application context — every intake belongs to a registered
+    -- application. Inner join because application_id is NOT NULL.
+    a.name                              AS application_code,
+    a.display_name                      AS application_name,
+    i.intake_at                         AS event_ts,
+    i.intake_at                         AS created_at,
+    i.intake_at                         AS ingest_ts
+FROM governance.intake i
+JOIN governance.application a ON a.id = i.application_id;
+
+
+-- ── v_intake_requirement ─────────────────────────────────────
+-- One row per intake_requirement, joined to the parent intake's
+-- code/title for self-contained reporting (avoids two-hop joins in
+-- the composer SQL). Embedding column is intentionally excluded —
+-- mart_field doesn't carry vector types.
+CREATE OR REPLACE VIEW analytics.v_intake_requirement AS
+SELECT
+    r.id::text                          AS source_pk,
+    r.id                                AS requirement_id,
+    r.intake_id                         AS intake_id,
+    i.code                              AS intake_code,
+    i.title                             AS intake_title,
+    r.code                              AS requirement_code,
+    r.kind::text                        AS requirement_kind,
+    r.statement                         AS requirement_statement,
+    r.acceptance_criteria               AS acceptance_criteria,
+    r.source                            AS requirement_source,
+    r.status::text                      AS requirement_status,
+    r.parent_requirement_id             AS parent_requirement_id,
+    r.created_by                        AS created_by,
+    r.acting_as_role::text              AS acting_as_role,
+    r.updated_at                        AS updated_at,
+    r.updated_at                        AS event_ts,
+    r.updated_at                        AS ingest_ts
+FROM governance.intake_requirement r
+JOIN governance.intake i ON i.id = r.intake_id;
+
+
+-- ── v_intake_approval ────────────────────────────────────────
+-- One row per signoff (per the resolved B-Q-1: per-signoff granularity).
+-- Joins approval_signoff -> approval_request -> intake. Pending
+-- requests with no signoffs yet still appear via a LEFT JOIN so
+-- "open approval requests" surface in the audit log.
+CREATE OR REPLACE VIEW analytics.v_intake_approval AS
+SELECT
+    COALESCE(s.id::text, ar.id::text)                AS source_pk,
+    s.id                                             AS signoff_id,
+    ar.id                                            AS approval_request_id,
+    ar.intake_id                                     AS intake_id,
+    i.code                                           AS intake_code,
+    i.title                                          AS intake_title,
+    i.ai_risk_tier::text                             AS ai_risk_tier,
+    ar.kind::text                                    AS approval_kind,
+    ar.status                                        AS approval_request_status,
+    ar.target_entity_type::text                      AS target_entity_type,
+    ar.target_entity_id                              AS target_entity_id,
+    ar.summary                                       AS approval_summary,
+    ar.opened_at                                     AS opened_at,
+    ar.opened_by                                     AS opened_by,
+    ar.opened_by_role::text                          AS opened_by_role,
+    ar.decided_at                                    AS decided_at,
+    s.role::text                                     AS signoff_role,
+    s.approver_name                                  AS approver_name,
+    s.approver_email                                 AS approver_email,
+    s.decision::text                                 AS signoff_decision,
+    s.comment                                        AS signoff_comment,
+    s.evidence_url                                   AS evidence_url,
+    s.signed_at                                      AS signed_at,
+    COALESCE(s.signed_at, ar.opened_at)              AS event_ts,
+    COALESCE(s.signed_at, ar.opened_at)              AS ingest_ts
+FROM governance.approval_request ar
+JOIN governance.intake i           ON i.id = ar.intake_id
+LEFT JOIN governance.approval_signoff s ON s.approval_request_id = ar.id;

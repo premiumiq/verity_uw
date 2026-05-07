@@ -109,9 +109,15 @@
             <div class="verity-subtitle">STUDIO</div>
         </div>
 
-        <!-- Four-mode navigation. Clean icon + label per item — no
-             captions, the labels are short enough to stand alone. -->
+        <!-- Five-mode navigation. Intake sits FIRST because it's the
+             upstream entry point — the other modes operate on registry
+             entities that come *out* of the intake process. -->
         <div class="verity-sidebar-nav">
+
+            <a href="/studio/intake"
+               class="verity-nav-link {% if active_mode == 'intake' %}active{% endif %}">
+                <span class="verity-nav-icon">⊕</span> Intake
+            </a>
 
             <a href="/studio/compose"
                class="verity-nav-link {% if active_mode == 'compose' %}active{% endif %}">
@@ -134,6 +140,16 @@
             </a>
 
         </div><!-- end sidebar-nav -->
+
+        <!-- Persona indicator — DISPLAY ONLY. Always-visible reminder
+             of which role the user is currently acting as; clicking
+             leads to /admin/profile, the single place where role
+             changes happen. This eliminates the previous in-sidebar
+             dropdown so the source of truth for role state is the
+             profile page only. -->
+        <div style="padding: 8px 0 0; border-top: 1px solid rgba(255,255,255,0.15);">
+            {% include '_partials/persona_indicator.html' %}
+        </div>
 
         <!-- Footer: version stamp. Kept minimal because Studio borrows
              the Verity brand and version. -->

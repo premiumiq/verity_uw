@@ -62,6 +62,14 @@ def create_studio_routes(verity, templates_dir: str) -> APIRouter:
     router = APIRouter()
     templates = Jinja2Templates(directory=templates_dir)
 
+    # ── INTAKE MODE — governance use-case intake ────────────
+    # Defined in a sibling module to keep this file focused on the
+    # original Compose / Validate / Deploy / Govern routes. The
+    # function attaches its routes onto the same router, so the
+    # persona middleware mounted on the Studio sub-app applies.
+    from verity.web.studio_intake_routes import register_intake_studio_routes
+    register_intake_studio_routes(router, verity, templates)
+
     # ── ROOT REDIRECT ────────────────────────────────────────
     @router.get("/")
     async def studio_home():

@@ -1,0 +1,36 @@
+{#
+  Redundancy-check hint — rendered into the requirements editor as
+  the user types. Driven by HTMX hx-post against
+  /studio/intake/{code}/requirements/redundancy-check.
+
+  Required context:
+    hits -- list of dicts: {id, intake_code, intake_title, code,
+                            statement, similarity, kind, status}
+#}
+{% if hits %}
+<div class="mt-2 p-3 rounded border border-amber-200 bg-amber-50">
+  <div class="flex items-center gap-2 text-amber-800 text-xs uppercase tracking-wider mb-2">
+    <span>!</span> <span>Similar requirements already exist</span>
+  </div>
+  <ul class="space-y-1.5 text-sm">
+    {% for h in hits %}
+      <li class="flex items-start gap-2">
+        <span class="font-mono text-xs px-1.5 py-0.5 rounded
+                     bg-amber-100 text-amber-900 border border-amber-200">
+          {{ '%.0f%%'|format(h.similarity * 100) }}
+        </span>
+        <span class="flex-1">
+          <a href="/studio/intake/{{ h.application_code }}/{{ h.intake_code }}?tab=requirements"
+             class="font-medium text-amber-900 hover:underline">
+            {{ h.intake_code }} · {{ h.code }}
+          </a>
+          <span class="text-zinc-700"> — {{ h.statement[:140] }}</span>
+        </span>
+      </li>
+    {% endfor %}
+  </ul>
+  <div class="text-xs text-amber-700 mt-2">
+    Consider linking the existing requirement instead of creating a duplicate.
+  </div>
+</div>
+{% endif %}

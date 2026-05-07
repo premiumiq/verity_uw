@@ -190,7 +190,7 @@ def _add_asset_card_table(doc, *, item_var: str, list_var: str):
     # Card paragraph 3 — facts (Materiality · Owner · Apps)
     p = body.add_paragraph()
     p.paragraph_format.space_before = Pt(2)
-    p.paragraph_format.space_after  = Pt(8)
+    p.paragraph_format.space_after  = Pt(2)
     facts = [
         ("Materiality: ",  "{{ a.materiality_display }}"),
         ("    ·    Owner: ",         "{{ a.owner_name or '—' }}"),
@@ -201,6 +201,33 @@ def _add_asset_card_table(doc, *, item_var: str, list_var: str):
         _set_run_font(run, name=BODY_FONT, size=10, color=MUTED_GRAY)
         run = p.add_run(value)
         _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BODY_GRAY)
+
+    # Card paragraph 4 — use case context (intake code, risk tier).
+    # Sourced from analytics.v_intake via intake_entity_link (resolved
+    # in the composer). Rendered inline so the inventory shows each
+    # asset's parent use case alongside its registry attributes.
+    p = body.add_paragraph()
+    p.paragraph_format.space_before = Pt(2)
+    p.paragraph_format.space_after  = Pt(2)
+    run = p.add_run("Use case: ")
+    _set_run_font(run, name=BODY_FONT, size=10, color=MUTED_GRAY)
+    run = p.add_run("{{ a.intake_code }} · {{ a.intake_risk_tier }} risk · {{ a.intake_status }}")
+    _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BODY_GRAY)
+
+    # Card paragraph 5 — HITL strategy. Italic prose describing how
+    # humans review or override the model's output for this use case;
+    # surfaced here as direct evidence of the human-oversight control.
+    p = body.add_paragraph()
+    p.paragraph_format.space_before = Pt(2)
+    p.paragraph_format.space_after  = Pt(8)
+    run = p.add_run("Human-in-the-loop: ")
+    _set_run_font(run, name=BODY_FONT, size=10, color=MUTED_GRAY)
+    run = p.add_run("{{ a.hitl_strategy }}")
+    _set_run_font(run, name=BODY_FONT, size=10, italic=True, color=BODY_GRAY)
+    run = p.add_run("    ·    Trigger: ")
+    _set_run_font(run, name=BODY_FONT, size=10, color=MUTED_GRAY)
+    run = p.add_run("{{ a.hitl_review_threshold }}")
+    _set_run_font(run, name=BODY_FONT, size=10, italic=True, color=BODY_GRAY)
 
     # tr-close marker row
     tr_close = table.rows[2].cells[0]
@@ -1051,11 +1078,14 @@ def author_naic_exhibit_c() -> Path:
 
     # ── OWNERSHIP & ACCOUNTABILITY ──
     _add_heading(doc, "Ownership & Accountability", level=1)
-    grid = doc.add_table(rows=2, cols=2)
+    grid = doc.add_table(rows=4, cols=2)
     grid.style = "Light Grid Accent 1"
     rows = [
-        ("Owner name",  "{{ target.owner_name or '—' }}"),
-        ("Owner email", "{{ target.owner_email or '—' }}"),
+        ("Owner name",          "{{ target.owner_name or '—' }}"),
+        ("Owner email",         "{{ target.owner_email or '—' }}"),
+        ("Originating use case",
+            "{{ target.intake_code }} — {{ target.intake_title }}"),
+        ("Use case business owner", "{{ target.intake_business_owner }}"),
     ]
     for i, (k, v) in enumerate(rows):
         c0 = grid.rows[i].cells[0]; c1 = grid.rows[i].cells[1]
@@ -1063,6 +1093,33 @@ def author_naic_exhibit_c() -> Path:
         _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BRAND_BLUE)
         c1.text = ""; run = c1.paragraphs[0].add_run(v)
         _set_run_font(run, name=BODY_FONT, size=10, color=BODY_GRAY)
+
+    # Human-in-the-loop strategy block — sourced from the parent intake.
+    # For a high-risk system deep-dive, the human-oversight controls
+    # are the central evidence that humans remain the decision-makers.
+    _add_styled_para(
+        doc,
+        "Human-in-the-Loop Strategy",
+        font=HEADING_FONT, size=13, bold=True, color=BRAND_BLUE,
+        space_before=16, space_after=4,
+    )
+    _add_styled_para(
+        doc,
+        "{{ target.hitl_strategy }}",
+        font=BODY_FONT, size=11, color=BODY_GRAY, space_after=4,
+    )
+    _add_styled_para(
+        doc,
+        "Review trigger: {{ target.hitl_review_threshold }}",
+        font=BODY_FONT, size=10, italic=True, color=MUTED_GRAY, space_after=4,
+    )
+    _add_styled_para(
+        doc,
+        "AI risk tier (use case): {{ target.intake_risk_tier }}    ·    "
+        "NAIC materiality: {{ target.intake_naic_materiality }}",
+        font=BODY_FONT, size=10, color=MUTED_GRAY, space_after=10,
+    )
+
     _add_page_break(doc)
 
     # ── LIFECYCLE HISTORY ──
@@ -1246,9 +1303,30 @@ def _setup_section(doc):
 
 
 def _add_canonicals_table(doc):
+    """Regulatory Coverage section.
+
+    Renders authored compliance prose, NOT auto-generated text from
+    feature names. For each canonical requirement covered by the
+    report, emits:
+
+      • A summary row (Theme · Title · Coverage Level · Frameworks)
+      • A "How the system addresses this requirement" paragraph
+        — sourced from compliance.requirement_coverage.rationale
+      • A "Customer responsibilities" paragraph (if present)
+        — sourced from compliance.requirement_coverage.customer_actions
+      • A footnote line listing the implementing capabilities
+        (primary feature names)
+
+    The prose uses system / process language and never names the
+    product. Source of truth lives in compliance_seed_data.yaml.
+    """
+    # Summary table — row per canonical, four compact columns. The
+    # detailed coverage rationale is rendered AFTER the table as
+    # paragraphs because tables have poor wrapping behaviour for
+    # multi-paragraph prose.
     can_table = doc.add_table(rows=4, cols=4)
     can_table.style = "Light Grid Accent 1"
-    headers = ["Theme", "Canonical Requirement", "Coverage", "Section"]
+    headers = ["Theme", "Canonical Requirement", "Coverage", "Frameworks"]
     for i, h in enumerate(headers):
         cell = can_table.rows[0].cells[i]; cell.text = ""
         run = cell.paragraphs[0].add_run(h)
@@ -1259,8 +1337,8 @@ def _add_canonicals_table(doc):
     cells_text = [
         "{{ c.theme_name }}",
         "{{ c.title }}",
-        "{{ c.coverage_level or '—' }}",
-        "{{ c.section or '—' }}",
+        "{{ c.coverage_level | default('—') }}",
+        "{{ c.frameworks_label | default('—') }}",
     ]
     for i, txt in enumerate(cells_text):
         body[i].text = ""
@@ -1269,6 +1347,445 @@ def _add_canonicals_table(doc):
     can_table.rows[3].cells[0].text = "{%tr endfor %}"
     can_table.rows[3].cells[0].merge(can_table.rows[3].cells[3])
 
+    # Per-canonical authored coverage detail — appears AFTER the
+    # summary table. Iterates the same `canonicals` collection.
+    _add_styled_para(
+        doc,
+        "How the system addresses each requirement",
+        font=HEADING_FONT, size=13, bold=True, color=BRAND_BLUE,
+        space_before=18, space_after=8,
+    )
+    _add_styled_para(
+        doc,
+        "For each requirement above, the following describes how the "
+        "system and surrounding processes deliver coverage. Where "
+        "responsibilities remain with the customer (policies, training, "
+        "or written program documentation), they are stated explicitly.",
+        font=BODY_FONT, size=10, color=MUTED_GRAY, italic=True,
+        space_after=10,
+    )
+
+    # docxtpl block-level for-loop. Each iteration emits a header line,
+    # the coverage rationale, customer actions (when present), and the
+    # implementing capabilities footnote. {%p ...%} is a docxtpl
+    # paragraph-level tag that produces no extra paragraph.
+    p = doc.add_paragraph()
+    p.add_run("{%p for c in canonicals %}")
+
+    # Sub-heading: canonical title with coverage badge.
+    p = doc.add_paragraph()
+    p.paragraph_format.space_before = Pt(8)
+    p.paragraph_format.space_after = Pt(2)
+    run = p.add_run("{{ c.title }} ")
+    _set_run_font(run, name=HEADING_FONT, size=11, bold=True, color=BRAND_BLUE)
+    run = p.add_run("· {{ c.coverage_level | default('—') | title }}")
+    _set_run_font(run, name=BODY_FONT, size=9, italic=True, color=MUTED_GRAY)
+
+    # Frameworks line.
+    p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(4)
+    run = p.add_run("Cited in: {{ c.frameworks_label | default('—') }}")
+    _set_run_font(run, name=BODY_FONT, size=9, color=MUTED_GRAY, italic=True)
+
+    # Authored coverage rationale paragraph.
+    p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(4)
+    run = p.add_run("{{ c.coverage_rationale | default('Coverage rationale not yet documented.') }}")
+    _set_run_font(run, name=BODY_FONT, size=10, color=BODY_GRAY)
+
+    # Customer-actions paragraph, only emitted when content exists.
+    # docxtpl conditional on a paragraph; empty branch is suppressed.
+    p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(4)
+    run = p.add_run("{%p if c.coverage_customer_actions %}")
+    _set_run_font(run, name=BODY_FONT, size=9, color=BODY_GRAY)
+    p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(4)
+    run = p.add_run("Customer responsibilities: ")
+    _set_run_font(run, name=BODY_FONT, size=9, bold=True, color=MUTED_GRAY)
+    run = p.add_run("{{ c.coverage_customer_actions }}")
+    _set_run_font(run, name=BODY_FONT, size=9, italic=True, color=MUTED_GRAY)
+    p = doc.add_paragraph()
+    p.add_run("{%p endif %}")
+
+    # Implementing-capabilities footnote — comma-separated feature
+    # names. docxtpl Jinja inline join.
+    p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(10)
+    run = p.add_run(
+        "Implementing capabilities: "
+        "{% for f in c.primary_features %}"
+        "{{ f.name }}{% if not loop.last %}, {% endif %}"
+        "{% endfor %}"
+        "{% if not c.primary_features %}—{% endif %}"
+    )
+    _set_run_font(run, name=BODY_FONT, size=8, italic=True, color=MUTED_GRAY)
+
+    p = doc.add_paragraph()
+    p.add_run("{%p endfor %}")
+
+
+# =============================================================================
+# Phase B — governance intake reports
+# =============================================================================
+#
+# Three reports composed from analytics.v_intake* views. They follow the
+# same envelope as the other authors (cover · purpose · regulatory
+# coverage · body · footer). Each ends with the standard
+# _add_canonicals_table() so the authored coverage prose appears in the
+# Regulatory Coverage section. None of these reports name the product;
+# all language describes "the system" / "the use case" / "the approval
+# chain" so the artifacts read as compliance documents.
+
+def _author_intake_envelope(report_title: str, report_purpose: str) -> "Document":
+    """Cover + purpose pages shared by the three intake reports."""
+    doc = Document()
+
+    # Cover page.
+    section = doc.sections[0]
+    _enable_different_first_page_header_footer(section)
+    section.left_margin   = Inches(1.0)
+    section.right_margin  = Inches(1.0)
+    section.top_margin    = Inches(1.0)
+    section.bottom_margin = Inches(1.0)
+
+    footer_p = section.footer.paragraphs[0]
+    footer_p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    run = footer_p.add_run(
+        "{{ report_title }}  ·  Generated {{ generated_at_str }}  ·  "
+        "Scope: {{ scope_summary }}"
+    )
+    _set_run_font(run, name=BODY_FONT, size=8, color=MUTED_GRAY)
+
+    for _ in range(8):
+        doc.add_paragraph()
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("AI GOVERNANCE")
+    _set_run_font(run, name=HEADING_FONT, size=14, bold=True, color=BRAND_BLUE_LIGHT)
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(4); p.paragraph_format.space_after = Pt(4)
+    run = p.add_run("Compliance Report")
+    _set_run_font(run, name=HEADING_FONT, size=11, color=MUTED_GRAY)
+
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(28); p.paragraph_format.space_after = Pt(8)
+    run = p.add_run("{{ report_title }}")
+    _set_run_font(run, name=HEADING_FONT, size=36, bold=True, color=BRAND_BLUE)
+
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(20)
+    run = p.add_run("Generated {{ generated_at_str }}")
+    _set_run_font(run, name=BODY_FONT, size=12, color=BODY_GRAY)
+
+    p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(2)
+    run = p.add_run("Scope: {{ scope_summary }}")
+    _set_run_font(run, name=BODY_FONT, size=11, italic=True, color=MUTED_GRAY)
+
+    _add_page_break(doc)
+
+    _add_heading(doc, "Purpose and Audience", level=1)
+    _add_styled_para(
+        doc, "Purpose",
+        font=HEADING_FONT, size=13, bold=True, color=BRAND_BLUE,
+        space_before=10, space_after=4,
+    )
+    _add_styled_para(
+        doc, report_purpose,
+        font=BODY_FONT, size=11, color=BODY_GRAY, space_after=10,
+    )
+    _add_styled_para(
+        doc, "Audience",
+        font=HEADING_FONT, size=13, bold=True, color=BRAND_BLUE,
+        space_before=10, space_after=4,
+    )
+    _add_styled_para(
+        doc,
+        "Chief Risk Officer · Chief Compliance Officer · AI Governance "
+        "Committee · external auditors and market-conduct examiners.",
+        font=BODY_FONT, size=11, color=BODY_GRAY, space_after=20,
+    )
+    _add_page_break(doc)
+    return doc
+
+
+def author_intake_inventory() -> Path:
+    """Use Case Intake Inventory — every recorded AI use case."""
+    doc = _author_intake_envelope(
+        report_title="Use Case Intake Inventory",
+        report_purpose=(
+            "This report enumerates every AI use case recorded in the "
+            "governance program — its business problem, expected benefit, "
+            "owner, risk classification, NAIC materiality, approval status, "
+            "and the registry artifacts realised against it. It is the "
+            "primary evidence that every AI system in the program was "
+            "authorized through a documented intake-and-approval flow "
+            "before any model was built."
+        ),
+    )
+
+    # Executive summary.
+    _add_heading(doc, "Executive Summary", level=1)
+    grid = doc.add_table(rows=4, cols=2); grid.style = "Light Grid Accent 1"
+    rows = [
+        ("Total recorded use cases", "{{ total_count }}"),
+        ("High-risk use cases",      "{{ high_risk_count }}"),
+        ("Limited-risk use cases",   "{{ limited_count }}"),
+        ("Approved or live",         "{{ approved_count }}"),
+    ]
+    for i, (k, v) in enumerate(rows):
+        c0 = grid.rows[i].cells[0]; c1 = grid.rows[i].cells[1]
+        c0.text = ""; r0 = c0.paragraphs[0].add_run(k)
+        _set_run_font(r0, name=BODY_FONT, size=10, bold=True, color=BRAND_BLUE)
+        c1.text = ""; r1 = c1.paragraphs[0].add_run(v)
+        _set_run_font(r1, name=BODY_FONT, size=10, color=BODY_GRAY)
+    _add_page_break(doc)
+
+    # Per-intake card.
+    _add_heading(doc, "Inventory of Use Cases", level=1)
+    _add_styled_para(
+        doc,
+        "Each recorded use case appears below with its identity, business "
+        "context, risk classification, human-oversight strategy, and "
+        "implementation footprint.",
+        font=BODY_FONT, size=11, color=BODY_GRAY, space_after=10,
+    )
+    table = doc.add_table(rows=3, cols=1)
+    table.autofit = False
+    table.columns[0].width = Inches(6.5)
+    tr_open = table.rows[0].cells[0]; tr_open.text = ""
+    tr_open.paragraphs[0].add_run("{%tr for i in intakes %}")
+
+    body = table.rows[1].cells[0]; body.width = Inches(6.5)
+    _shade_cell(body, CARD_SHADE_HEX); _set_cell_borders(body, color="C5CDDC")
+    body.vertical_alignment = WD_ALIGN_VERTICAL.TOP
+    body._tc.remove(body.paragraphs[0]._p)
+
+    # Title line.
+    p = body.add_paragraph(); p.paragraph_format.space_before = Pt(8); p.paragraph_format.space_after = Pt(2)
+    run = p.add_run("{{ i.intake_title }}")
+    _set_run_font(run, name=BODY_FONT, size=13, bold=True, color=BRAND_BLUE)
+    run = p.add_run("    ·    {{ i.intake_code }}")
+    _set_run_font(run, name=BODY_FONT, size=11, color=MUTED_GRAY)
+    run = p.add_run("    ·    {{ i.intake_status | title }}")
+    _set_run_font(run, name=BODY_FONT, size=11, bold=True, color=BRAND_BLUE_LIGHT)
+
+    # Risk + materiality line.
+    p = body.add_paragraph(); p.paragraph_format.space_after = Pt(2)
+    for label, value in [
+        ("AI risk tier: ",     "{{ i.ai_risk_tier | title }}"),
+        ("    ·    NAIC: ",     "{{ i.naic_materiality | replace('_',' ') | title }}"),
+        ("    ·    Owner: ",    "{{ i.business_owner_name }}"),
+        ("    ·    Team: ",     "{{ i.requesting_team or '—' }}"),
+    ]:
+        run = p.add_run(label); _set_run_font(run, name=BODY_FONT, size=10, color=MUTED_GRAY)
+        run = p.add_run(value);  _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BODY_GRAY)
+
+    # Problem.
+    p = body.add_paragraph(); p.paragraph_format.space_before = Pt(6); p.paragraph_format.space_after = Pt(2)
+    run = p.add_run("Business problem: "); _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=MUTED_GRAY)
+    p = body.add_paragraph(); p.paragraph_format.space_after = Pt(2)
+    run = p.add_run("{{ i.problem_statement }}"); _set_run_font(run, name=BODY_FONT, size=10, italic=True, color=BODY_GRAY)
+
+    # Expected benefit.
+    p = body.add_paragraph(); p.paragraph_format.space_before = Pt(6); p.paragraph_format.space_after = Pt(2)
+    run = p.add_run("Expected benefit: "); _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=MUTED_GRAY)
+    p = body.add_paragraph(); p.paragraph_format.space_after = Pt(2)
+    run = p.add_run("{{ i.expected_benefit }}"); _set_run_font(run, name=BODY_FONT, size=10, italic=True, color=BODY_GRAY)
+
+    # HITL strategy.
+    p = body.add_paragraph(); p.paragraph_format.space_before = Pt(6); p.paragraph_format.space_after = Pt(2)
+    run = p.add_run("Human-in-the-loop strategy: "); _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=MUTED_GRAY)
+    p = body.add_paragraph(); p.paragraph_format.space_after = Pt(2)
+    run = p.add_run("{{ i.hitl_strategy }}"); _set_run_font(run, name=BODY_FONT, size=10, italic=True, color=BODY_GRAY)
+    p = body.add_paragraph(); p.paragraph_format.space_after = Pt(4)
+    run = p.add_run("Trigger: "); _set_run_font(run, name=BODY_FONT, size=9, color=MUTED_GRAY)
+    run = p.add_run("{{ i.hitl_review_threshold }}"); _set_run_font(run, name=BODY_FONT, size=9, italic=True, color=BODY_GRAY)
+
+    # Footprint.
+    p = body.add_paragraph(); p.paragraph_format.space_before = Pt(8); p.paragraph_format.space_after = Pt(8)
+    for label, value in [
+        ("Requirements: ",    "{{ i.requirement_count }}"),
+        ("    ·    Realised registry artifacts: ", "{{ i.realized_plan_count }}"),
+        ("    ·    Linked entities: ",             "{{ i.linked_entity_count }}"),
+        ("    ·    Submitted: ",                   "{{ i.intake_at.strftime('%Y-%m-%d') if i.intake_at else '—' }}"),
+        ("    ·    Approved: ",                    "{{ i.approved_at.strftime('%Y-%m-%d') if i.approved_at else '—' }}"),
+    ]:
+        run = p.add_run(label); _set_run_font(run, name=BODY_FONT, size=10, color=MUTED_GRAY)
+        run = p.add_run(value); _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BODY_GRAY)
+
+    tr_close = table.rows[2].cells[0]; tr_close.text = ""
+    tr_close.paragraphs[0].add_run("{%tr endfor %}")
+
+    _add_page_break(doc)
+
+    # Regulatory coverage.
+    _add_heading(doc, "Regulatory Coverage", level=1)
+    _add_canonicals_table(doc)
+
+    out = TEMPLATES_DIR / "intake_inventory.docx"
+    doc.save(str(out))
+    return out
+
+
+def author_approval_audit_log() -> Path:
+    """Approval Audit Log — every signoff with intake context."""
+    doc = _author_intake_envelope(
+        report_title="Approval Audit Log",
+        report_purpose=(
+            "This report enumerates every approval signoff recorded across "
+            "the use-case intake flow — who approved what, in what role, "
+            "when, with what comment, and on what evidence. It is the "
+            "durable record of segregation-of-duty controls and named "
+            "accountability for every AI system in the governance program."
+        ),
+    )
+
+    _add_heading(doc, "Executive Summary", level=1)
+    grid = doc.add_table(rows=3, cols=2); grid.style = "Light Grid Accent 1"
+    rows = [
+        ("Signoffs recorded", "{{ signoff_count }}"),
+        ("Approved",          "{{ approved_count }}"),
+        ("Rejected",          "{{ rejected_count }}"),
+    ]
+    for i, (k, v) in enumerate(rows):
+        c0 = grid.rows[i].cells[0]; c1 = grid.rows[i].cells[1]
+        c0.text = ""; r0 = c0.paragraphs[0].add_run(k)
+        _set_run_font(r0, name=BODY_FONT, size=10, bold=True, color=BRAND_BLUE)
+        c1.text = ""; r1 = c1.paragraphs[0].add_run(v)
+        _set_run_font(r1, name=BODY_FONT, size=10, color=BODY_GRAY)
+    _add_page_break(doc)
+
+    _add_heading(doc, "Signoff Records", level=1)
+    _add_styled_para(
+        doc,
+        "Each row records a single named signoff. The role identifies the "
+        "capacity in which the approver acted; the kind identifies whether "
+        "the signoff authorised the use case itself, a risk reclassification, "
+        "an artifact promotion, or a retirement.",
+        font=BODY_FONT, size=11, color=BODY_GRAY, space_after=10,
+    )
+    t = doc.add_table(rows=4, cols=6); t.style = "Light Grid Accent 1"
+    headers = ["Use case", "Approval kind", "Role", "Approver", "Decision", "When"]
+    for i, h in enumerate(headers):
+        cell = t.rows[0].cells[i]; cell.text = ""
+        run = cell.paragraphs[0].add_run(h)
+        _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BRAND_BLUE)
+    t.rows[1].cells[0].text = "{%tr for s in signoffs %}"
+    t.rows[1].cells[0].merge(t.rows[1].cells[5])
+    body = t.rows[2].cells
+    cells_text = [
+        "{{ s.intake_code }}",
+        "{{ s.approval_kind | replace('_',' ') }}",
+        "{{ s.signoff_role | replace('_',' ') }}",
+        "{{ s.approver_name }}",
+        "{{ s.signoff_decision }}",
+        "{{ s.signed_at.strftime('%Y-%m-%d %H:%M') if s.signed_at else '—' }}",
+    ]
+    for i, txt in enumerate(cells_text):
+        body[i].text = ""
+        run = body[i].paragraphs[0].add_run(txt)
+        _set_run_font(run, name=BODY_FONT, size=10, color=BODY_GRAY)
+    t.rows[3].cells[0].text = "{%tr endfor %}"
+    t.rows[3].cells[0].merge(t.rows[3].cells[5])
+
+    _add_page_break(doc)
+    _add_heading(doc, "Regulatory Coverage", level=1)
+    _add_canonicals_table(doc)
+
+    out = TEMPLATES_DIR / "approval_audit_log.docx"
+    doc.save(str(out))
+    return out
+
+
+def author_intake_impact_assessment_register() -> Path:
+    """Impact Assessment Register — high-risk + limited use cases with assessments."""
+    doc = _author_intake_envelope(
+        report_title="Impact Assessment Register",
+        report_purpose=(
+            "This report enumerates use cases at the specified risk tier "
+            "together with their documented impact assessments — data "
+            "sources and classification, populations affected, potential "
+            "harms with severity and likelihood, mitigations with named "
+            "owners, fairness and privacy considerations, and the human-"
+            "oversight strategy. It is the direct evidence for risk-"
+            "management and consumer-protection obligations."
+        ),
+    )
+
+    _add_heading(doc, "Executive Summary", level=1)
+    grid = doc.add_table(rows=4, cols=2); grid.style = "Light Grid Accent 1"
+    rows = [
+        ("Risk tier covered",                    "{{ risk_tier | title }}"),
+        ("Use cases at this tier",               "{{ intake_count }}"),
+        ("Assessments completed",                "{{ completed_count }}"),
+        ("Assessments missing or in progress",   "{{ missing_count }}"),
+    ]
+    for i, (k, v) in enumerate(rows):
+        c0 = grid.rows[i].cells[0]; c1 = grid.rows[i].cells[1]
+        c0.text = ""; r0 = c0.paragraphs[0].add_run(k)
+        _set_run_font(r0, name=BODY_FONT, size=10, bold=True, color=BRAND_BLUE)
+        c1.text = ""; r1 = c1.paragraphs[0].add_run(v)
+        _set_run_font(r1, name=BODY_FONT, size=10, color=BODY_GRAY)
+    _add_page_break(doc)
+
+    _add_heading(doc, "Use Cases & Assessments", level=1)
+    table = doc.add_table(rows=3, cols=1)
+    table.autofit = False; table.columns[0].width = Inches(6.5)
+    tr_open = table.rows[0].cells[0]; tr_open.text = ""
+    tr_open.paragraphs[0].add_run("{%tr for i in intakes %}")
+    body = table.rows[1].cells[0]; body.width = Inches(6.5)
+    _shade_cell(body, CARD_SHADE_HEX); _set_cell_borders(body, color="C5CDDC")
+    body.vertical_alignment = WD_ALIGN_VERTICAL.TOP
+    body._tc.remove(body.paragraphs[0]._p)
+
+    p = body.add_paragraph(); p.paragraph_format.space_before = Pt(8); p.paragraph_format.space_after = Pt(2)
+    run = p.add_run("{{ i.intake_title }}")
+    _set_run_font(run, name=BODY_FONT, size=13, bold=True, color=BRAND_BLUE)
+    run = p.add_run("    ·    {{ i.intake_code }}")
+    _set_run_font(run, name=BODY_FONT, size=10, color=MUTED_GRAY)
+    run = p.add_run("    ·    {{ i.ai_risk_tier | title }} risk    ·    {{ i.intake_status | title }}")
+    _set_run_font(run, name=BODY_FONT, size=10, italic=True, color=MUTED_GRAY)
+
+    # Owner line.
+    p = body.add_paragraph(); p.paragraph_format.space_after = Pt(6)
+    run = p.add_run("Owner: "); _set_run_font(run, name=BODY_FONT, size=10, color=MUTED_GRAY)
+    run = p.add_run("{{ i.business_owner_name }}")
+    _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BODY_GRAY)
+    run = p.add_run("    ·    Team: "); _set_run_font(run, name=BODY_FONT, size=10, color=MUTED_GRAY)
+    run = p.add_run("{{ i.requesting_team or '—' }}")
+    _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=BODY_GRAY)
+
+    # Sections — fairness, privacy, oversight, HITL strategy, threshold.
+    sections = [
+        ("Fairness considerations",   "{{ i.fairness_considerations }}"),
+        ("Privacy considerations",    "{{ i.privacy_considerations }}"),
+        ("Human oversight plan (impact assessment)", "{{ i.human_oversight_plan }}"),
+        ("HITL strategy (intake)",    "{{ i.hitl_strategy }}"),
+        ("Review trigger",            "{{ i.hitl_review_threshold }}"),
+    ]
+    for label, value in sections:
+        p = body.add_paragraph(); p.paragraph_format.space_before = Pt(6); p.paragraph_format.space_after = Pt(2)
+        run = p.add_run(label); _set_run_font(run, name=BODY_FONT, size=10, bold=True, color=MUTED_GRAY)
+        p = body.add_paragraph(); p.paragraph_format.space_after = Pt(2)
+        run = p.add_run(value); _set_run_font(run, name=BODY_FONT, size=10, italic=True, color=BODY_GRAY)
+
+    # Final spacer paragraph.
+    p = body.add_paragraph(); p.paragraph_format.space_after = Pt(8)
+    run = p.add_run(" ")
+    _set_run_font(run, name=BODY_FONT, size=4, color=BODY_GRAY)
+
+    tr_close = table.rows[2].cells[0]; tr_close.text = ""
+    tr_close.paragraphs[0].add_run("{%tr endfor %}")
+
+    _add_page_break(doc)
+    _add_heading(doc, "Regulatory Coverage", level=1)
+    _add_canonicals_table(doc)
+
+    out = TEMPLATES_DIR / "intake_impact_assessment_register.docx"
+    doc.save(str(out))
+    return out
+
 
 AUTHORS = {
     "model_inventory":             author_model_inventory,
@@ -1276,6 +1793,10 @@ AUTHORS = {
     "workflow_audit_trail":        author_workflow_audit_trail,    # one workflow
     "fairness_validation_summary": author_fairness_validation_summary,
     "naic_exhibit_c":              author_naic_exhibit_c,
+    # Phase B — governance intake reports.
+    "intake_inventory":                  author_intake_inventory,
+    "approval_audit_log":                author_approval_audit_log,
+    "intake_impact_assessment_register": author_intake_impact_assessment_register,
 }
 
 

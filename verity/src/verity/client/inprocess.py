@@ -39,6 +39,7 @@ from uuid import UUID
 from verity.db.connection import Database
 from verity.governance.coordinator import GovernanceCoordinator
 from verity.governance.decisions import DecisionsReader
+from verity.governance.intake import IntakeService
 from verity.governance.runs import RunsReader
 from verity.models.decision import (
     AuditTrailEntry,
@@ -141,6 +142,11 @@ class Verity:
         # because nothing else conflates the two surfaces today.
         self.runs_reader = RunsReader(self.db)
         self.runs_writer = RunsWriter(self.db)
+
+        # Governance Intake — the "use case before the agent" layer.
+        # See docs/architecture/governance-intake.md and
+        # verity/src/verity/governance/intake.py for the full surface.
+        self.intake = IntakeService(self.db)
 
     async def connect(self) -> None:
         """Open the database connection pool."""

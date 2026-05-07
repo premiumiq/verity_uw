@@ -22,6 +22,7 @@ from verity.web.api.compliance_meta import build_compliance_meta_router
 from verity.web.api.decisions import build_decisions_router
 from verity.web.api.draft_edit import build_draft_edit_router
 from verity.web.api.feed import build_feed_router
+from verity.web.api.intake import build_intake_router
 from verity.web.api.lifecycle import build_lifecycle_router
 from verity.web.api.models import build_models_router
 from verity.web.api.quotas import build_quotas_router
@@ -114,5 +115,10 @@ def build_api_router(verity) -> APIRouter:
     # YAMLs served on demand. Customers ingesting from MinIO call these
     # to bootstrap their warehouse without putting them in the data bucket.
     router.include_router(build_compliance_meta_router(verity))
+
+    # Governance Intake — use cases, requirements, approvals, artifact plan.
+    # See verity/src/verity/web/api/intake.py and
+    # docs/architecture/governance-intake.md.
+    router.include_router(build_intake_router(verity))
 
     return router

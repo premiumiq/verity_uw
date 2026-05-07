@@ -66,10 +66,15 @@
 
             <!-- STUDIO — authoring + governance frontend.
                  Each link enters Studio's own sub-app, where Studio's
-                 four-mode rail takes over the sidebar. The "← Admin
+                 five-mode rail takes over the sidebar. The "← Admin
                  Console" link at the top of Studio's sidebar brings
-                 users back here. -->
+                 users back here. Intake sits FIRST because it's the
+                 upstream entry point — every other mode operates on
+                 registry artifacts that come *out* of intake. -->
             <div class="verity-nav-section" style="margin-top: 10px;">Studio</div>
+            <a href="/studio/intake" class="verity-nav-link">
+                <span class="verity-nav-icon">⊕</span> Intake
+            </a>
             <a href="/studio/compose" class="verity-nav-link">
                 <span class="verity-nav-icon">✎</span> Compose
             </a>
@@ -166,22 +171,32 @@
 
         </div><!-- end sidebar-nav -->
 
-        <!-- Sidebar footer — compact gear + user icons above the
-             version tag. Icons only (no labels) to keep chrome out
-             of the vertical space: gear → /admin/settings, user
-             silhouette → account (placeholder href until there is
-             a real accounts flow). -->
-        <div style="padding: 10px 16px 8px; border-top: 1px solid rgba(255,255,255,0.15);
+        <!-- Sidebar footer.
+             Top row: gear → /admin/settings, @ → /admin/profile.
+             We use the @ glyph (not the 👤 emoji) because emoji
+             characters render in their platform-default colour
+             (purple/blue tint on most systems) and ignore CSS
+             `color`. @ is plain ASCII, monochrome, and reads as
+             "account" in modern UI conventions.
+             The persona indicator below the icons shows which
+             role the user is currently acting as; clicking it
+             also leads to /admin/profile where the role can be
+             switched. Switching is intentionally on the profile
+             page only (no sidebar dropdown) so there's a single
+             place where role changes happen. -->
+        <div style="padding: 10px 16px 4px; border-top: 1px solid rgba(255,255,255,0.15);
                     display: flex; align-items: center; gap: 14px;">
             <a href="/admin/settings" title="Settings"
                style="color: rgba(255,255,255,0.6); font-size: 1rem; text-decoration: none; line-height: 1;"
                onmouseover="this.style.color='#8FAADC'"
                onmouseout="this.style.color='rgba(255,255,255,0.6)'">⚙</a>
-            <a href="#" title="Account"
-               style="color: rgba(255,255,255,0.6); font-size: 1rem; text-decoration: none; line-height: 1;"
+            <a href="/admin/profile" title="Profile and role"
+               style="color: rgba(255,255,255,0.6); font-size: 1rem; text-decoration: none;
+                      line-height: 1; font-weight: 600;"
                onmouseover="this.style.color='#8FAADC'"
-               onmouseout="this.style.color='rgba(255,255,255,0.6)'">👤</a>
+               onmouseout="this.style.color='rgba(255,255,255,0.6)'">@</a>
         </div>
+        {% include '_partials/persona_indicator.html' %}
         <div style="padding: 0 16px 10px; font-size: 0.6rem;
                     color: rgba(255,255,255,0.3);">
             Verity v0.1.0
