@@ -1,0 +1,221 @@
+{% extends 'studio/_base.html' %}
+
+{% block title %}New Intake · Verity Studio{% endblock %}
+{% block page_title %}New Intake{% endblock %}
+{% block breadcrumbs %}
+  <span class="verity-breadcrumb-sep">/</span>
+  <a href="/studio/intake">Intake</a>
+  <span class="verity-breadcrumb-sep">/</span>
+  <span>New</span>
+{% endblock %}
+
+{% block content %}
+
+<form method="POST" action="/studio/intake/new" class="max-w-3xl space-y-5">
+
+  {% if error %}
+    <div class="p-3 rounded border border-red-200 bg-red-50 text-red-800 text-sm">
+      {{ error }}
+    </div>
+  {% endif %}
+
+  <p class="text-sm text-zinc-600">
+    Submit the business case for an AI use case. Risk classification
+    happens in triage; for now, leave the tier at the proposed value
+    and AI Governance will confirm it. Required fields are marked
+    <span class="text-red-600">*</span>.
+  </p>
+
+  {# ── IDENTITY ─────────────────────────────────────────────── #}
+  <fieldset class="border border-zinc-200 rounded p-4 space-y-4">
+    <legend class="px-2 text-xs uppercase tracking-wider text-zinc-500">
+      Identity
+    </legend>
+
+    <div>
+      <label class="block text-sm font-medium mb-1">
+        Application <span class="text-red-600">*</span>
+      </label>
+      <select name="application_code" required
+              class="w-full px-3 py-2 border border-zinc-300 rounded text-sm">
+        <option value="" disabled selected>— Select the consuming application —</option>
+        {% for app in applications %}
+          <option value="{{ app.name }}">
+            {{ app.display_name }} ({{ app.name }})
+          </option>
+        {% endfor %}
+      </select>
+      <div class="text-xs text-zinc-500 mt-1">
+        Only registered applications can intake use cases. The intake's
+        URL slug is unique within this application.
+      </div>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium mb-1">
+        Title <span class="text-red-600">*</span>
+      </label>
+      <input name="title" required maxlength="200"
+             class="w-full px-3 py-2 border border-zinc-300 rounded text-sm">
+      <div class="text-xs text-zinc-500 mt-1">
+        The URL slug is auto-derived from this title — you don't type it.
+      </div>
+    </div>
+  </fieldset>
+
+  {# ── BUSINESS CASE ────────────────────────────────────────── #}
+  <fieldset class="border border-zinc-200 rounded p-4 space-y-4">
+    <legend class="px-2 text-xs uppercase tracking-wider text-zinc-500">
+      Business case
+    </legend>
+
+    <div>
+      <label class="block text-sm font-medium mb-1">
+        Problem statement <span class="text-red-600">*</span>
+      </label>
+      <textarea name="problem_statement" required rows="3"
+                class="w-full px-3 py-2 border border-zinc-300 rounded text-sm"
+                placeholder="What business problem does this AI solve?"></textarea>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium mb-1">
+        Expected benefit <span class="text-red-600">*</span>
+      </label>
+      <textarea name="expected_benefit" required rows="3"
+                class="w-full px-3 py-2 border border-zinc-300 rounded text-sm"
+                placeholder="What's the expected outcome — speed, quality, capacity?"></textarea>
+    </div>
+
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="block text-sm font-medium mb-1">In-scope decisions</label>
+        <textarea name="in_scope_decisions" rows="3"
+                  class="w-full px-3 py-2 border border-zinc-300 rounded text-sm"
+                  placeholder="What WILL the AI decide / influence?"></textarea>
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1">Out-of-scope decisions</label>
+        <textarea name="out_of_scope_decisions" rows="3"
+                  class="w-full px-3 py-2 border border-zinc-300 rounded text-sm"
+                  placeholder="Explicit non-goals."></textarea>
+      </div>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium mb-1">Affected populations</label>
+      <input name="affected_populations" placeholder="applicants, brokers, underwriters"
+             class="w-full px-3 py-2 border border-zinc-300 rounded text-sm">
+      <div class="text-xs text-zinc-500 mt-1">Comma-separated.</div>
+    </div>
+  </fieldset>
+
+  {# ── OWNERSHIP ────────────────────────────────────────────── #}
+  <fieldset class="border border-zinc-200 rounded p-4 space-y-4">
+    <legend class="px-2 text-xs uppercase tracking-wider text-zinc-500">
+      Ownership
+    </legend>
+
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="block text-sm font-medium mb-1">
+          Business owner name <span class="text-red-600">*</span>
+        </label>
+        <input name="business_owner_name" required
+               class="w-full px-3 py-2 border border-zinc-300 rounded text-sm">
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1">Business owner email</label>
+        <input name="business_owner_email" type="email"
+               class="w-full px-3 py-2 border border-zinc-300 rounded text-sm">
+      </div>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium mb-1">Requesting team</label>
+      <input name="requesting_team"
+             class="w-full px-3 py-2 border border-zinc-300 rounded text-sm">
+    </div>
+  </fieldset>
+
+  {# ── PROPOSED RISK ────────────────────────────────────────── #}
+  <fieldset class="border border-zinc-200 rounded p-4 space-y-4">
+    <legend class="px-2 text-xs uppercase tracking-wider text-zinc-500">
+      Proposed risk classification (AI Governance confirms at triage)
+    </legend>
+
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="block text-sm font-medium mb-1">AI risk tier</label>
+        <select name="ai_risk_tier"
+                class="w-full px-3 py-2 border border-zinc-300 rounded text-sm">
+          <option value="minimal">minimal</option>
+          <option value="limited" selected>limited</option>
+          <option value="high">high</option>
+          <option value="unacceptable">unacceptable (auto-rejected)</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1">NAIC materiality</label>
+        <select name="naic_materiality"
+                class="w-full px-3 py-2 border border-zinc-300 rounded text-sm">
+          <option value="non_material" selected>non_material</option>
+          <option value="material">material</option>
+        </select>
+      </div>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium mb-1">Risk classification rationale</label>
+      <textarea name="risk_classification_rationale" rows="2"
+                class="w-full px-3 py-2 border border-zinc-300 rounded text-sm"
+                >(pending triage)</textarea>
+    </div>
+  </fieldset>
+
+  {# ── HITL STRATEGY ────────────────────────────────────────── #}
+  <fieldset class="border border-zinc-200 rounded p-4 space-y-4">
+    <legend class="px-2 text-xs uppercase tracking-wider text-zinc-500">
+      Human-in-the-loop strategy
+    </legend>
+    <p class="text-xs text-zinc-500 -mt-2">
+      How will humans review or override the AI's output? Required for any
+      use case that affects consumer-facing decisions; surfaced in
+      compliance reports as evidence of human oversight controls.
+    </p>
+
+    <div>
+      <label class="block text-sm font-medium mb-1">HITL strategy</label>
+      <textarea name="hitl_strategy" rows="3"
+                class="w-full px-3 py-2 border border-zinc-300 rounded text-sm"
+                placeholder="e.g. Underwriter reviews every classification before any bind/decline action; AI is decision-support only. Overrides feed the model improvement queue."></textarea>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium mb-1">Review trigger / threshold</label>
+      <input name="hitl_review_threshold"
+             class="w-full px-3 py-2 border border-zinc-300 rounded text-sm"
+             placeholder="e.g. always · confidence < 0.8 · weekly random 10% sample · exception only">
+      <div class="text-xs text-zinc-500 mt-1">
+        When does a human inspect the output?
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset class="border border-zinc-200 rounded p-4 space-y-4">
+    <legend class="px-2 text-xs uppercase tracking-wider text-zinc-500">Notes</legend>
+    <textarea name="notes" rows="2"
+              class="w-full px-3 py-2 border border-zinc-300 rounded text-sm"></textarea>
+  </fieldset>
+
+  <div class="flex items-center gap-3">
+    <button type="submit"
+            class="verity-btn verity-btn-primary">
+      Submit Intake
+    </button>
+    <a href="/studio/intake" class="text-sm text-zinc-600 hover:text-zinc-900">Cancel</a>
+  </div>
+
+</form>
+
+{% endblock %}

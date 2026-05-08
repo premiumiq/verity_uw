@@ -18,9 +18,30 @@
     <span>Model Inventory</span>
 {% endblock %}
 
-{% block page_title %}Model Inventory Report{% endblock %}
+{% block page_title %}Model Inventory{% endblock %}
 
 {% block content %}
+
+{# Subnav styles live in inventory_graph.css alongside the
+   graph view. Loading it here too keeps the tab markup
+   identical on both subtabs. #}
+<link rel="stylesheet" href="/admin/static/inventory_graph.css">
+
+{# ── SUBNAV: Report | Production Graph ─────────────────────
+    Two tabs, two URLs (deep-linkable). Active styling driven
+    by the `inventory_subtab` value the route passes in. The
+    same subnav markup is included in model_inventory_graph.html
+    so the operator can flip between views. #}
+<div class="inventory-subnav">
+    <a href="/admin/model-inventory"
+       class="inventory-subnav-tab {% if inventory_subtab == 'report' %}active{% endif %}">
+        Report
+    </a>
+    <a href="/admin/model-inventory/graph"
+       class="inventory-subnav-tab {% if inventory_subtab == 'graph' %}active{% endif %}">
+        Production Graph
+    </a>
+</div>
 
 <!-- Report header -->
 <div style="margin-bottom: 20px; font-size: 0.85rem; color: var(--verity-text-light);">

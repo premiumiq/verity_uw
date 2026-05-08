@@ -34,6 +34,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from verity.web.middleware.persona import PersonaMiddleware
 from verity.web.studio_routes import create_studio_routes
 
 
@@ -70,6 +71,12 @@ def create_verity_studio(verity) -> FastAPI:
         StaticFiles(directory=str(STATIC_DIR)),
         name="studio-static",
     )
+
+    # Persona middleware reads the vty_persona cookie and stashes the
+    # parsed StudioRole on request.state.persona for templates and
+    # route handlers. Mounted only on Studio (not Admin or the JSON
+    # API). See verity/src/verity/web/middleware/persona.py.
+    app.add_middleware(PersonaMiddleware)
 
     # Register all HTML page routes.
     router = create_studio_routes(verity, templates_dir=str(TEMPLATES_DIR))

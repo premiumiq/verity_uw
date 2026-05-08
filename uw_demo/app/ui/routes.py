@@ -57,6 +57,61 @@ def _enum_value(value):
 
 
 # ══════════════════════════════════════════════════════════════
+# HITL EDIT REASON PRESETS
+# ══════════════════════════════════════════════════════════════
+# Drives the dropdown on the inline-edit form (pen → save).
+# Each entry is (id, label, send_feedback_default).
+#
+#   id                        — value submitted by the form select.
+#   label                     — what the operator sees AND what
+#                               gets stored as the audit reason.
+#   send_feedback_default     — whether picking this preset should
+#                               turn the "Send feedback to Verity"
+#                               checkbox ON (True) or OFF (False).
+#
+# Why the flag default varies: not every HITL edit is feedback the
+# Verity governance system should learn from. If the broker simply
+# didn't include a piece of info on the documents, that's a data-
+# completeness problem, not an extractor accuracy problem —
+# forwarding it would muddy the extractor's training signal.
+# Reasons that ARE about extractor accuracy (missed / wrong) flip
+# the flag on by default. The operator can still override the
+# checkbox manually after picking a preset.
+#
+# The 'other' entry is special-cased in the template: choosing it
+# reveals a free-text input. Typed reasons default to flag ON
+# because the typical reason an operator types something custom
+# is "the AI got it wrong in a way the presets don't cover".
+
+EDIT_REASONS = [
+    # (id, label, send_feedback_default)
+    ("not_extracted",
+     "Field was not extracted at all",
+     True),
+    ("not_extracted_accurately",
+     "Field was not extracted accurately",
+     True),
+    ("not_in_documents",
+     "Information not received on documents",
+     False),
+    ("broker_correction",
+     "Broker correction (email / phone)",
+     False),
+    ("uw_judgment",
+     "Override per UW judgment",
+     False),
+    ("other",
+     "Other (specify)",
+     True),
+]
+
+# Lookup by id — used by the edit handler to translate the
+# submitted preset id back into its (label, flag) pair without a
+# linear scan.
+EDIT_REASON_BY_ID = {r[0]: r for r in EDIT_REASONS}
+
+
+# ══════════════════════════════════════════════════════════════
 # DATABASE HELPERS
 # ══════════════════════════════════════════════════════════════
 
@@ -278,6 +333,43 @@ async def _get_stage_counts() -> dict[str, int]:
             return {row[0]: row[1] for row in rows}
 
 
+def _resolve_int_field(
+    sub: dict,
+    ext_by_name: dict,
+    field_name: str,
+) -> int | None:
+    """Apply the displayed-value precedence used by the Details
+    section (HITL → AI → submission column) and coerce the
+    result into an int.
+
+    The submission row stores these card fields as BIGINT /
+    INTEGER, but submission_extraction.{ai,hitl}_value is TEXT —
+    so any value that came in via extraction or HITL edit is a
+    string. The KPI cards' Jinja formatter
+    (`"${:,.0f}".format(...)`) needs an int, so we coerce here
+    and fall back to None on anything we can't parse (which the
+    template's truthy check then renders as '—').
+    """
+    ext = ext_by_name.get(field_name)
+    if ext and ext.get("hitl_value") is not None:
+        raw = ext["hitl_value"]
+    elif ext and ext.get("ai_value") is not None:
+        raw = ext["ai_value"]
+    else:
+        # No extraction touched this field — fall through to
+        # whatever the submission row holds (already typed).
+        return sub.get(field_name)
+    if raw in (None, ""):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        # An extraction value that isn't an int (e.g. a range
+        # like "$40-45M" the extractor flagged low-confidence).
+        # Render '—' rather than crash the template.
+        return None
+
+
 def _build_field_sections(
     sub: dict,
     extractions: list[dict],
@@ -336,17 +428,28 @@ def _build_field_sections(
                 ext and ext.get("ai_value") is not None
                 and ext.get("hitl_value") is None
             )
-            # ai_not_found is TRUE when the AI ran AND has no
-            # value to report. The semantic comes from how
+            # ai_not_found is TRUE when the AI ran, had no value
+            # to report, AND no human has supplied one since.
+            # The first two conditions come from how
             # store_extraction_result writes the row:
             #   ai_found = field_name not in unextractable
             # so a row with ai_found=False AND ai_value IS NULL
             # means the AI explicitly listed this field as
-            # unextractable. ai_value is empty string with
-            # ai_found=True can also mean "extracted but empty".
+            # unextractable. ai_value="" with ai_found=True can
+            # also mean "extracted but empty".
+            #
+            # The hitl_value gate is the bug-fix: once a HITL
+            # edit has supplied a value, the field is no longer
+            # "AI never produced a value" — the user has filled
+            # it in. Without this gate the cell would keep
+            # rendering the "AI did not find this field" badge
+            # in place of the human-entered value, even though
+            # both the audit log and the hitl_value column
+            # already carried the edit.
             ai_not_found = bool(
                 ext is not None
                 and ext.get("ai_value") in (None, "")
+                and ext.get("hitl_value") is None
                 and (ext.get("ai_found") is False
                      or ext.get("review_reason") == "missing")
             )
@@ -700,6 +803,10 @@ def create_uw_routes(verity) -> APIRouter:
     router = APIRouter()
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     templates.env.finalize = _enum_value
+    # Make EDIT_REASONS available to every template without
+    # having to thread it through each route's context dict.
+    # The _field_row macro iterates this to build its dropdown.
+    templates.env.globals["edit_reasons"] = EDIT_REASONS
 
     # ── SETTINGS TOGGLE ──────────────────────────────────────
 
@@ -792,6 +899,27 @@ def create_uw_routes(verity) -> APIRouter:
         # the same helper. Documents are passed so the sparkle
         # tooltip can name the source file.
         sections = _build_field_sections(sub, extractions, documents)
+
+        # KPI cards at the top of the page (Annual Revenue,
+        # Employees, Limits Requested, Prior Premium) historically
+        # read straight off `sub.<col>`. After the move to a
+        # minimal seed, those columns are NULL on workflow rows
+        # even when the AI has extracted the value or the user has
+        # made a HITL edit — so the cards rendered as '—' while the
+        # Submission Details section below them showed the real
+        # value. Apply the same hitl→ai→sub precedence the Details
+        # section uses, coerce extraction strings (TEXT in
+        # submission_extraction) back into ints (BIGINT/INTEGER on
+        # submission), and write the resolved value back onto sub
+        # so the existing template needs no change.
+        ext_by_name = {e["field_name"]: e for e in extractions}
+        for card_field in (
+            "annual_revenue", "employee_count",
+            "limits_requested", "prior_premium",
+        ):
+            sub[card_field] = _resolve_int_field(
+                sub, ext_by_name, card_field,
+            )
 
         next_action = _compute_next_action(
             submission_id, cur_stage, cur_status, has_docs=doc_count > 0,
@@ -1505,9 +1633,25 @@ def create_uw_routes(verity) -> APIRouter:
         submission_id: str,
         field_name: str,
         hitl_value: str = Form(...),
-        reason: str = Form(""),
+        reason_preset: str = Form(""),
+        reason_other: str = Form(""),
         send_feedback: str = Form(""),
     ):
+        # Resolve the reason text from the dropdown + optional
+        # typed input. The form always sends BOTH fields; we
+        # pick which one to use based on which preset was
+        # selected. If the operator chose a real preset we use
+        # its label as the audit reason; if they chose "other"
+        # we use whatever they typed; if they somehow picked
+        # nothing we fall back to empty (and validation below
+        # blocks the save when feedback is being forwarded).
+        if reason_preset == "other":
+            reason = reason_other.strip()
+        elif reason_preset in EDIT_REASON_BY_ID:
+            reason = EDIT_REASON_BY_ID[reason_preset][1]
+        else:
+            reason = ""
+
         # Treat any non-empty checkbox value as "on". HTML omits
         # unchecked checkboxes from the form body entirely.
         forward_to_verity = bool(send_feedback)

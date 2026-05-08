@@ -67,6 +67,12 @@ class Lifecycle:
                 f"Promotion gate requirements not met: {'; '.join(gate_issues)}"
             )
 
+        # 3b. Validate the intake (governance) gate. Linked-intake check
+        # only — entities with no intake_entity_link rows pass through
+        # unchanged, preserving backward compat with legacy seed data.
+        # See docs/architecture/governance-intake.md § 4.5.
+        await self._check_intake_gate(entity_type, current, target_state)
+
         # 4. Determine the gate type for the approval record
         gate_type = f"{current_state.value}_to_{target_state.value}_promotion"
         new_channel = STATE_TO_CHANNEL[target_state]
@@ -240,6 +246,56 @@ class Lifecycle:
         elif entity_type == EntityType.PROMPT:
             return await self.db.fetch_one("get_prompt_version", {"version_id": str(version_id)})
         return None
+
+    async def _check_intake_gate(
+        self,
+        entity_type: EntityType,
+        current_version: dict,
+        target_state: LifecycleState,
+    ) -> None:
+        """Block promotion when a linked intake (use case) does not allow it.
+
+        Resolves the parent entity (agent/task/prompt header) from the
+        version row and asks IntakeService whether promotion is allowed.
+        Unlinked entities pass through. See
+        docs/architecture/governance-intake.md § 4.5.
+
+        Imported lazily so the SDK can run without intake tables (e.g.
+        in narrowly-scoped unit tests that bypass migrations).
+        """
+        # Map registry EntityType to intake LinkedEntityKind. Both enums
+        # share string values for the four kinds we care about, so a
+        # value lookup is enough.
+        from verity.governance.intake import IntakeService
+        from verity.models.intake import LinkedEntityKind
+
+        try:
+            intake_kind = LinkedEntityKind(entity_type.value)
+        except ValueError:
+            # Unknown entity type — nothing to check.
+            return
+
+        # Resolve the entity (header) id from the version row.
+        # Each version table carries a parent FK column named
+        # {agent|task|prompt}_id; pick the right one.
+        parent_id_key = {
+            EntityType.AGENT: "agent_id",
+            EntityType.TASK: "task_id",
+            EntityType.PROMPT: "prompt_id",
+        }.get(entity_type)
+        if not parent_id_key:
+            return
+        entity_id = current_version.get(parent_id_key)
+        if entity_id is None:
+            return
+
+        intake_service = IntakeService(self.db)
+        result = await intake_service.check_promotion_gate(
+            intake_kind, entity_id, target_state.value,
+        )
+        if not result.allowed:
+            joined = "; ".join(result.reasons)
+            raise ValueError(f"Intake gate blocks promotion: {joined}")
 
     async def _set_champion(self, entity_type: EntityType, current_version: dict, new_version_id: UUID):
         """Set a new champion version and deprecate the old one."""

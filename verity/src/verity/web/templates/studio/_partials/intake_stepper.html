@@ -1,0 +1,38 @@
+{#
+  Intake lifecycle stepper.
+
+  Mirrors uw_demo's submission stepper visually (verity-step* classes
+  defined in verity.css). Renders one circle per step in the main
+  intake flow: proposed → in_review → impact_assessment → approved
+  → in_build → live. Status values: complete · active · pending ·
+  skipped · failed.
+
+  Required template context:
+    workflow_steps -- list of dicts {step_order, step_name, status, completed_at}
+                      computed in studio_intake_routes._intake_workflow_steps.
+#}
+<div class="verity-stepper">
+  {% for step in workflow_steps %}
+    <div class="verity-step verity-step-{{ step.status }}">
+      <div class="verity-step-circle">
+        {% if step.status == 'complete' %}
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M3 8L6.5 11.5L13 4.5" stroke="white" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        {% elif step.status == 'failed' %}
+          ✗
+        {% elif step.status == 'skipped' %}
+          —
+        {% else %}
+          {{ step.step_order }}
+        {% endif %}
+      </div>
+      <div class="verity-step-label">{{ step.step_name }}</div>
+    </div>
+    {% if not loop.last %}
+      <div class="verity-step-connector
+                  {% if step.status == 'complete' %}verity-connector-complete{% endif %}"></div>
+    {% endif %}
+  {% endfor %}
+</div>

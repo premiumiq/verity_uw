@@ -13,14 +13,22 @@ import psycopg
 SCHEMA_FILE = Path(__file__).parent / "schema.sql"
 COMPLIANCE_SCHEMA_FILE = Path(__file__).parent / "schema_compliance.sql"
 COMPLIANCE_VIEWS_FILE = Path(__file__).parent / "schema_compliance_views.sql"
+# Governance intake (use cases / requirements / approvals / artifact plan).
+# Applied AFTER schema_compliance.sql because intake_requirement.embedding_model_id
+# FKs compliance.embedding_config. See docs/architecture/governance-intake.md.
+INTAKE_SCHEMA_FILE = Path(__file__).parent / "schema_intake.sql"
 
 
 async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
     """Apply the Verity schema to the target database.
 
-    Applies schema.sql first (operational trust DB) then
+    Applies schema.sql first (operational trust DB), then
     schema_compliance.sql (L3 compliance metamodel + L2 analytics
-    schema placeholder). See docs/architecture/compliance-stack.md.
+    schema placeholder), then schema_intake.sql (governance intake
+    layer — use cases, requirements, approvals, artifact plan), then
+    schema_compliance_views.sql (logical mart). See
+    docs/architecture/compliance-stack.md and
+    docs/architecture/governance-intake.md.
 
     Args:
         database_url: PostgreSQL connection URL.
@@ -28,6 +36,7 @@ async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
     """
     schema_sql = SCHEMA_FILE.read_text()
     compliance_schema_sql = COMPLIANCE_SCHEMA_FILE.read_text()
+    intake_schema_sql = INTAKE_SCHEMA_FILE.read_text()
     compliance_views_sql = COMPLIANCE_VIEWS_FILE.read_text()
 
     async with await psycopg.AsyncConnection.connect(
@@ -86,6 +95,22 @@ async def apply_schema(database_url: str, drop_existing: bool = False) -> None:
                 if "already exists" in err_msg:
                     continue
                 print(f"Compliance schema error on statement {i}: {err_msg}")
+                print(f"Statement: {stmt[:200]}...")
+                raise
+
+        print("Applying Verity intake schema (governance intake / requirements / approvals)...")
+        intake_statements = _split_sql_statements(intake_schema_sql)
+        for i, stmt in enumerate(intake_statements, 1):
+            stmt = stmt.strip()
+            if not stmt:
+                continue
+            try:
+                await conn.execute(stmt)
+            except Exception as e:
+                err_msg = str(e)
+                if "already exists" in err_msg:
+                    continue
+                print(f"Intake schema error on statement {i}: {err_msg}")
                 print(f"Statement: {stmt[:200]}...")
                 raise
 

@@ -1,0 +1,95 @@
+{% extends 'studio/_base.html' %}
+
+{% block title %}Governance Dashboard · Verity Studio{% endblock %}
+{% block page_title %}Governance Dashboard{% endblock %}
+{% block breadcrumbs %}
+  <span class="verity-breadcrumb-sep">/</span>
+  <span>Governance</span>
+  <span class="verity-breadcrumb-sep">/</span>
+  <span>Dashboard</span>
+{% endblock %}
+
+{% block content %}
+
+<div class="grid grid-cols-2 gap-4 mb-6 max-w-4xl">
+  <section class="p-4 rounded border border-zinc-200">
+    <h3 class="text-xs uppercase tracking-wider text-zinc-500 mb-3">By risk tier</h3>
+    <ul class="space-y-1 text-sm">
+      {% for tier in ['high','limited','minimal','unacceptable'] %}
+        <li class="flex justify-between">
+          <span class="capitalize">{{ tier }}</span>
+          <span class="font-mono">{{ counts.by_risk_tier.get(tier, 0) }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="p-4 rounded border border-zinc-200">
+    <h3 class="text-xs uppercase tracking-wider text-zinc-500 mb-3">By status</h3>
+    <ul class="space-y-1 text-sm">
+      {% for s in ['proposed','in_review','impact_assessment','approved','in_build','live','rejected','retired'] %}
+        <li class="flex justify-between">
+          <span>{{ s }}</span>
+          <span class="font-mono">{{ counts.by_status.get(s, 0) }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+</div>
+
+<section class="mb-6 max-w-4xl">
+  <h3 class="text-xs uppercase tracking-wider text-zinc-500 mb-2">Pending approvals</h3>
+  {% if counts.pending_approvals %}
+    <table class="w-full text-sm border border-zinc-200 rounded">
+      <thead class="bg-zinc-50 text-zinc-600 text-xs uppercase">
+        <tr>
+          <th class="text-left px-3 py-2">Intake</th>
+          <th class="text-left px-3 py-2">Kind</th>
+          <th class="text-left px-3 py-2">Risk</th>
+          <th class="text-left px-3 py-2">Required</th>
+          <th class="text-left px-3 py-2">Opened</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in counts.pending_approvals %}
+          <tr class="border-t border-zinc-100">
+            <td class="px-3 py-2">
+              <a href="/studio/intake/{{ a.application_code }}/{{ a.intake_code }}?tab=approvals"
+                 class="text-blue-700 hover:underline font-mono text-xs">{{ a.intake_code }}</a>
+              <div class="text-xs text-zinc-500">{{ a.intake_title }}</div>
+            </td>
+            <td class="px-3 py-2 text-xs">{{ a.kind }}</td>
+            <td class="px-3 py-2 text-xs">{{ a.ai_risk_tier }}</td>
+            <td class="px-3 py-2 text-xs">
+              {% for r in a.required_roles %}
+                <span class="inline-block text-xs px-1.5 py-0.5 rounded bg-zinc-100 border border-zinc-200 mr-1 mb-1">
+                  {{ r | replace('_',' ') }}
+                </span>
+              {% endfor %}
+            </td>
+            <td class="px-3 py-2 text-xs text-zinc-500">{{ a.opened_at.strftime('%Y-%m-%d') if a.opened_at else '' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="text-sm text-zinc-500">No pending approvals.</p>
+  {% endif %}
+</section>
+
+<section class="mb-6 max-w-4xl">
+  <h3 class="text-xs uppercase tracking-wider text-zinc-500 mb-2">
+    Unlinked registry entities
+    <span class="normal-case text-zinc-400 ml-1">(no intake linked)</span>
+  </h3>
+  <ul class="text-sm grid grid-cols-2 gap-x-6 max-w-md">
+    {% for kind in ['agent','task','prompt','tool'] %}
+      <li class="flex justify-between border-b border-zinc-100 py-1">
+        <span>{{ kind }}</span>
+        <span class="font-mono">{{ counts.unlinked_entities.get(kind, 0) }}</span>
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+
+{% endblock %}

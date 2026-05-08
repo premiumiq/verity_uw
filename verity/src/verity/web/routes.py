@@ -24,9 +24,21 @@ logger = logging.getLogger(__name__)
 
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Form, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+
+from verity.models.intake import StudioRole
+from verity.web.middleware.persona import (
+    ACTION_LABELS,
+    ACTION_ORDER,
+    ROLE_DESCRIPTIONS,
+    actions_allowed_for,
+    get_persona,
+    is_action_allowed,
+    persona_cookie_response,
+    role_action_matrix,
+)
 
 
 def _enum_value(value):
@@ -64,7 +76,13 @@ def _render(templates, request, template_name, **context):
 
     Wraps Starlette 1.0's TemplateResponse(request, name, context).
     Usage: return _render(templates, request, "page.html", foo=bar, baz=qux)
+
+    Default-injects ``persona`` from request.state (set by
+    PersonaMiddleware) so the sidebar persona indicator shows the
+    real role on every page without each route having to pass it.
+    Routes that already supply ``persona`` explicitly win.
     """
+    context.setdefault("persona", getattr(request.state, "persona", None))
     return templates.TemplateResponse(request, template_name, context)
 
 
@@ -269,6 +287,54 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
             selected_app_names=selected_names,
             mtd=mtd,
         )
+
+    # ── PROFILE & ROLE ────────────────────────────────────────
+    # The profile page is the single surface where the active persona
+    # is changed. The sidebar shows the *current* role only (display);
+    # all role transitions happen here, with the role-help modal
+    # providing the action × role matrix on demand.
+
+    @router.get("/profile", response_class=HTMLResponse)
+    async def profile(request: Request):
+        current = get_persona(request) or StudioRole.VIEWER
+        return _render(
+            templates, request, "profile.html",
+            active_page="profile",
+            current_role=current,
+            current_role_description=ROLE_DESCRIPTIONS.get(current, ""),
+            allowed_actions=[
+                (a, ACTION_LABELS.get(a, a)) for a in actions_allowed_for(current)
+            ],
+            denied_actions=[
+                (a, ACTION_LABELS.get(a, a)) for a in ACTION_ORDER
+                if not is_action_allowed(current, a)
+            ],
+            all_roles=list(StudioRole),
+            role_descriptions=ROLE_DESCRIPTIONS,
+            matrix=role_action_matrix(),
+        )
+
+    @router.post("/profile/switch", response_class=HTMLResponse)
+    async def profile_switch(
+        request: Request,
+        persona: str = Form(...),
+        return_to: str = Form("/admin/profile"),
+    ):
+        """Set the persona cookie and redirect.
+
+        Same effect as POST /studio/persona — the cookie is path=/, so
+        either endpoint works from either app. Mounting it on Admin
+        too means the profile-page form doesn't have to leave the app
+        to switch role.
+        """
+        try:
+            role = StudioRole(persona)
+        except ValueError:
+            role = StudioRole.VIEWER
+        # 303 forces the browser to issue a fresh GET on return_to,
+        # picking up the new cookie on the redirect target.
+        response = RedirectResponse(url=return_to, status_code=303)
+        return persona_cookie_response(response, role)
 
     # ── AGENTS ────────────────────────────────────────────────
 
@@ -1086,17 +1152,289 @@ def create_routes(verity, templates_dir: str) -> APIRouter:
         )
 
     # ── MODEL INVENTORY ───────────────────────────────────────
+    #
+    # Two views live under the Model Inventory tab, switched via a
+    # subnav at the top of the page:
+    #   * /admin/model-inventory[/report] — tabular SR 11-7 report
+    #     (the original page).
+    #   * /admin/model-inventory/graph    — three-lane network
+    #     diagram of champion executables and their wired-up
+    #     prompts, configs, tools, and inter-agent delegations.
+    #
+    # The graph fetches its data via a JSON endpoint
+    # (/admin/model-inventory/graph-data) so the whole page is
+    # static markup + a small client-side init that hits the API.
 
     @router.get("/model-inventory", response_class=HTMLResponse)
     async def model_inventory(request: Request):
+        """Tabular Model Inventory — Report subnav tab."""
         await verity.ensure_connected()
         agents = await verity.model_inventory_agents()
         tasks = await verity.model_inventory_tasks()
         return _render(templates, request, "model_inventory.html",
             active_page="model_inventory",
+            inventory_subtab="report",
             agents=agents,
             tasks=tasks,
         )
+
+    @router.get("/model-inventory/graph", response_class=HTMLResponse)
+    async def model_inventory_graph_page(request: Request):
+        """Production-graph subnav tab. Page shell only — the
+        actual nodes and edges are loaded by inventory_graph.js
+        from the graph-data endpoint below, so the operator can
+        toggle filters without page reloads."""
+        await verity.ensure_connected()
+        return _render(templates, request, "model_inventory_graph.html",
+            active_page="model_inventory",
+            inventory_subtab="graph",
+        )
+
+    @router.get("/model-inventory/graph-data", response_class=JSONResponse)
+    async def model_inventory_graph_data():
+        """JSON feed for the graph page.
+
+        Returns Cytoscape-ready `nodes` and `edges` arrays plus
+        an `applications` list for the filter dropdown. All the
+        heavy filtering (by application, by node-type toggle)
+        happens client-side on already-loaded data — this endpoint
+        always returns the full champion graph in one shot.
+        """
+        await verity.ensure_connected()
+        # ── Pull all the source rows in parallel-friendly order. ──
+        # No async gathering here because verity.db is a single
+        # connection pool; sequential keeps the failure mode
+        # simple, and the dataset is small (champion entities only).
+        agents       = await verity.db.fetch_all("inventory_graph_agents", {})
+        tasks        = await verity.db.fetch_all("inventory_graph_tasks", {})
+        prompts      = await verity.db.fetch_all("inventory_graph_prompts", {})
+        configs      = await verity.db.fetch_all("inventory_graph_configs", {})
+        tools        = await verity.db.fetch_all("inventory_graph_tools", {})
+        edge_prompts = await verity.db.fetch_all(
+            "inventory_graph_edges_executable_prompt", {})
+        edge_configs = await verity.db.fetch_all(
+            "inventory_graph_edges_executable_config", {})
+        edge_tools   = await verity.db.fetch_all(
+            "inventory_graph_edges_executable_tool", {})
+        edge_deleg   = await verity.db.fetch_all(
+            "inventory_graph_edges_delegation", {})
+        applications = await verity.db.fetch_all(
+            "inventory_graph_applications", {})
+        membership   = await verity.db.fetch_all(
+            "inventory_graph_application_membership", {})
+
+        # ── Build a (entity_type, entity_id) → [app_id] map. ──
+        # Used both for direct membership (agent/task/prompt/tool
+        # rows in application_entity) and for inheriting apps
+        # onto configs (a config belongs to every app whose
+        # executable wired to it belongs to).
+        app_membership: dict[tuple[str, str], list[str]] = {}
+        for m in membership:
+            key = (m["entity_type"], str(m["entity_id"]))
+            app_membership.setdefault(key, []).append(str(m["application_id"]))
+
+        def apps_of(entity_type: str, entity_id) -> list[str]:
+            return app_membership.get((entity_type, str(entity_id)), [])
+
+        # ── Node assembly ─────────────────────────────────────
+        # Cytoscape node id format: "<type>:<uuid>". The colon
+        # separator gives the front-end a single point to parse
+        # back to (type, id) for navigation and filtering.
+
+        nodes: list[dict] = []
+
+        for a in agents:
+            nodes.append({
+                "data": {
+                    "id":           f"agent:{a['agent_id']}",
+                    "node_type":    "agent",
+                    "name":         a["name"],
+                    "label":        a["display_name"],
+                    "materiality":  a["materiality_tier"],
+                    "domain":       a["domain"],
+                    "owner":        a["owner_name"],
+                    "version":      a["champion_version"],
+                    "model":        a["model_name"],
+                    "config_name":  a["inference_config_name"],
+                    "validation_passed": a["last_validation_passed"],
+                    "decision_count_30d": a["decision_count_30d"],
+                    "applications": apps_of("agent", a["agent_id"]),
+                    "detail_url":   f"/admin/agents/{a['name']}",
+                },
+            })
+
+        for t in tasks:
+            nodes.append({
+                "data": {
+                    "id":           f"task:{t['task_id']}",
+                    "node_type":    "task",
+                    "name":         t["name"],
+                    "label":        t["display_name"],
+                    "capability":   t["capability_type"],
+                    "materiality":  t["materiality_tier"],
+                    "domain":       t["domain"],
+                    "owner":        t["owner_name"],
+                    "version":      t["champion_version"],
+                    "model":        t["model_name"],
+                    "config_name":  t["inference_config_name"],
+                    "validation_passed": t["last_validation_passed"],
+                    "decision_count_30d": t["decision_count_30d"],
+                    "applications": apps_of("task", t["task_id"]),
+                    "detail_url":   f"/admin/tasks/{t['name']}",
+                },
+            })
+
+        # Prompt node id keys on the prompt PARENT id, not the
+        # version id — keeps the node count reasonable in the
+        # common case where every champion uses the same version
+        # of a prompt. The front-end shows the version label as
+        # a sub-line on the node.
+        for p in prompts:
+            nodes.append({
+                "data": {
+                    "id":           f"prompt:{p['prompt_id']}",
+                    "node_type":    "prompt",
+                    "name":         p["name"],
+                    "label":        p["display_name"],
+                    "version":      p["version_label"],
+                    "governance_tier":   p["governance_tier"],
+                    "api_role":          p["api_role"],
+                    "sensitivity_level": p["sensitivity_level"],
+                    "applications": apps_of("prompt", p["prompt_id"]),
+                    "detail_url":   f"/admin/prompts/{p['name']}",
+                },
+            })
+
+        # Configs aren't versioned and aren't in application_entity.
+        # Their app membership is the union of the apps of every
+        # executable that uses them — computed in the second pass
+        # below once the executable→config edges are known.
+        config_apps: dict[str, set[str]] = {}
+        for c in configs:
+            config_apps[str(c["config_id"])] = set()
+
+        for t in tools:
+            nodes.append({
+                "data": {
+                    "id":           f"tool:{t['tool_id']}",
+                    "node_type":    "tool",
+                    "name":         t["name"],
+                    "label":        t["display_name"],
+                    "transport":    t["transport"],
+                    "mcp_server_name": t["mcp_server_name"],
+                    "is_write_operation": t["is_write_operation"],
+                    "applications": apps_of("tool", t["tool_id"]),
+                    "detail_url":   f"/admin/tools/{t['name']}",
+                },
+            })
+
+        # ── Build prompt_version → prompt_id lookup so the
+        # executable→prompt edges can target the parent node. ──
+        prompt_version_to_parent: dict[str, str] = {
+            str(p["prompt_version_id"]): str(p["prompt_id"])
+            for p in prompts
+        }
+
+        # Map executable-uuid → applications for config inheritance.
+        exec_apps: dict[tuple[str, str], list[str]] = {}
+        for a in agents:
+            exec_apps[("agent", str(a["agent_id"]))] = \
+                apps_of("agent", a["agent_id"])
+        for t in tasks:
+            exec_apps[("task", str(t["task_id"]))] = \
+                apps_of("task", t["task_id"])
+
+        # ── Edge assembly ─────────────────────────────────────
+        edges: list[dict] = []
+
+        for e in edge_prompts:
+            parent_prompt_id = prompt_version_to_parent.get(
+                str(e["prompt_version_id"])
+            )
+            if not parent_prompt_id:
+                # Defensive — should never fire because the
+                # prompts query is the same JOIN. Skip rather
+                # than render a dangling edge.
+                continue
+            edges.append({
+                "data": {
+                    "id":     f"e-prompt-{e['source_entity_id']}-{parent_prompt_id}-{e['api_role']}",
+                    "source": f"{e['source_entity_type']}:{e['source_entity_id']}",
+                    "target": f"prompt:{parent_prompt_id}",
+                    "edge_type": "prompt",
+                    "api_role":  e["api_role"],
+                    "execution_order": e["execution_order"],
+                },
+            })
+
+        for e in edge_configs:
+            edges.append({
+                "data": {
+                    "id":     f"e-config-{e['source_entity_id']}-{e['config_id']}",
+                    "source": f"{e['source_entity_type']}:{e['source_entity_id']}",
+                    "target": f"config:{e['config_id']}",
+                    "edge_type": "config",
+                },
+            })
+            # Inherit executable's applications onto the config.
+            cfg_id = str(e["config_id"])
+            if cfg_id in config_apps:
+                src_key = (e["source_entity_type"],
+                           str(e["source_entity_id"]))
+                config_apps[cfg_id].update(exec_apps.get(src_key, []))
+
+        for e in edge_tools:
+            edges.append({
+                "data": {
+                    "id":     f"e-tool-{e['source_entity_id']}-{e['tool_id']}",
+                    "source": f"{e['source_entity_type']}:{e['source_entity_id']}",
+                    "target": f"tool:{e['tool_id']}",
+                    "edge_type": "tool",
+                    "authorized": e["authorized"],
+                },
+            })
+
+        for e in edge_deleg:
+            edges.append({
+                "data": {
+                    "id":     f"e-deleg-{e['parent_agent_id']}-{e['child_agent_id']}",
+                    "source": f"agent:{e['parent_agent_id']}",
+                    "target": f"agent:{e['child_agent_id']}",
+                    "edge_type": "delegation",
+                    "scope": e["scope"],
+                },
+            })
+
+        # Now emit config nodes with their inherited app lists.
+        for c in configs:
+            cfg_id = str(c["config_id"])
+            nodes.append({
+                "data": {
+                    "id":           f"config:{cfg_id}",
+                    "node_type":    "config",
+                    "name":         c["name"],
+                    "label":        c["display_name"],
+                    "model":        c["model_name"],
+                    "temperature":  float(c["temperature"])
+                                      if c["temperature"] is not None else None,
+                    "max_tokens":   c["max_tokens"],
+                    "applications": sorted(config_apps.get(cfg_id, set())),
+                    "detail_url":   f"/admin/configs/{c['name']}",
+                },
+            })
+
+        return JSONResponse({
+            "nodes": nodes,
+            "edges": edges,
+            "applications": [
+                {
+                    "id":    str(app["id"]),
+                    "name":  app["name"],
+                    "label": app["display_name"],
+                }
+                for app in applications
+            ],
+        })
 
     # ── LIFECYCLE MANAGEMENT ─────────────────────────────────
 

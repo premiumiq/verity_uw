@@ -1,0 +1,1053 @@
+{% extends 'studio/_base.html' %}
+
+{% block title %}{{ intake.code }} · Verity Studio{% endblock %}
+{% block page_title %}{{ intake.title }}{% endblock %}
+{% block breadcrumbs %}
+  <span class="verity-breadcrumb-sep">/</span>
+  <a href="/studio/intake">Intake</a>
+  <span class="verity-breadcrumb-sep">/</span>
+  <span class="font-mono">{{ intake.code }}</span>
+{% endblock %}
+
+{% block content %}
+
+{# ── ACTION BAR ───────────────────────────────────────────
+   Sits in its own row above the context grid so the "Generate
+   report" affordance has room to breathe and doesn't compete
+   with the use-case facts below. #}
+<div style="display: flex; justify-content: flex-end; align-items: center;
+            gap: 12px; margin-bottom: 12px;">
+  <details style="position: relative;">
+    <summary style="cursor: pointer; list-style: none;
+                    display: inline-flex; align-items: center; gap: 6px;
+                    padding: 8px 14px; border: 1px solid var(--verity-border);
+                    border-radius: 4px; background: var(--verity-bg);
+                    font-size: 0.8rem; color: var(--verity-blue-deep);
+                    font-weight: 500; user-select: none;">
+      ⬇ Generate compliance report ▾
+    </summary>
+    <div style="position: absolute; right: 0; top: 100%; margin-top: 4px;
+                background: var(--verity-bg); border: 1px solid var(--verity-border);
+                border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.10);
+                padding: 6px; z-index: 20; min-width: 340px;">
+      <form method="post" action="/admin/compliance/reports/intake_inventory/generate">
+        <input type="hidden" name="intake_code" value="{{ intake.code }}">
+        <button type="submit"
+                style="width: 100%; text-align: left; padding: 8px 12px;
+                       border: none; background: transparent; border-radius: 4px;
+                       font-size: 0.85rem; cursor: pointer;"
+                onmouseover="this.style.background='var(--verity-bg-hover)'"
+                onmouseout="this.style.background='transparent'">
+          <strong>Use Case Intake Inventory</strong>
+          <div style="font-size: 0.72rem; color: var(--verity-text-light); margin-top: 2px;">
+            Identity, owner, risk, status, footprint.
+          </div>
+        </button>
+      </form>
+      <form method="post" action="/admin/compliance/reports/approval_audit_log/generate">
+        <input type="hidden" name="intake_code" value="{{ intake.code }}">
+        <button type="submit"
+                style="width: 100%; text-align: left; padding: 8px 12px;
+                       border: none; background: transparent; border-radius: 4px;
+                       font-size: 0.85rem; cursor: pointer;"
+                onmouseover="this.style.background='var(--verity-bg-hover)'"
+                onmouseout="this.style.background='transparent'">
+          <strong>Approval Audit Log</strong>
+          <div style="font-size: 0.72rem; color: var(--verity-text-light); margin-top: 2px;">
+            Every signoff for this use case.
+          </div>
+        </button>
+      </form>
+      {% if intake.ai_risk_tier in ('high', 'limited') %}
+      <form method="post" action="/admin/compliance/reports/intake_impact_assessment_register/generate">
+        <input type="hidden" name="intake_code" value="{{ intake.code }}">
+        <input type="hidden" name="ai_risk_tier" value="{{ intake.ai_risk_tier }}">
+        <button type="submit"
+                style="width: 100%; text-align: left; padding: 8px 12px;
+                       border: none; background: transparent; border-radius: 4px;
+                       font-size: 0.85rem; cursor: pointer;"
+                onmouseover="this.style.background='var(--verity-bg-hover)'"
+                onmouseout="this.style.background='transparent'">
+          <strong>Impact Assessment Register</strong>
+          <div style="font-size: 0.72rem; color: var(--verity-text-light); margin-top: 2px;">
+            Risk-tier deep-dive.
+          </div>
+        </button>
+      </form>
+      {% endif %}
+    </div>
+  </details>
+</div>
+
+{# ── LIFECYCLE STEPPER + CONTEXT STRIP ──────────────────────
+   Stepper at top showing the 6-stage intake flow; below it a
+   key/value grid with proper breathing room — labels stacked above
+   values, auto-wrapping columns. Replaces the previous flex-row
+   that crammed everything onto one line. #}
+<div class="verity-card verity-section">
+
+  {# Context grid — risk classification + ownership facts.
+     `repeat(auto-fit, minmax(...))` lets the columns reflow on narrow
+     viewports; 2-3 rows of 4-ish columns at typical widths. #}
+  <div style="display: grid;
+              grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+              gap: 18px 28px;
+              padding: 4px 0 18px;
+              border-bottom: 1px solid var(--verity-border-light);
+              margin-bottom: 16px;">
+    <div>
+      <div class="verity-detail-label">Application</div>
+      <div class="verity-detail-value" style="margin-top: 4px;">
+        <a href="/studio/intake?application_code={{ intake.application_code }}"
+           style="color: var(--verity-blue-deep); text-decoration: none;
+                  border-bottom: 1px dashed var(--verity-border);">
+          {{ intake.application_name or intake.application_code }}
+        </a>
+      </div>
+    </div>
+    <div>
+      <div class="verity-detail-label">Code</div>
+      <div class="verity-detail-value" style="margin-top: 4px; font-family: monospace; font-size: 0.85rem;">
+        {{ intake.code }}
+      </div>
+    </div>
+    <div>
+      <div class="verity-detail-label">Risk tier</div>
+      <div style="margin-top: 4px;">
+        <span class="verity-badge
+              {% if intake.ai_risk_tier == 'high' %}verity-badge-high
+              {% elif intake.ai_risk_tier == 'limited' %}verity-badge-medium
+              {% elif intake.ai_risk_tier == 'minimal' %}verity-badge-low
+              {% else %}verity-badge-deprecated{% endif %}">
+          {{ intake.ai_risk_tier | replace('_',' ') | title }}
+        </span>
+      </div>
+    </div>
+    <div>
+      <div class="verity-detail-label">NAIC materiality</div>
+      <div class="verity-detail-value" style="margin-top: 4px;">
+        {{ intake.naic_materiality | replace('_',' ') | title }}
+      </div>
+    </div>
+    <div>
+      <div class="verity-detail-label">Business owner</div>
+      <div class="verity-detail-value" style="margin-top: 4px;">
+        {{ intake.business_owner_name }}
+        {% if intake.requesting_team %}
+          <div style="font-size: 0.72rem; color: var(--verity-text-light); margin-top: 2px;">
+            {{ intake.requesting_team }}
+          </div>
+        {% endif %}
+      </div>
+    </div>
+    <div>
+      <div class="verity-detail-label">Submitted</div>
+      <div class="verity-detail-value" style="margin-top: 4px;">
+        {{ intake.intake_at.strftime('%b %d, %Y') if intake.intake_at else '—' }}
+      </div>
+    </div>
+    {% if intake.approved_at %}
+    <div>
+      <div class="verity-detail-label">Approved</div>
+      <div class="verity-detail-value" style="margin-top: 4px;">
+        {{ intake.approved_at.strftime('%b %d, %Y') }}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  {% include 'studio/_partials/intake_stepper.html' %}
+</div>
+
+{# ── TAB STRIP ───────────────────────────────────────────── #}
+{% set tabs = [
+    ('overview',     'Overview'),
+    ('requirements', 'Requirements'),
+    ('plan',         'Plan'),
+    ('linked',       'Linked'),
+    ('impact',       'Impact'),
+    ('approvals',    'Approvals'),
+] %}
+<div class="border-b border-zinc-200 mb-5 flex gap-1">
+  {% for tab_key, tab_label in tabs %}
+    <a href="/studio/intake/{{ intake.application_code }}/{{ intake.code }}?tab={{ tab_key }}"
+       class="px-3 py-2 text-sm
+              {% if active_tab == tab_key %}
+                border-b-2 border-blue-600 text-blue-700 font-medium
+              {% else %}
+                text-zinc-600 hover:text-zinc-900
+              {% endif %}">
+      {{ tab_label }}
+      {% if tab_key == 'requirements' %}
+        <span class="text-xs text-zinc-500">({{ requirements|length }})</span>
+      {% elif tab_key == 'plan' %}
+        <span class="text-xs text-zinc-500">({{ plan|length }})</span>
+      {% elif tab_key == 'linked' %}
+        <span class="text-xs text-zinc-500">({{ entity_links|length }})</span>
+      {% elif tab_key == 'approvals' %}
+        <span class="text-xs text-zinc-500">({{ approvals|length }})</span>
+      {% endif %}
+    </a>
+  {% endfor %}
+</div>
+
+{# ── OVERVIEW TAB ────────────────────────────────────────── #}
+{% if active_tab == 'overview' %}
+
+  {# Triage banner — only rendered when persona can triage AND the
+     intake is in a triageable state. Sits at the top so the read-only
+     content below can use the full page width. #}
+  {% if is_action_allowed(persona, 'triage_intake')
+        and intake.status in ('proposed','in_review','impact_assessment') %}
+    <details class="mb-5 border border-zinc-200 rounded" open>
+      <summary class="cursor-pointer px-4 py-2 text-sm font-medium text-zinc-700
+                      flex items-center justify-between bg-blue-50 rounded-t">
+        <span>Triage — set or revise risk classification</span>
+        <span class="text-xs text-blue-700">AI Governance action</span>
+      </summary>
+      <form method="POST"
+            action="/studio/intake/{{ intake.application_code }}/{{ intake.code }}/triage"
+            class="px-4 pb-4 pt-2 space-y-3 text-sm">
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Risk tier</label>
+            <select name="ai_risk_tier" required
+                    class="w-full px-2 py-1.5 border rounded text-sm">
+              {% for tier in ['minimal','limited','high','unacceptable'] %}
+                <option value="{{ tier }}" {% if intake.ai_risk_tier == tier %}selected{% endif %}>{{ tier }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">NAIC materiality</label>
+            <select name="naic_materiality" required
+                    class="w-full px-2 py-1.5 border rounded text-sm">
+              <option value="non_material" {% if intake.naic_materiality == 'non_material' %}selected{% endif %}>non_material</option>
+              <option value="material"     {% if intake.naic_materiality == 'material'     %}selected{% endif %}>material</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Rationale</label>
+          <textarea name="risk_classification_rationale" rows="3" required
+                    class="w-full px-2 py-1.5 border rounded text-sm"
+                    >{{ intake.risk_classification_rationale }}</textarea>
+        </div>
+        <div>
+          <button type="submit"
+                  class="verity-btn verity-btn-primary">
+            Save triage
+          </button>
+        </div>
+      </form>
+    </details>
+  {% endif %}
+
+  {# Full-width overview body. Replaces the previous 3-col grid that
+     wedged content into 2/3 of the page. Triage is the banner above
+     when applicable; nothing else needs to live in a side column. #}
+  <div class="space-y-5">
+
+      {# Edit-mode toggle: persona with edit_intake permission sees a
+         pencil affordance; clicking it adds ?edit=1 to the URL. The
+         POST handler validates persona again server-side. #}
+      {% if edit_overview and is_action_allowed(persona, 'edit_intake') %}
+        {# ─── EDIT MODE ─────────────────────────────────────── #}
+        <form method="POST" action="/studio/intake/{{ intake.application_code }}/{{ intake.code }}/edit"
+              class="space-y-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-xs uppercase tracking-wider text-zinc-500">
+              Editing — Overview
+            </h3>
+            <a href="/studio/intake/{{ intake.application_code }}/{{ intake.code }}?tab=overview"
+               class="text-xs text-zinc-500 hover:text-zinc-900">Cancel</a>
+          </div>
+
+          <div>
+            <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Title</label>
+            <input name="title" required value="{{ intake.title }}"
+                   class="w-full px-3 py-2 border border-zinc-300 rounded text-sm">
+          </div>
+          <div>
+            <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Problem statement</label>
+            <textarea name="problem_statement" rows="3" required
+                      class="w-full px-3 py-2 border border-zinc-300 rounded text-sm">{{ intake.problem_statement }}</textarea>
+          </div>
+          <div>
+            <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Expected benefit</label>
+            <textarea name="expected_benefit" rows="3" required
+                      class="w-full px-3 py-2 border border-zinc-300 rounded text-sm">{{ intake.expected_benefit }}</textarea>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">In-scope decisions</label>
+              <textarea name="in_scope_decisions" rows="3"
+                        class="w-full px-3 py-2 border border-zinc-300 rounded text-sm">{{ intake.in_scope_decisions or '' }}</textarea>
+            </div>
+            <div>
+              <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Out-of-scope decisions</label>
+              <textarea name="out_of_scope_decisions" rows="3"
+                        class="w-full px-3 py-2 border border-zinc-300 rounded text-sm">{{ intake.out_of_scope_decisions or '' }}</textarea>
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Affected populations (comma-separated)</label>
+            <input name="affected_populations"
+                   value="{{ intake.affected_populations | join(', ') }}"
+                   class="w-full px-3 py-2 border border-zinc-300 rounded text-sm">
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Business owner name</label>
+              <input name="business_owner_name" required value="{{ intake.business_owner_name }}"
+                     class="w-full px-3 py-2 border border-zinc-300 rounded text-sm">
+            </div>
+            <div>
+              <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Business owner email</label>
+              <input name="business_owner_email" type="email" value="{{ intake.business_owner_email or '' }}"
+                     class="w-full px-3 py-2 border border-zinc-300 rounded text-sm">
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Requesting team</label>
+            <input name="requesting_team" value="{{ intake.requesting_team or '' }}"
+                   class="w-full px-3 py-2 border border-zinc-300 rounded text-sm">
+          </div>
+          <div>
+            <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">HITL strategy</label>
+            <textarea name="hitl_strategy" rows="3"
+                      class="w-full px-3 py-2 border border-zinc-300 rounded text-sm">{{ intake.hitl_strategy or '' }}</textarea>
+          </div>
+          <div>
+            <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">HITL review trigger / threshold</label>
+            <input name="hitl_review_threshold" value="{{ intake.hitl_review_threshold or '' }}"
+                   class="w-full px-3 py-2 border border-zinc-300 rounded text-sm">
+          </div>
+          <div>
+            <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Notes</label>
+            <textarea name="notes" rows="2"
+                      class="w-full px-3 py-2 border border-zinc-300 rounded text-sm">{{ intake.notes or '' }}</textarea>
+          </div>
+
+          <div class="flex items-center gap-3 pt-2">
+            <button type="submit"
+                    class="verity-btn verity-btn-primary">
+              Save changes
+            </button>
+            <a href="/studio/intake/{{ intake.application_code }}/{{ intake.code }}?tab=overview"
+               class="text-sm text-zinc-600 hover:text-zinc-900">Cancel</a>
+          </div>
+        </form>
+      {% else %}
+        {# ─── READ-ONLY MODE ───────────────────────────────── #}
+        {% if is_action_allowed(persona, 'edit_intake') %}
+          <div class="flex justify-end">
+            <a href="/studio/intake/{{ intake.application_code }}/{{ intake.code }}?tab=overview&edit=1"
+               class="text-xs text-blue-700 hover:underline">✎ Edit overview</a>
+          </div>
+        {% endif %}
+
+        <section>
+          <h3 class="text-xs uppercase tracking-wider text-zinc-500 mb-1">Problem</h3>
+          <p class="text-sm whitespace-pre-line">{{ intake.problem_statement }}</p>
+        </section>
+
+        <section>
+          <h3 class="text-xs uppercase tracking-wider text-zinc-500 mb-1">Expected benefit</h3>
+          <p class="text-sm whitespace-pre-line">{{ intake.expected_benefit }}</p>
+        </section>
+
+        <div class="grid grid-cols-2 gap-4">
+          <section>
+            <h3 class="text-xs uppercase tracking-wider text-zinc-500 mb-1">In scope</h3>
+            <p class="text-sm whitespace-pre-line">{{ intake.in_scope_decisions or '—' }}</p>
+          </section>
+          <section>
+            <h3 class="text-xs uppercase tracking-wider text-zinc-500 mb-1">Out of scope</h3>
+            <p class="text-sm whitespace-pre-line">{{ intake.out_of_scope_decisions or '—' }}</p>
+          </section>
+        </div>
+
+        <section>
+          <h3 class="text-xs uppercase tracking-wider text-zinc-500 mb-1">Affected populations</h3>
+          <div class="flex flex-wrap gap-1.5">
+            {% for p in intake.affected_populations %}
+              <span class="text-xs px-2 py-0.5 rounded bg-zinc-100 border border-zinc-200">{{ p }}</span>
+            {% else %}
+              <span class="text-sm text-zinc-500">—</span>
+            {% endfor %}
+          </div>
+        </section>
+
+        <section>
+          <h3 class="text-xs uppercase tracking-wider text-zinc-500 mb-1">Risk classification</h3>
+          <p class="text-sm whitespace-pre-line">{{ intake.risk_classification_rationale }}</p>
+        </section>
+
+        <section>
+          <h3 class="text-xs uppercase tracking-wider text-zinc-500 mb-1">
+            Human-in-the-loop strategy
+          </h3>
+          {% if intake.hitl_strategy %}
+            <p class="text-sm whitespace-pre-line">{{ intake.hitl_strategy }}</p>
+            {% if intake.hitl_review_threshold %}
+              <p class="text-xs text-zinc-500 mt-1">
+                <span class="uppercase tracking-wider">Trigger:</span>
+                {{ intake.hitl_review_threshold }}
+              </p>
+            {% endif %}
+          {% else %}
+            <p class="text-sm text-zinc-500">No HITL strategy recorded.</p>
+          {% endif %}
+        </section>
+      {% endif %}
+  </div>
+{% endif %}
+
+{# Removed: orphaned aside + duplicate triage panel.
+   The triage block now sits at the top of the overview tab as a
+   collapsible banner; the read-only content below uses full width.
+   Block below is preserved as a no-op so the file structure stays
+   parseable until the next refactor; trimming it later is fine. #}
+{% if false %}
+    <aside class="space-y-4">
+      {# ── TRIAGE PANEL — visible to AI Governance only ── #}
+      {% if is_action_allowed(persona, 'triage_intake') and intake.status in ('proposed','in_review','impact_assessment') %}
+        <div class="p-3 rounded border border-blue-200 bg-blue-50">
+          <h3 class="text-xs uppercase tracking-wider text-blue-800 mb-2">Triage</h3>
+          <form method="POST" action="/studio/intake/{{ intake.application_code }}/{{ intake.code }}/triage" class="space-y-2 text-sm">
+            <div>
+              <label class="block text-xs">Risk tier</label>
+              <select name="ai_risk_tier" class="w-full px-2 py-1 border rounded text-sm">
+                {% for tier in ['minimal','limited','high','unacceptable'] %}
+                  <option value="{{ tier }}" {% if intake.ai_risk_tier == tier %}selected{% endif %}>{{ tier }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs">NAIC materiality</label>
+              <select name="naic_materiality" class="w-full px-2 py-1 border rounded text-sm">
+                <option value="non_material" {% if intake.naic_materiality == 'non_material' %}selected{% endif %}>non_material</option>
+                <option value="material"     {% if intake.naic_materiality == 'material'     %}selected{% endif %}>material</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs">Rationale</label>
+              <textarea name="risk_classification_rationale" rows="3" required
+                        class="w-full px-2 py-1 border rounded text-sm"
+                        >{{ intake.risk_classification_rationale }}</textarea>
+            </div>
+            <button type="submit"
+                    class="w-full px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded">
+              Save triage
+            </button>
+          </form>
+        </div>
+      {% endif %}
+      {# Removed: the duplicative facts box. #}
+    </aside>
+  </div>
+{% endif %}{# end of false-wrapped legacy aside #}
+
+{# ── REQUIREMENTS TAB ────────────────────────────────────── #}
+{% if active_tab == 'requirements' %}
+  <div class="space-y-5">
+    {% if requirements %}
+      <table class="w-full text-sm border border-zinc-200 rounded">
+        <thead class="bg-zinc-50 text-zinc-600 text-xs uppercase">
+          <tr>
+            <th class="text-left px-3 py-2">Code</th>
+            <th class="text-left px-3 py-2">Kind</th>
+            <th class="text-left px-3 py-2">Statement</th>
+            <th class="text-left px-3 py-2">Source</th>
+            <th class="text-left px-3 py-2">Status</th>
+            <th class="text-left px-3 py-2">Embedded</th>
+            <th class="px-3 py-2 w-12"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in requirements %}
+            {% if edit_req_code == r.code and is_action_allowed(persona, 'edit_requirement') %}
+              {# ─── EDIT ROW ─────────────────────────────────── #}
+              <tr class="border-t border-zinc-100 bg-blue-50/40">
+                <td colspan="7" class="px-3 py-3">
+                  <form method="POST"
+                        action="/studio/intake/{{ intake.application_code }}/{{ intake.code }}/requirements/{{ r.code }}/update"
+                        class="grid grid-cols-12 gap-2 text-sm items-start">
+                    <div class="col-span-1 font-mono text-zinc-600 pt-2">{{ r.code }}</div>
+                    <div class="col-span-2">
+                      <select name="kind" class="w-full px-2 py-1.5 border rounded text-sm">
+                        {% for k in ['business','functional','non_functional','compliance'] %}
+                          <option value="{{ k }}" {% if r.kind == k %}selected{% endif %}>{{ k }}</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                    <div class="col-span-5 space-y-2">
+                      <textarea name="statement" required rows="2"
+                                class="w-full px-2 py-1.5 border rounded text-sm"
+                                placeholder="Statement">{{ r.statement }}</textarea>
+                      <textarea name="acceptance_criteria" rows="2"
+                                class="w-full px-2 py-1.5 border rounded text-sm"
+                                placeholder="Acceptance criteria (optional)">{{ r.acceptance_criteria or '' }}</textarea>
+                    </div>
+                    <div class="col-span-2">
+                      <input name="source" placeholder="Source"
+                             value="{{ r.source or '' }}"
+                             class="w-full px-2 py-1.5 border rounded text-sm">
+                    </div>
+                    <div class="col-span-1">
+                      <select name="status" class="w-full px-2 py-1.5 border rounded text-sm">
+                        {% for s in ['draft','approved','implemented','verified','deprecated'] %}
+                          <option value="{{ s }}" {% if r.status == s %}selected{% endif %}>{{ s }}</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                    <div class="col-span-1 flex flex-col gap-1">
+                      <button type="submit" title="Save"
+                              class="verity-btn verity-btn-primary verity-btn-sm">
+                        Save
+                      </button>
+                      <a href="/studio/intake/{{ intake.application_code }}/{{ intake.code }}?tab=requirements"
+                         class="verity-btn verity-btn-secondary verity-btn-sm" style="justify-content: center;">
+                        Cancel
+                      </a>
+                    </div>
+                  </form>
+                </td>
+              </tr>
+            {% else %}
+              {# ─── READ-ONLY ROW ────────────────────────────── #}
+              <tr class="border-t border-zinc-100 hover:bg-zinc-50">
+                <td class="px-3 py-2 font-mono">{{ r.code }}</td>
+                <td class="px-3 py-2">{{ r.kind }}</td>
+                <td class="px-3 py-2">{{ r.statement }}
+                  {% if r.acceptance_criteria %}
+                    <div class="text-xs text-zinc-500 italic mt-0.5">AC: {{ r.acceptance_criteria }}</div>
+                  {% endif %}
+                </td>
+                <td class="px-3 py-2 text-xs text-zinc-500">{{ r.source or '—' }}</td>
+                <td class="px-3 py-2"><span class="text-xs px-2 py-0.5 rounded bg-zinc-100">{{ r.status }}</span></td>
+                <td class="px-3 py-2">{{ '✓' if r.has_embedding else '—' }}</td>
+                <td class="px-3 py-2 text-right">
+                  {% if is_action_allowed(persona, 'edit_requirement') %}
+                    <a href="/studio/intake/{{ intake.application_code }}/{{ intake.code }}?tab=requirements&edit_req={{ r.code }}"
+                       title="Edit"
+                       class="text-zinc-400 hover:text-blue-700 text-sm">✎</a>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="text-sm text-zinc-500">No requirements yet.</p>
+    {% endif %}
+
+    {% if is_action_allowed(persona, 'edit_requirement') %}
+      <details class="border border-zinc-200 rounded">
+        <summary class="cursor-pointer px-4 py-2 text-sm font-medium text-zinc-700">
+          + Add requirement
+        </summary>
+        <form method="POST"
+              action="/studio/intake/{{ intake.application_code }}/{{ intake.code }}/requirements/add"
+              class="px-4 pb-4 pt-2 space-y-3 text-sm">
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Code</label>
+              <input name="req_code" required placeholder="BR-1, FR-1, NFR-1, CR-1"
+                     class="w-full px-2 py-1.5 border rounded text-sm font-mono">
+            </div>
+            <div>
+              <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Kind</label>
+              <select name="kind" required class="w-full px-2 py-1.5 border rounded text-sm">
+                <option value="business">business</option>
+                <option value="functional" selected>functional</option>
+                <option value="non_functional">non_functional</option>
+                <option value="compliance">compliance</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Source</label>
+              <input name="source" placeholder="PRD §, NYDFS Cir 7, …"
+                     class="w-full px-2 py-1.5 border rounded text-sm">
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Statement</label>
+            <textarea name="statement" required rows="2"
+                      class="w-full px-2 py-1.5 border rounded text-sm"
+                      hx-post="/studio/intake/{{ intake.application_code }}/{{ intake.code }}/requirements/redundancy-check"
+                      hx-trigger="keyup changed delay:600ms"
+                      hx-target="#redundancy-target"
+                      hx-include="this"></textarea>
+          </div>
+          <div>
+            <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Acceptance criteria (optional)</label>
+            <textarea name="acceptance_criteria" rows="2"
+                      class="w-full px-2 py-1.5 border rounded text-sm"></textarea>
+          </div>
+          <div id="redundancy-target"></div>
+          <div>
+            <button type="submit"
+                    class="verity-btn verity-btn-primary">
+              Add requirement
+            </button>
+          </div>
+        </form>
+      </details>
+    {% endif %}
+  </div>
+{% endif %}
+
+{# ── PLAN TAB ────────────────────────────────────────────── #}
+{% if active_tab == 'plan' %}
+  <div class="space-y-5">
+    {% if intake.ai_risk_tier == 'unacceptable' %}
+      <div class="p-3 rounded border border-zinc-300 bg-zinc-50 text-zinc-700 text-sm">
+        This intake is in <code>unacceptable</code> risk tier under EU AI Act framing —
+        prohibited use case. No artifact plan may be produced.
+      </div>
+    {% else %}
+      {% if plan %}
+        <table class="w-full text-sm border border-zinc-200 rounded">
+          <thead class="bg-zinc-50 text-zinc-600 text-xs uppercase">
+            <tr>
+              <th class="text-left px-3 py-2">Kind</th>
+              <th class="text-left px-3 py-2">Proposed name</th>
+              <th class="text-left px-3 py-2">Display / purpose</th>
+              <th class="text-left px-3 py-2">Capability</th>
+              <th class="text-left px-3 py-2">Materiality</th>
+              <th class="text-left px-3 py-2">Status</th>
+              <th class="text-left px-3 py-2">Auto?</th>
+              <th class="px-3 py-2 w-20"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in plan %}
+              {% if edit_plan_id == (p.id | string) and is_action_allowed(persona, 'edit_plan') %}
+                {# ─── EDIT ROW ─────────────────────────────────── #}
+                <tr class="border-t border-zinc-100 bg-blue-50/40">
+                  <td colspan="8" class="px-3 py-3">
+                    <form method="POST"
+                          action="/studio/intake/{{ intake.application_code }}/{{ intake.code }}/plan/{{ p.id }}/update"
+                          class="grid grid-cols-12 gap-2 text-sm items-start">
+                      <div class="col-span-1 text-xs uppercase pt-2 text-zinc-600">{{ p.proposed_kind }}</div>
+                      <div class="col-span-2">
+                        <input name="proposed_name" required
+                               value="{{ p.proposed_name }}"
+                               class="w-full px-2 py-1.5 border rounded text-sm font-mono">
+                      </div>
+                      <div class="col-span-5 space-y-2">
+                        <input name="proposed_display_name" required
+                               value="{{ p.proposed_display_name }}"
+                               placeholder="Display name"
+                               class="w-full px-2 py-1.5 border rounded text-sm">
+                        <input name="proposed_purpose"
+                               value="{{ p.proposed_purpose or '' }}"
+                               placeholder="Purpose"
+                               class="w-full px-2 py-1.5 border rounded text-sm">
+                        <textarea name="proposed_description" rows="2"
+                                  placeholder="Description (optional)"
+                                  class="w-full px-2 py-1.5 border rounded text-sm">{{ p.proposed_description or '' }}</textarea>
+                      </div>
+                      <div class="col-span-1 text-xs pt-2">{{ p.proposed_capability_type or '—' }}</div>
+                      <div class="col-span-1 text-xs pt-2">{{ p.proposed_materiality_tier }}</div>
+                      <div class="col-span-1">
+                        <select name="status" class="w-full px-2 py-1.5 border rounded text-sm">
+                          {% for s in ['proposed','in_progress','realized','cancelled'] %}
+                            <option value="{{ s }}" {% if p.status == s %}selected{% endif %}>{{ s }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                      <div class="col-span-1 flex flex-col gap-1">
+                        <button type="submit"
+                                class="verity-btn verity-btn-primary verity-btn-sm">
+                          Save
+                        </button>
+                        <a href="/studio/intake/{{ intake.application_code }}/{{ intake.code }}?tab=plan"
+                           class="verity-btn verity-btn-secondary verity-btn-sm" style="justify-content: center;">
+                          Cancel
+                        </a>
+                      </div>
+                    </form>
+                  </td>
+                </tr>
+              {% else %}
+                {# ─── READ-ONLY ROW ────────────────────────────── #}
+                <tr class="border-t border-zinc-100 hover:bg-zinc-50">
+                  <td class="px-3 py-2 text-xs uppercase">{{ p.proposed_kind }}</td>
+                  <td class="px-3 py-2 font-mono text-xs">{{ p.proposed_name }}</td>
+                  <td class="px-3 py-2">
+                    {{ p.proposed_display_name }}
+                    {% if p.proposed_purpose %}
+                      <div class="text-xs text-zinc-500 italic mt-0.5">{{ p.proposed_purpose }}</div>
+                    {% endif %}
+                  </td>
+                  <td class="px-3 py-2 text-xs">{{ p.proposed_capability_type or '—' }}</td>
+                  <td class="px-3 py-2 text-xs">{{ p.proposed_materiality_tier }}</td>
+                  <td class="px-3 py-2"><span class="text-xs px-2 py-0.5 rounded bg-zinc-100">{{ p.status }}</span></td>
+                  <td class="px-3 py-2 text-xs text-center">{{ '✓' if p.auto_generated else '—' }}</td>
+                  <td class="px-3 py-2 text-xs text-right whitespace-nowrap">
+                    {% if is_action_allowed(persona, 'edit_plan') and p.status != 'realized' %}
+                      <a href="/studio/intake/{{ intake.application_code }}/{{ intake.code }}?tab=plan&edit_plan={{ p.id }}"
+                         title="Edit"
+                         class="text-zinc-400 hover:text-blue-700 mr-2">✎</a>
+                      <form method="POST"
+                            action="/studio/intake/{{ intake.application_code }}/{{ intake.code }}/plan/{{ p.id }}/delete"
+                            class="inline"
+                            onsubmit="return confirm('Delete this plan row? Re-run the generator to restore it if requirements still warrant it.');">
+                        <button title="Delete plan row"
+                                class="text-zinc-400 hover:text-red-700">✕</button>
+                      </form>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="text-sm text-zinc-500">
+          No plan rows yet. The plan auto-generates when the intake is approved,
+          based on functional requirements — or you can add one manually below.
+        </p>
+      {% endif %}
+
+      {# Action row — re-run generator + add manually. #}
+      <div class="flex flex-wrap gap-3 items-center">
+        {% if is_action_allowed(persona, 'generate_plan') %}
+          <form method="POST" action="/studio/intake/{{ intake.application_code }}/{{ intake.code }}/plan/generate" class="inline">
+            <button type="submit" class="verity-btn verity-btn-secondary">
+              Re-run plan generator
+            </button>
+            <span class="text-xs text-zinc-500 ml-2">Skips rows that already exist.</span>
+          </form>
+        {% endif %}
+      </div>
+
+      {# Add-plan-row form — manual addition, mirrors how the engineer
+         can insert a planned artifact the rule-based generator missed.
+         Gated on edit_plan because adding a row is a write to the same
+         table as editing. #}
+      {% if is_action_allowed(persona, 'edit_plan') %}
+        <details class="border border-zinc-200 rounded">
+          <summary class="cursor-pointer px-4 py-2 text-sm font-medium text-zinc-700">
+            + Add plan row manually
+          </summary>
+          <form method="POST"
+                action="/studio/intake/{{ intake.application_code }}/{{ intake.code }}/plan/add"
+                class="px-4 pb-4 pt-2 space-y-3 text-sm">
+            <div class="grid grid-cols-3 gap-3">
+              <div>
+                <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Kind</label>
+                <select name="proposed_kind" required
+                        class="w-full px-2 py-1.5 border rounded text-sm">
+                  <option value="agent">agent</option>
+                  <option value="task" selected>task</option>
+                  <option value="prompt">prompt</option>
+                  <option value="tool">tool</option>
+                  <option value="test_suite">test_suite</option>
+                  <option value="ground_truth_dataset">ground_truth_dataset</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Capability (tasks only)</label>
+                <select name="proposed_capability_type"
+                        class="w-full px-2 py-1.5 border rounded text-sm">
+                  <option value="">—</option>
+                  <option value="classification">classification</option>
+                  <option value="extraction">extraction</option>
+                  <option value="summarisation">summarisation</option>
+                  <option value="generation">generation</option>
+                  <option value="matching">matching</option>
+                  <option value="validation">validation</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Materiality tier</label>
+                <select name="proposed_materiality_tier" required
+                        class="w-full px-2 py-1.5 border rounded text-sm">
+                  <option value="high"   {% if intake.ai_risk_tier == 'high' %}selected{% endif %}>high</option>
+                  <option value="medium" {% if intake.ai_risk_tier == 'limited' %}selected{% endif %}>medium</option>
+                  <option value="low"    {% if intake.ai_risk_tier == 'minimal' %}selected{% endif %}>low</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Proposed name (slug)</label>
+              <input name="proposed_name" required pattern="[a-z0-9-]+"
+                     placeholder="bop-eligibility-validator"
+                     class="w-full px-2 py-1.5 border rounded text-sm font-mono">
+            </div>
+            <div>
+              <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Display name</label>
+              <input name="proposed_display_name" required
+                     placeholder="What the artifact does, in plain language"
+                     class="w-full px-2 py-1.5 border rounded text-sm">
+            </div>
+            <div>
+              <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Purpose</label>
+              <input name="proposed_purpose"
+                     placeholder="Why this artifact exists"
+                     class="w-full px-2 py-1.5 border rounded text-sm">
+            </div>
+            <div>
+              <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Description (optional)</label>
+              <textarea name="proposed_description" rows="2"
+                        class="w-full px-2 py-1.5 border rounded text-sm"></textarea>
+            </div>
+            <div>
+              <button type="submit"
+                      class="verity-btn verity-btn-primary">
+                Add plan row
+              </button>
+            </div>
+          </form>
+        </details>
+      {% endif %}
+    {% endif %}
+  </div>
+{% endif %}
+
+{# ── LINKED ENTITIES TAB ─────────────────────────────────── #}
+{% if active_tab == 'linked' %}
+  {% if entity_links %}
+    <table class="w-full text-sm border border-zinc-200 rounded">
+      <thead class="bg-zinc-50 text-zinc-600 text-xs uppercase">
+        <tr>
+          <th class="text-left px-3 py-2">Kind</th>
+          <th class="text-left px-3 py-2">Entity ID</th>
+          <th class="text-left px-3 py-2">Requirement</th>
+          <th class="text-left px-3 py-2">Relationship</th>
+          <th class="text-left px-3 py-2">Linked at</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for l in entity_links %}
+          <tr class="border-t border-zinc-100">
+            <td class="px-3 py-2">{{ l.entity_type }}</td>
+            <td class="px-3 py-2 font-mono text-xs">{{ l.entity_id }}</td>
+            <td class="px-3 py-2 text-xs text-zinc-600">{{ l.requirement_id or '—' }}</td>
+            <td class="px-3 py-2 text-xs">{{ l.relationship }}</td>
+            <td class="px-3 py-2 text-xs text-zinc-500">{{ l.created_at.strftime('%Y-%m-%d') if l.created_at else '' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="text-sm text-zinc-500">
+      No registry entities are linked to this intake yet. Engineers
+      link agents / tasks / prompts here from the Compose pages.
+    </p>
+  {% endif %}
+{% endif %}
+
+{# ── IMPACT TAB ──────────────────────────────────────────── #}
+{% if active_tab == 'impact' %}
+  {% if intake.ai_risk_tier in ('limited','high') %}
+    <p class="text-sm text-zinc-600 mb-3">
+      An impact assessment is required for risk tier
+      <code>{{ intake.ai_risk_tier }}</code>. The human-oversight plan
+      is mandatory for approval.
+    </p>
+
+    {% if is_action_allowed(persona, 'edit_impact_assessment') %}
+      <form method="POST" action="/studio/intake/{{ intake.application_code }}/{{ intake.code }}/impact"
+            class="space-y-3 max-w-3xl">
+        <div>
+          <label class="block text-sm font-medium mb-1">Fairness considerations</label>
+          <textarea name="fairness_considerations" rows="3"
+                    class="w-full px-3 py-2 border border-zinc-300 rounded text-sm"
+                    >{{ impact.fairness_considerations if impact else '' }}</textarea>
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Privacy considerations</label>
+          <textarea name="privacy_considerations" rows="3"
+                    class="w-full px-3 py-2 border border-zinc-300 rounded text-sm"
+                    >{{ impact.privacy_considerations if impact else '' }}</textarea>
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">
+            Human oversight plan
+            <span class="text-red-600">*</span>
+          </label>
+          <textarea name="human_oversight_plan" rows="4" required
+                    class="w-full px-3 py-2 border border-zinc-300 rounded text-sm"
+                    >{{ impact.human_oversight_plan if impact else '' }}</textarea>
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Notes</label>
+          <textarea name="notes" rows="2"
+                    class="w-full px-3 py-2 border border-zinc-300 rounded text-sm"
+                    >{{ impact.notes if impact else '' }}</textarea>
+        </div>
+        <label class="inline-flex items-center gap-2 text-sm">
+          <input type="checkbox" name="completed" value="1"
+                 {% if impact and impact.completed_at %}checked{% endif %}>
+          Mark assessment complete
+        </label>
+        <div>
+          <button type="submit"
+                  class="verity-btn verity-btn-primary">
+            Save assessment
+          </button>
+        </div>
+      </form>
+    {% else %}
+      {% if impact %}
+        <div class="space-y-3 text-sm">
+          <p><strong>Fairness:</strong> {{ impact.fairness_considerations or '—' }}</p>
+          <p><strong>Privacy:</strong> {{ impact.privacy_considerations or '—' }}</p>
+          <p><strong>Human oversight plan:</strong> {{ impact.human_oversight_plan or '—' }}</p>
+          {% if impact.completed_at %}
+            <p class="text-xs text-emerald-700">Completed {{ impact.completed_at.strftime('%Y-%m-%d') }} by {{ impact.completed_by }}</p>
+          {% endif %}
+        </div>
+      {% else %}
+        <p class="text-sm text-zinc-500">Impact assessment not started.</p>
+      {% endif %}
+    {% endif %}
+  {% else %}
+    <p class="text-sm text-zinc-500">
+      Impact assessment is not required for risk tier
+      <code>{{ intake.ai_risk_tier }}</code>.
+    </p>
+  {% endif %}
+{% endif %}
+
+{# ── APPROVALS TAB ───────────────────────────────────────── #}
+{% if active_tab == 'approvals' %}
+  {% if approvals %}
+    {% for a in approvals %}
+      <section class="mb-5 p-4 rounded border border-zinc-200">
+        <header class="flex items-center justify-between mb-3">
+          <div>
+            <span class="text-xs uppercase tracking-wider text-zinc-500">{{ a.kind }}</span>
+            <span class="ml-2 text-xs px-2 py-0.5 rounded
+                  {% if a.status == 'approved' %}bg-emerald-100 text-emerald-800
+                  {% elif a.status == 'rejected' %}bg-red-100 text-red-800
+                  {% elif a.status == 'withdrawn' %}bg-zinc-100 text-zinc-700
+                  {% else %}bg-amber-100 text-amber-800{% endif %}">
+              {{ a.status }}
+            </span>
+          </div>
+          <span class="text-xs text-zinc-500">opened {{ a.opened_at.strftime('%Y-%m-%d') if a.opened_at else '' }} by {{ a.opened_by }}</span>
+        </header>
+
+        <p class="text-sm mb-3">{{ a.summary }}</p>
+
+        <h4 class="text-xs uppercase tracking-wider text-zinc-500 mb-1">Required signoffs</h4>
+        <div class="flex flex-wrap gap-1.5 mb-3">
+          {% for r in a.required_roles %}
+            <span class="text-xs px-2 py-0.5 rounded bg-zinc-100 border border-zinc-200">
+              {{ r | replace('_',' ') }}
+            </span>
+          {% endfor %}
+        </div>
+
+        {% if a.status == 'pending' %}
+          {# Persona-driven role enforcement: the role on the signoff is
+             always the current persona — it cannot be picked from a form.
+             The form is suppressed entirely when the persona doesn't
+             match any of this request's required roles. This eliminates
+             "Compliance signing as Legal" and similar role spoofing. #}
+          {% set persona_value = persona.value if persona else None %}
+          {% set persona_can_sign = (
+              persona_value in a.required_roles
+              and is_action_allowed(persona, 'signoff')
+          ) %}
+
+          <div class="border-t border-zinc-100 pt-3">
+            {% if persona_can_sign %}
+              {# Signing-as banner — read-only role pill, no dropdown. #}
+              <div class="flex items-center gap-2 mb-2 text-sm">
+                <span class="text-xs uppercase tracking-wider text-zinc-500">Signing as</span>
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded
+                             bg-blue-50 text-blue-800 border border-blue-200
+                             text-xs font-semibold uppercase tracking-wider">
+                  {{ persona_value | replace('_',' ') }}
+                </span>
+                <span class="text-xs text-zinc-500 ml-2">
+                  Role is taken from your active persona — switch persona on the
+                  <a href="/admin/profile" class="underline">profile page</a>
+                  to sign in a different role.
+                </span>
+              </div>
+
+              <form method="POST"
+                    action="/studio/intake/{{ intake.application_code }}/{{ intake.code }}/approvals/{{ a.id }}/signoff"
+                    class="space-y-3 text-sm">
+                <div>
+                  <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Decision</label>
+                  <select name="decision" required class="w-full px-2 py-1.5 border rounded text-sm">
+                    <option value="approved">approved</option>
+                    <option value="rejected">rejected</option>
+                    <option value="requested_changes">requested_changes</option>
+                    <option value="abstained">abstained</option>
+                  </select>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Your name</label>
+                    <input name="approver_name" required
+                           class="w-full px-2 py-1.5 border rounded text-sm">
+                  </div>
+                  <div>
+                    <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Your email</label>
+                    <input name="approver_email" type="email"
+                           class="w-full px-2 py-1.5 border rounded text-sm">
+                  </div>
+                </div>
+                <div>
+                  <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Comment (optional)</label>
+                  <textarea name="comment" rows="2"
+                            class="w-full px-2 py-1.5 border rounded text-sm"></textarea>
+                </div>
+                <div>
+                  <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Evidence URL (optional)</label>
+                  <input name="evidence_url" placeholder="https://…"
+                         class="w-full px-2 py-1.5 border rounded text-sm">
+                </div>
+                <div>
+                  <button type="submit" class="verity-btn verity-btn-primary">
+                    Record signoff as {{ persona_value | replace('_',' ') | title }}
+                  </button>
+                </div>
+              </form>
+            {% else %}
+              {# Persona doesn't match a required role — show why and how to fix. #}
+              <div class="p-3 rounded border border-amber-200 bg-amber-50 text-sm text-amber-900">
+                <div class="font-medium mb-1">
+                  Your active persona
+                  {% if persona_value %}
+                    (<span class="font-mono">{{ persona_value | replace('_',' ') }}</span>)
+                  {% else %}
+                    (<span class="font-mono">none</span>)
+                  {% endif %}
+                  cannot sign this approval.
+                </div>
+                <div class="text-xs">
+                  This request requires:
+                  {% for r in a.required_roles %}
+                    <span class="inline-block px-1.5 py-0.5 mx-0.5 rounded
+                                 bg-amber-100 border border-amber-300 font-mono">
+                      {{ r | replace('_',' ') }}
+                    </span>
+                  {% endfor %}
+                  · Switch persona on the
+                  <a href="/admin/profile" class="underline">profile page</a>
+                  to one of these roles to sign.
+                </div>
+              </div>
+            {% endif %}
+          </div>
+        {% endif %}
+      </section>
+    {% endfor %}
+  {% else %}
+    <p class="text-sm text-zinc-500">No approval requests yet.</p>
+  {% endif %}
+{% endif %}
+
+{% endblock %}

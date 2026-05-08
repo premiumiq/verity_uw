@@ -38,11 +38,22 @@ canonical_requirements:
     coverage:
       level: full
       rationale: |
-        Asset Registry stores task_version, agent_version, prompt_template,
-        tool, connector, MCP server — all versioned DB records with name,
-        owner, materiality, lifecycle_state. Model Inventory Report
-        auto-generated cross-application.
+        Every AI use case begins as a recorded intake before any model is
+        built — capturing the business problem, owner, requesting team, risk
+        tier, and NAIC materiality classification. Each registry artifact
+        (agent version, task version, prompt template, tool, data connector,
+        MCP server) is then versioned with name, owner, lifecycle state, and
+        a back-reference to its originating intake. The model inventory is
+        therefore traceable end-to-end from regulatory provision through
+        approved use case through deployed component, and the cross-
+        application inventory report enumerates every entity in the
+        registered population.
+      customer_actions: |
+        Maintain organizational policy that no production AI is permitted
+        outside the intake-and-registry flow; periodically reconcile the
+        inventory against business-unit AI usage surveys.
     feature_links:
+      - { code: use_case_intake_registry, role: primary }
       - { code: task_version_registration, role: primary }
       - { code: agent_version_registration, role: primary }
       - { code: prompt_template_versioning, role: supporting }
@@ -61,10 +72,17 @@ canonical_requirements:
     coverage:
       level: full
       rationale: |
-        Owner field on every entity version. Approval record for each lifecycle
-        promotion records the responsible approver. Override logs linked to
-        named users. Accountability chain queryable end-to-end.
+        Every use case records its business owner and requesting team at
+        intake; ownership flows through to every registry artifact built
+        for that use case. Each lifecycle promotion is recorded with the
+        responsible approver's name, role, and signed-at timestamp. Every
+        write to the governance system records the role under which the
+        user was acting, providing segregation-of-duty evidence. Override
+        logs and decision logs are linked to named users so accountability
+        is queryable end-to-end from any artifact back to its owner.
     feature_links:
+      - { code: use_case_intake_registry, role: primary }
+      - { code: persona_aware_action_gating, role: primary }
       - { code: agent_version_registration, role: supporting }
       - { code: task_version_registration, role: supporting }
       - { code: hitl_approval_records, role: primary }
@@ -76,18 +94,29 @@ canonical_requirements:
     title: Written AIS Program
     description: |
       A documented AI Systems Program governing all AI use in regulated practices.
-      Verity is the operational implementation; the written policy wrapper
-      is customer responsibility.
+      The platform implements the operational program; the written policy
+      wrapper is customer responsibility.
     sort_seq: 30
     coverage:
       level: substantial
       rationale: |
-        Verity IS the operational AIS Program implementation: registry,
-        lifecycle, testing, decision logging, compliance reporting.
+        The operational AI Systems Program is implemented end-to-end: an
+        intake registry that records the business case for every use of AI;
+        a multi-role approval chain that requires named signoff before any
+        model is built; a 7-state lifecycle that gates promotion at each
+        stage; testing, validation, and decision-logging facilities; and
+        compliance reporting that emits regulator-ready evidence. The
+        intake-aware promotion gate prevents any registry artifact from
+        reaching production without an approved use case behind it.
       customer_actions: |
-        The written policy document referencing Verity controls as the AIS
-        Program infrastructure is customer responsibility.
+        The written policy document referencing the platform controls as
+        the AI Systems Program infrastructure remains customer
+        responsibility — including the program owner designation, the
+        committee charter, and the periodic program review cadence.
     feature_links:
+      - { code: use_case_intake_registry, role: primary }
+      - { code: multi_role_approval_chain, role: primary }
+      - { code: intake_promotion_gate, role: primary }
       - { code: seven_state_lifecycle, role: primary }
       - { code: configurable_gates_per_materiality, role: supporting }
       - { code: regulatory_evidence_package, role: supporting }
@@ -101,14 +130,25 @@ canonical_requirements:
       escalation paths — for AI risk management.
     sort_seq: 40
     coverage:
-      level: substantial
+      level: full
       rationale: |
-        HITL approval chains, incident escalation, rollback, override tracking
-        — the technical governance controls are implemented.
+        Approval of every use case requires signoff from a tier-appropriate
+        set of named roles — business owner, compliance, legal, model risk,
+        AI governance, and (where applicable) security and privacy. Each
+        role's signoff is durable, attributed, and timestamped, and the
+        intake cannot move into the build phase until all required roles
+        have signed. Every write to the system records the role under
+        which the user was acting, providing structural segregation-of-
+        duty evidence. Lifecycle promotions inherit the same
+        role-attributed approval mechanism; incidents and overrides
+        feed the escalation queue.
       customer_actions: |
-        Governance structure (committee, roles, escalation paths) must be
-        defined in written policy by the insurer.
+        The written committee charter (membership, meeting cadence,
+        quorum rules, escalation paths) and the role-to-person mapping
+        for each persona remain customer responsibility.
     feature_links:
+      - { code: multi_role_approval_chain, role: primary }
+      - { code: persona_aware_action_gating, role: primary }
       - { code: hitl_approval_records, role: supporting }
       - { code: incident_log, role: supporting }
       - { code: lifecycle_event_audit, role: supporting }
@@ -123,10 +163,19 @@ canonical_requirements:
     coverage:
       level: full
       rationale: |
-        Materiality tier classification is the direct ORSA implementation.
-        Model inventory report provides a snapshot for ORSA model risk
-        section. Incident log provides loss event history.
+        Risk classification happens twice and durably: at intake time
+        every use case is classified into one of four AI risk tiers
+        (minimal, limited, high, unacceptable) with a written rationale,
+        and is also classified as material or non-material under the
+        NAIC Model Bulletin definition. Each registry artifact
+        (agent, task) inherits its parent intake's risk profile and
+        carries its own materiality tier for runtime gating. The
+        cross-application inventory report exposes the population by
+        tier; the incident log tracks any tier change driven by
+        production events.
     feature_links:
+      - { code: risk_tier_at_intake, role: primary }
+      - { code: naic_materiality_classification, role: primary }
       - { code: materiality_tier_classification, role: primary }
       - { code: model_inventory_report, role: supporting }
       - { code: incident_log, role: supporting }
@@ -163,14 +212,29 @@ canonical_requirements:
       (ASOP 56 Sec. 3.4).
     sort_seq: 20
     coverage:
-      level: substantial
+      level: full
       rationale: |
-        Metamodel stores purpose, inputs, outputs, authority thresholds,
-        validation results. Auto-generated documentation.
+        Documentation accumulates across three durable layers. The intake
+        layer captures the business problem, expected benefit, scope (in /
+        out of scope decisions), affected populations, and — for limited
+        and high-risk use cases — a complete impact assessment recording
+        data sources, potential harms, mitigations, fairness and privacy
+        considerations, and the human oversight plan. The requirements
+        layer captures business, functional, non-functional, and
+        compliance requirements with status tracking and back-references
+        from each registry artifact. The registry layer stores purpose,
+        inputs, outputs, authority thresholds, prompt templates, and
+        validation results per version. Auto-generated documentation
+        joins all three for any qualified reviewer.
       customer_actions: |
-        "Sufficient for a qualified reviewer" standard requires supplementary
-        LLM-specific documentation per agent.
+        Domain-specific narrative documentation (e.g. modeling
+        assumptions, expert judgments, conservatism choices) that goes
+        beyond the structured fields remains the responsibility of the
+        modeling team; the platform stores it but does not generate it.
     feature_links:
+      - { code: use_case_intake_registry, role: primary }
+      - { code: intake_impact_assessment, role: primary }
+      - { code: intake_requirements_traceability, role: primary }
       - { code: agent_version_registration, role: primary }
       - { code: validation_report_storage, role: primary }
       - { code: model_inventory_report, role: supporting }
@@ -261,14 +325,24 @@ canonical_requirements:
       access patterns, and quality standards.
     sort_seq: 40
     coverage:
-      level: substantial
+      level: full
       rationale: |
-        Data classification policies in metamodel. MCP trust assessments
-        document governance of each external provider.
+        Data governance is documented at two layers. At the use-case
+        layer, each impact assessment captures the data sources the AI
+        will consume — owner, classification (public / internal /
+        confidential / PII-restricted), access pattern, and quality
+        considerations — alongside the populations affected and the
+        privacy considerations that follow. At the platform layer,
+        data classification policies are codified in the metamodel,
+        and trust assessments document the governance of each external
+        provider (data connectors, MCP servers).
       customer_actions: |
-        Written data governance policy document referencing Verity controls
-        is supplementary.
+        Periodic re-validation that the data governance posture
+        described at intake remains accurate (e.g. data sources
+        haven't drifted, access controls remain in place) is the
+        responsibility of the use-case owner.
     feature_links:
+      - { code: intake_impact_assessment, role: primary }
       - { code: mcp_server_trust_registry, role: primary }
       - { code: connector_registration, role: supporting }
 
@@ -466,10 +540,18 @@ canonical_requirements:
     coverage:
       level: full
       rationale: |
-        Every change creates a new version record. State transitions require
-        approval records. Prompt changes versioned independently. Composition
-        frozen at promotion. Full change history permanently stored and queryable.
+        Every change creates a new version record. Promotion of any
+        artifact is gated on its parent intake being in approved or live
+        status; high-risk intakes additionally require an explicit
+        promote-to-champion approval per artifact at the moment of
+        production deployment. State transitions are recorded with the
+        approver's name, role, and timestamp. Prompt changes are
+        versioned independently; composition is frozen at promotion;
+        full change history is permanently stored and queryable from any
+        registry artifact back to its originating use case.
     feature_links:
+      - { code: intake_promotion_gate, role: primary }
+      - { code: multi_role_approval_chain, role: primary }
       - { code: seven_state_lifecycle, role: primary }
       - { code: hitl_approval_records, role: primary }
       - { code: frozen_composition_at_promotion, role: primary }
@@ -487,11 +569,18 @@ canonical_requirements:
     coverage:
       level: full
       rationale: |
-        Authority thresholds in metamodel enforced at runtime. Tool allowlists
-        restrict agent capabilities. HITL gates prevent action above thresholds
-        without human confirmation. Materiality tiers control gate requirements.
-        Quotas limit per-entity usage.
+        Authorization is enforced at three layers. At the design layer,
+        every write to the governance system records the role under
+        which the user was acting; actions are gated by a documented
+        role-action matrix. At the asset layer, tool allowlists restrict
+        agent capabilities and authority thresholds in the metamodel
+        constrain runtime behaviour. At the operational layer, HITL
+        gates prevent action above thresholds without human
+        confirmation, and quotas limit per-entity usage. Materiality
+        tiers and intake risk tiers together govern the strictness of
+        controls applied.
     feature_links:
+      - { code: persona_aware_action_gating, role: primary }
       - { code: tool_authorization_checking, role: primary }
       - { code: write_authority_per_tool, role: primary }
       - { code: configurable_gates_per_materiality, role: supporting }
@@ -508,11 +597,18 @@ canonical_requirements:
     coverage:
       level: full
       rationale: |
-        HITL gates at promotion and per-decision above thresholds. Override
-        mechanism with reason-coded logging. Rollback to prior Champion in
-        less than 1 minute via single API call. Agent suspension without code
-        deployment via admin UI.
+        Human oversight is captured up front and enforced at runtime.
+        At intake, every use case records its human-in-the-loop
+        strategy (how humans review or override AI output) and the
+        review trigger condition (always | confidence threshold |
+        sample | exception). At promotion, HITL gates require explicit
+        approval at materiality-driven checkpoints. At runtime, an
+        override mechanism with reason-coded logging captures every
+        human correction; rollback to the prior champion is possible
+        in under a minute via a single API call; agent suspension is
+        possible without code deployment.
     feature_links:
+      - { code: human_oversight_strategy_capture, role: primary }
       - { code: hitl_approval_records, role: primary }
       - { code: champion_resolution_at_runtime, role: primary }
       - { code: configurable_gates_per_materiality, role: supporting }
@@ -528,10 +624,19 @@ canonical_requirements:
     coverage:
       level: full
       rationale: |
-        Materiality tiers (High / Medium / Low) with configurable gates per tier.
-        High — full 7-state lifecycle with 3 HITL gates. Medium — reduced gates.
-        Low — version tracking only. Quotas per-entity.
+        Risk tier is set at intake and drives every downstream control.
+        Unacceptable-tier intakes are auto-rejected. High-risk intakes
+        require five approval roles (business owner, compliance, legal,
+        model risk, AI governance), a documented impact assessment with
+        human-oversight plan, and a separate promote-to-champion approval
+        per artifact. Limited-risk intakes require three approval roles
+        and an impact assessment. Minimal-risk intakes require business
+        owner signoff only. Materiality tiers (high / medium / low) on
+        each artifact govern the runtime gate set; quotas constrain
+        per-entity usage proportionally.
     feature_links:
+      - { code: risk_tier_at_intake, role: primary }
+      - { code: multi_role_approval_chain, role: primary }
       - { code: materiality_tier_classification, role: primary }
       - { code: configurable_gates_per_materiality, role: primary }
       - { code: rate_limiting, role: supporting }
@@ -709,15 +814,29 @@ canonical_requirements:
       market conduct examinations — covering NAIC Evaluation Tool Exhibits A–D.
     sort_seq: 10
     coverage:
-      level: substantial
+      level: full
       rationale: |
-        Model Inventory Report, regulatory evidence packages, queryable decision
-        audit (execution_context_id), test execution logs — covers all 4 exhibits
-        of the NAIC Evaluation Tool.
+        Examination evidence assembles from layered durable records.
+        The use-case intake registry provides the model inventory with
+        business owner, risk tier, and approval status for every AI
+        system in production. The multi-role approval chain provides a
+        durable audit trail of every signoff (role, approver, decision,
+        timestamp, optional evidence URL) — answering "who approved what,
+        when, and on what evidence." Every write to the system records
+        the role under which the user was acting. Decision logs are
+        queryable end-to-end via execution_context_id; test execution
+        logs record validation outcomes; a regulatory evidence package
+        composes any subset for export. These outputs map directly to
+        NAIC Evaluation Tool Exhibits A–D.
       customer_actions: |
-        Formatting to match specific Evaluation Tool exhibit templates may
-        need customization.
+        Formatting to match specific Evaluation Tool exhibit templates
+        may need customization. Examination response procedures
+        (timeline expectations, contact protocols) remain customer
+        responsibility.
     feature_links:
+      - { code: use_case_intake_registry, role: primary }
+      - { code: multi_role_approval_chain, role: primary }
+      - { code: persona_aware_action_gating, role: primary }
       - { code: model_inventory_report, role: primary }
       - { code: regulatory_evidence_package, role: primary }
       - { code: test_execution_log, role: supporting }

@@ -1,21 +1,41 @@
 """Seed uw_db with demo submissions and loss history.
 
-Every seeded submission lands in the 'intake' stage with no
-documents, extractions, or assessments pre-populated. The user
-walks each submission forward through the workflow themselves
-from a clean starting state.
+Two seeding shapes per submission, picked by an external
+allowlist file (showcase_submissions.txt):
 
-The companion seed_edms.py uploads the same documents to the
-Vault (EDMS) so they're discoverable by the Documents tab —
-they just don't have rows in uw_db `document` yet. Clicking
-"Discover Documents" in the UI is what creates those rows.
+  * Showcase rows (uncommented in showcase_submissions.txt):
+    full column set seeded. These demo the "AI already
+    extracted everything" path — open the submission and the
+    Submission Details tab is fully populated.
 
-Usage:
-    # Called from register_all.py:
-    await seed_uw_db(drop_existing=True)
+  * Everything else: only the four intake-metadata columns
+    the broker actually sends in the submission email body
+    (named_insured, lob, sic_code, sic_description) plus loss
+    history. Every document-extractable column is left NULL
+    so the user walks Discover Documents → Extract → Review
+    without pre-seeded values shadowing AI extractions in the
+    audit log or the sparkle UX.
 
-    # Standalone (no schema reset — additive only):
+To change which submissions get full-data treatment, edit
+showcase_submissions.txt and (un)comment the relevant line —
+no code change required.
+
+The companion seed_edms.py uploads documents to the Vault
+(EDMS) for both shapes so the user can run extraction on
+workflow rows.
+
+CLI:
+    # Default — additive seed (creates missing rows only):
     python -m uw_demo.app.setup.seed_uw
+
+    # Surgical re-seed of every non-showcase submission.
+    # Showcase rows and any extractions / HITL edits made
+    # against them are preserved untouched:
+    python -m uw_demo.app.setup.seed_uw --reseed-workflow
+
+    # Reset a single submission to its seed state. Showcase
+    # rows reset to full data; others to minimal:
+    python -m uw_demo.app.setup.seed_uw --reset <uuid>
 """
 
 import asyncio
@@ -39,6 +59,54 @@ UW_DB_URL = os.environ.get(
 
 # Path to schema file
 SCHEMA_FILE = Path(__file__).parent.parent / "db" / "schema.sql"
+
+
+# ── SHOWCASE ALLOWLIST ───────────────────────────────────────
+# File holding the UUIDs of submissions that should be seeded
+# with the FULL field set. Anything not in this set (or not in
+# the file at all) is seeded with only the minimal intake
+# metadata (named_insured, lob, sic_code, sic_description).
+#
+# Lives next to this script as a plain text file so it can be
+# edited without touching code.
+
+SHOWCASE_FILE = Path(__file__).parent / "showcase_submissions.txt"
+
+
+def _load_showcase_ids() -> frozenset[str]:
+    """Read showcase-submission UUIDs from showcase_submissions.txt.
+
+    File format: one entry per line. Lines beginning with '#'
+    (after any leading whitespace) are treated as comments and
+    skipped. On a non-comment line the first whitespace-
+    delimited token is the UUID; anything after it is a human-
+    readable label and is ignored.
+
+    A missing file is non-fatal: returns an empty set and prints
+    a warning so the misconfiguration is visible in the seeder
+    output rather than failing register_all silently.
+    """
+    if not SHOWCASE_FILE.exists():
+        print(
+            f"  ! showcase_submissions.txt not found at {SHOWCASE_FILE}; "
+            f"all rows will seed minimally"
+        )
+        return frozenset()
+    ids: set[str] = set()
+    for line in SHOWCASE_FILE.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        # First token is the UUID; rest of line is label / inline
+        # comment and is ignored.
+        ids.add(stripped.split()[0])
+    return frozenset(ids)
+
+
+# Loaded once at import time so every entry point in this module
+# (the bulk seeder, the surgical reseeder, the single-row reset)
+# sees the same set without having to re-parse the file.
+SHOWCASE_IDS: frozenset[str] = _load_showcase_ids()
 
 
 # ── DEMO SUBMISSIONS ────────────────────────────────────────
@@ -502,37 +570,76 @@ SUBMISSIONS = [
 
 
 async def _seed_submission_row(cur, sub: dict) -> None:
-    """Insert one row into `submission`. Idempotency is handled by the
-    caller before this is invoked. The submission table has no
-    `status` column — stage state lives in submission_stage rows
-    (seeded by _seed_submission_stages)."""
+    """Insert one row into `submission`.
+
+    Two paths driven by SHOWCASE_IDS:
+
+      * Showcase id: full column set seeded — same behaviour as
+        the original seeder. The Submission Details tab will
+        render fully populated.
+
+      * Anything else: minimal intake metadata only
+        (named_insured, lob, sic_code, sic_description). Every
+        document-extractable column is left NULL so the AI
+        extractor writes the canonical value and the audit log
+        / sparkle UX have a single source of truth.
+
+    Idempotency is the caller's responsibility. Stage state
+    lives in submission_stage rows (seeded by
+    _seed_submission_stages), not on the submission row.
+    """
+    if sub["id"] in SHOWCASE_IDS:
+        await cur.execute(
+            """INSERT INTO submission (
+                id, named_insured, lob, fein, entity_type,
+                state_of_incorporation, sic_code, sic_description,
+                annual_revenue, employee_count, board_size,
+                independent_directors, effective_date, expiration_date,
+                limits_requested, retention_requested,
+                prior_carrier, prior_premium
+            ) VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s,
+                %s, %s, %s,
+                %s, %s, %s,
+                %s, %s,
+                %s, %s
+            )""",
+            (
+                sub["id"], sub["named_insured"], sub["lob"],
+                sub.get("fein"), sub.get("entity_type"),
+                sub.get("state_of_incorporation"), sub.get("sic_code"),
+                sub.get("sic_description"),
+                sub.get("annual_revenue"), sub.get("employee_count"),
+                sub.get("board_size"), sub.get("independent_directors"),
+                sub.get("effective_date"), sub.get("expiration_date"),
+                sub.get("limits_requested"), sub.get("retention_requested"),
+                sub.get("prior_carrier"), sub.get("prior_premium"),
+            ),
+        )
+    else:
+        # Minimal seed — only what arrives in the broker email
+        # body before any document is opened. Everything else is
+        # NULL on purpose so the AI extractor populates it.
+        await cur.execute(
+            """INSERT INTO submission (
+                id, named_insured, lob, sic_code, sic_description
+            ) VALUES (%s, %s, %s, %s, %s)""",
+            (
+                sub["id"], sub["named_insured"], sub["lob"],
+                sub.get("sic_code"), sub.get("sic_description"),
+            ),
+        )
+
+
+async def _delete_submission(cur, submission_id: str) -> None:
+    """Delete a submission row. Cascade FKs on submission_stage,
+    document, submission_extraction, submission_extraction_audit,
+    submission_assessment, submission_event, and loss_history all
+    take their child rows down with it — so a single DELETE here
+    leaves the database in a clean slate for that submission."""
     await cur.execute(
-        """INSERT INTO submission (
-            id, named_insured, lob, fein, entity_type,
-            state_of_incorporation, sic_code, sic_description,
-            annual_revenue, employee_count, board_size,
-            independent_directors, effective_date, expiration_date,
-            limits_requested, retention_requested,
-            prior_carrier, prior_premium
-        ) VALUES (
-            %s, %s, %s, %s, %s,
-            %s, %s, %s,
-            %s, %s, %s,
-            %s, %s, %s,
-            %s, %s,
-            %s, %s
-        )""",
-        (
-            sub["id"], sub["named_insured"], sub["lob"],
-            sub.get("fein"), sub.get("entity_type"),
-            sub.get("state_of_incorporation"), sub.get("sic_code"),
-            sub.get("sic_description"),
-            sub.get("annual_revenue"), sub.get("employee_count"),
-            sub.get("board_size"), sub.get("independent_directors"),
-            sub.get("effective_date"), sub.get("expiration_date"),
-            sub.get("limits_requested"), sub.get("retention_requested"),
-            sub.get("prior_carrier"), sub.get("prior_premium"),
-        ),
+        "DELETE FROM submission WHERE id = %s", (submission_id,),
     )
 
 
@@ -653,7 +760,137 @@ async def seed_uw_db(*, drop_existing: bool = False):
         print(f"  + app_settings seeded (pipeline_mode=mock)")
 
 
+# ── SURGICAL RESEED HELPERS ──────────────────────────────────
+#
+# Used when the user wants to refresh workflow rows without
+# wiping the showcase rows (or the extractions / HITL edits
+# they've already made on those showcase rows). Both helpers
+# operate row-by-row using DELETE … WHERE id = %s and re-insert,
+# so the schema stays put and unrelated submissions are
+# untouched.
+
+
+async def reseed_workflow_submissions(
+    *, preserve_ids: frozenset[str] | None = None,
+) -> None:
+    """Delete and re-seed every non-showcase submission.
+
+    For each submission in SUBMISSIONS whose id is NOT in
+    `preserve_ids`:
+      1. DELETE FROM submission … (cascade kills child rows).
+      2. Re-insert via _seed_submission_row (which will pick
+         the minimal shape because the id is not in SHOWCASE_IDS).
+      3. Re-seed loss_history and submission_stage.
+
+    Submissions in `preserve_ids` are left exactly as they are —
+    their submission row, extractions, audit rows, HITL edits
+    and stage transitions are all untouched.
+
+    Args:
+        preserve_ids: UUIDs to leave alone. Defaults to
+            SHOWCASE_IDS, which is the typical case (workflow
+            rows refresh, showcase rows preserved).
+    """
+    keep = preserve_ids if preserve_ids is not None else SHOWCASE_IDS
+
+    async with await psycopg.AsyncConnection.connect(UW_DB_URL) as conn:
+        async with conn.cursor() as cur:
+            preserved = 0
+            reseeded = 0
+            for sub in SUBMISSIONS:
+                if sub["id"] in keep:
+                    print(
+                        f"  = preserving {sub['id'][:8]}… "
+                        f"({sub['named_insured']})"
+                    )
+                    preserved += 1
+                    continue
+
+                await _delete_submission(cur, sub["id"])
+                await _seed_submission_row(cur, sub)
+                await _seed_loss_history(cur, sub)
+                await _seed_submission_stages(cur, sub)
+                print(
+                    f"  + reseeded {sub['id'][:8]}… "
+                    f"({sub['named_insured']}, minimal)"
+                )
+                reseeded += 1
+        await conn.commit()
+        print(
+            f"  + workflow reseed complete — "
+            f"{reseeded} reseeded, {preserved} preserved"
+        )
+
+
+async def reset_submission(submission_id: str) -> None:
+    """Reset a single submission to its seed state.
+
+    The submission and all child rows are deleted, then
+    re-inserted via the same path as the bulk seeder. The shape
+    (full vs minimal) is decided by SHOWCASE_IDS, so resetting a
+    showcase row reseeds it with full data and resetting a
+    workflow row reseeds it minimally.
+
+    Raises ValueError if `submission_id` is not present in the
+    SUBMISSIONS list — without a seed entry there's nothing to
+    re-insert.
+    """
+    target = next(
+        (s for s in SUBMISSIONS if s["id"] == submission_id), None,
+    )
+    if target is None:
+        raise ValueError(
+            f"No seed entry for submission {submission_id} "
+            f"— check SUBMISSIONS in seed_uw.py"
+        )
+
+    async with await psycopg.AsyncConnection.connect(UW_DB_URL) as conn:
+        async with conn.cursor() as cur:
+            await _delete_submission(cur, submission_id)
+            await _seed_submission_row(cur, target)
+            await _seed_loss_history(cur, target)
+            await _seed_submission_stages(cur, target)
+        await conn.commit()
+        kind = "full" if submission_id in SHOWCASE_IDS else "minimal"
+        print(
+            f"  + reset {submission_id[:8]}… "
+            f"({target['named_insured']}, {kind})"
+        )
+
+
 # ── STANDALONE ENTRY POINT ───────────────────────────────────
 
 if __name__ == "__main__":
-    asyncio.run(seed_uw_db())
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Seed / reseed uw_db demo data.",
+    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--reseed-workflow",
+        action="store_true",
+        help=(
+            "Delete and re-seed every non-showcase submission "
+            "(showcase rows listed uncommented in "
+            "showcase_submissions.txt are preserved as-is, "
+            "including any extractions or HITL edits already "
+            "made against them)."
+        ),
+    )
+    group.add_argument(
+        "--reset",
+        metavar="UUID",
+        help=(
+            "Delete and re-seed a single submission by id. "
+            "Showcase ids reset to full data; others to minimal."
+        ),
+    )
+    args = parser.parse_args()
+
+    if args.reseed_workflow:
+        asyncio.run(reseed_workflow_submissions())
+    elif args.reset:
+        asyncio.run(reset_submission(args.reset))
+    else:
+        asyncio.run(seed_uw_db())

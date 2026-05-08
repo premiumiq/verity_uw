@@ -16,6 +16,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from verity.web.middleware.persona import PersonaMiddleware
 from verity.web.routes import create_routes
 
 
@@ -41,6 +42,13 @@ def create_verity_web(verity) -> FastAPI:
 
     # Serve static files (verity.css) at /static/
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="verity-static")
+
+    # Persona middleware — reads the vty_persona cookie set by the
+    # profile page (or by /studio/persona) and stashes the parsed
+    # StudioRole on request.state.persona for templates to read.
+    # Same cookie / same middleware as Studio; mounting it here too
+    # means the Admin sidebar can show "Acting as X" everywhere.
+    app.add_middleware(PersonaMiddleware)
 
     # Register all HTML page routes
     router = create_routes(verity, templates_dir=str(TEMPLATES_DIR))

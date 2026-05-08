@@ -354,7 +354,6 @@ a:hover {
 .verity-badge-candidate  { background: var(--verity-blue-pale);   color: var(--verity-blue-deep); }
 .verity-badge-staging    { background: var(--verity-blue-light);  color: var(--verity-blue-dark); }
 .verity-badge-shadow     { background: var(--verity-amber-light); color: #816014; }
-.verity-badge-challenger { background: var(--verity-amber-light); color: #816014; }
 .verity-badge-champion   { background: var(--verity-green-light); color: #3E6044; }
 .verity-badge-deprecated { background: var(--verity-gray-dark);      color: var(--verity-text-light); border: 1px solid var(--verity-border); }
 
@@ -372,12 +371,9 @@ a:hover {
 .verity-badge-failed   { background: var(--verity-red-light);   color: #A23838; }
 .verity-badge-pending  { background: var(--verity-blue-light);  color: var(--verity-blue-dark); }
 
-/* Async-run lifecycle states surfaced by execution_run_current. */
-.verity-badge-submitted { background: var(--verity-blue-pale);  color: var(--verity-blue-deep); }
-.verity-badge-claimed   { background: var(--verity-blue-light); color: var(--verity-blue-dark); }
-.verity-badge-heartbeat { background: var(--verity-amber-light); color: #816014; }
-.verity-badge-released  { background: var(--verity-gray-light); color: var(--verity-text-light); }
-.verity-badge-cancelled { background: var(--verity-gray-pale);  color: var(--verity-text-light); border: 1px solid var(--verity-border); }
+/* Removed (2026-05-07): unused -challenger / -submitted / -claimed /
+   -heartbeat / -released / -cancelled async-run-state badges; no
+   template / route / partial referenced them. */
 
 
 /* ── BUTTONS ───────────────────────────────────────────────── */
@@ -747,74 +743,10 @@ a:hover {
 }
 
 
-/* ── KPI CARDS ───────────────────────────────────────────────
-   Summary metric cards for dashboards and list pages.
-*/
-
-.verity-kpi-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 12px;
-    margin-bottom: 20px;
-}
-
-.verity-kpi-card {
-    background: var(--verity-bg);
-    border: 1px solid var(--verity-border);
-    border-radius: 6px;
-    padding: 12px 16px;
-    text-align: center;
-}
-
-.verity-kpi-value {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: var(--verity-blue-deep);
-    line-height: 1.2;
-}
-
-.verity-kpi-label {
-    font-size: 0.7rem;
-    font-weight: 500;
-    color: var(--verity-text-light);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-top: 4px;
-}
-
-
-/* ── SUMMARY CARDS ROW ───────────────────────────────────────
-   Horizontal row of key metric cards (revenue, employees, etc.)
-*/
-
-.verity-summary-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 12px;
-    margin-bottom: 20px;
-}
-
-.verity-summary-card {
-    background: var(--verity-bg);
-    border: 1px solid var(--verity-border);
-    border-radius: 6px;
-    padding: 12px 16px;
-}
-
-.verity-summary-label {
-    font-size: 0.7rem;
-    font-weight: 500;
-    color: var(--verity-text-light);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.verity-summary-value {
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: var(--verity-text);
-    margin-top: 2px;
-}
+/* Removed (2026-05-07): unused .verity-kpi-* and .verity-summary-*
+   class families. No template or partial referenced them; the dashboard
+   pages that would have used them never adopted the pattern. Restore
+   from git history if a future card-grid view wants to re-adopt. */
 
 
 /* ── HTMX INDICATOR ──────────────────────────────────────────
@@ -888,4 +820,107 @@ a:hover {
     content: "\25BC";        /* ▼ */
     opacity: 1;
     color: var(--verity-blue-deep);
+}
+
+
+/* ── WORKFLOW STEPPER ────────────────────────────────────────
+   Horizontal step indicator with numbered circles and connectors.
+   Originally authored for uw_demo's submission_detail; adopted
+   here for the intake detail page so use-case lifecycle progression
+   is visible at a glance.
+
+   States: -complete (green check), -active (amber pulse),
+           -pending (gray), -failed (red), -skipped (muted)
+*/
+
+.verity-stepper {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 16px 0 20px;
+}
+
+.verity-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 110px;
+}
+
+.verity-step-circle {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border: 2px solid var(--verity-border);
+    background: var(--verity-bg);
+    color: var(--verity-text-light);
+    z-index: 1;
+    transition: all 0.3s ease;
+}
+
+.verity-step-complete .verity-step-circle {
+    background: var(--verity-green);
+    border-color: var(--verity-green);
+    color: white;
+}
+
+.verity-step-active .verity-step-circle {
+    background: var(--verity-amber);
+    border-color: var(--verity-amber);
+    color: white;
+    animation: verity-pulse 2s ease-in-out infinite;
+}
+
+.verity-step-failed .verity-step-circle {
+    background: var(--verity-red);
+    border-color: var(--verity-red);
+    color: white;
+}
+
+.verity-step-skipped .verity-step-circle {
+    background: var(--verity-gray-light);
+    border-color: var(--verity-gray-light);
+    color: white;
+}
+
+.verity-step-label {
+    margin-top: 6px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--verity-text-light);
+    text-align: center;
+    max-width: 100px;
+}
+
+.verity-step-complete .verity-step-label,
+.verity-step-active   .verity-step-label {
+    color: var(--verity-text);
+}
+
+.verity-step-time {
+    font-size: 0.6rem;
+    color: var(--verity-text-light);
+    margin-top: 2px;
+}
+
+.verity-step-connector {
+    flex: 1;
+    height: 2px;
+    background: var(--verity-border);
+    margin-top: 18px;
+    min-width: 30px;
+}
+
+.verity-step-connector.verity-connector-complete {
+    background: var(--verity-green);
+}
+
+@keyframes verity-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(227, 180, 71, 0.55); }
+    50%      { box-shadow: 0 0 0 8px rgba(227, 180, 71, 0); }
 }

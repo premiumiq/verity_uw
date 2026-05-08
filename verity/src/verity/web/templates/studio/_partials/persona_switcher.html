@@ -1,0 +1,37 @@
+{#
+  Persona switcher partial — pill at the top-right of the Studio nav.
+  Shows current persona; clicking the dropdown selects another role.
+  Submits to POST /studio/persona which sets the cookie and redirects.
+
+  Required context:
+    persona      -- current StudioRole (from request.state)
+    StudioRole   -- enum class for iteration
+    request      -- to derive a redirect target
+#}
+{% set current = persona.value if persona else 'viewer' %}
+<form method="POST" action="/studio/persona"
+      class="flex items-center gap-2"
+      onchange="this.submit()">
+  <input type="hidden" name="redirect_to"
+         value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+
+  <span class="text-[11px] uppercase tracking-wider opacity-50">Acting as</span>
+
+  <div class="inline-flex items-center gap-2 px-2.5 py-1 rounded
+              bg-white/10 border border-white/20 text-white">
+    <span class="inline-flex h-5 w-5 items-center justify-center rounded-full
+                 bg-white/20 text-[10px] font-semibold uppercase">
+      {{ current[:2] }}
+    </span>
+    <select name="persona"
+            class="bg-transparent text-white text-xs focus:outline-none cursor-pointer pr-1">
+      {% for role in StudioRole %}
+        <option value="{{ role.value }}"
+                style="color: black;"
+                {% if role.value == current %}selected{% endif %}>
+          {{ role.value | replace('_',' ') | title }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+</form>

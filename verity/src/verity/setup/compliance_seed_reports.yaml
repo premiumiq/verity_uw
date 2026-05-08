@@ -24,6 +24,10 @@ feed_views:
   - { view: v_decision,            description: "Per-call decision log: reasoning, confidence, model, duration.",                   sort: 40 }
   - { view: v_validation_result,   description: "Per-test validation outcomes (pre-deployment + ongoing).",                         sort: 50 }
   - { view: v_override,            description: "Human overrides applied to AI-produced values.",                                   sort: 60 }
+  # Phase B (governance intake): use cases, requirements, approvals.
+  - { view: v_intake,              description: "Use-case intake header: business problem, owner, risk tier, status.",              sort: 70 }
+  - { view: v_intake_requirement,  description: "Per-intake requirements (BR/FR/NFR/CR) with status.",                              sort: 80 }
+  - { view: v_intake_approval,     description: "Per-signoff approval audit log scoped to an intake.",                              sort: 90 }
 
 # -----------------------------------------------------------------------------
 # mart_field — every column reachable from a report.
@@ -115,6 +119,63 @@ mart_fields:
   - { table: v_validation_result, column: channel,            type: category,   description: "Deployment channel at test time", sort: 11 }
   - { table: v_validation_result, column: mock_mode,          type: category,   description: "Whether the test ran in mock mode", sort: 12 }
   - { table: v_validation_result, column: run_at,             type: date,       description: "When the test was run", sort: 13 }
+
+  # ---- v_intake (Phase B — governance intake) ---------------------------
+  - { table: v_intake, column: intake_code,                  type: identifier, description: "Stable slug uniquely identifying the use case (e.g. uw-bop-eligibility).", sort: 1 }
+  - { table: v_intake, column: intake_title,                 type: text,       description: "Human-readable use-case title.", sort: 2 }
+  - { table: v_intake, column: problem_statement,            type: text,       description: "Business problem the AI use case addresses.", sort: 3 }
+  - { table: v_intake, column: expected_benefit,             type: text,       description: "Expected business outcome / benefit.", sort: 4 }
+  - { table: v_intake, column: in_scope_decisions,           type: text,       description: "Decisions the AI WILL make / influence.", sort: 5 }
+  - { table: v_intake, column: out_of_scope_decisions,       type: text,       description: "Decisions the AI explicitly will NOT make.", sort: 6 }
+  - { table: v_intake, column: affected_populations,         type: json,       description: "Populations affected by the AI (applicants, brokers, underwriters, ...).", sort: 7 }
+  - { table: v_intake, column: business_owner_name,          type: text,       description: "Sponsor of the use case.", is_pii: true, sort: 8 }
+  - { table: v_intake, column: business_owner_email,         type: text,       description: "Sponsor email.", is_pii: true, sort: 9 }
+  - { table: v_intake, column: requesting_team,              type: text,       description: "Team that submitted the intake.", sort: 10 }
+  - { table: v_intake, column: ai_risk_tier,                 type: category,   description: "minimal | limited | high | unacceptable (EU AI Act framing).", sort: 11 }
+  - { table: v_intake, column: naic_materiality,             type: category,   description: "material | non_material (NAIC AI Bulletin).", sort: 12 }
+  - { table: v_intake, column: risk_classification_rationale, type: text,       description: "Why this tier was chosen.", sort: 13 }
+  - { table: v_intake, column: intake_status,                type: category,   description: "proposed|in_review|impact_assessment|approved|in_build|live|rejected|retired", sort: 14 }
+  - { table: v_intake, column: intake_at,                    type: date,       description: "When the intake was first submitted.", sort: 15 }
+  - { table: v_intake, column: approved_at,                  type: date,       description: "When governance approved the intake.", sort: 16 }
+  - { table: v_intake, column: retired_at,                   type: date,       description: "When the use case was retired (NULL if active).", sort: 17 }
+  - { table: v_intake, column: effective_date,               type: date,       description: "Production go-live date.", sort: 18 }
+  - { table: v_intake, column: next_recertification_due,     type: date,       description: "Next scheduled recertification date.", sort: 19 }
+  - { table: v_intake, column: created_by,                   type: text,       description: "Who submitted the intake.", is_pii: true, sort: 20 }
+  - { table: v_intake, column: hitl_strategy,                type: text,       description: "How humans review or override AI output for this use case (free text).", sort: 21 }
+  - { table: v_intake, column: hitl_review_threshold,        type: text,       description: "Trigger condition for HITL review (always | confidence < X | sample %, etc.).", sort: 22 }
+  - { table: v_intake, column: application_code,             type: identifier, description: "Registered application that owns this use case (FK to governance.application).", sort: 23 }
+  - { table: v_intake, column: application_name,             type: text,       description: "Display name of the application that owns this use case.", sort: 24 }
+
+  # ---- v_intake_requirement ---------------------------------------------
+  - { table: v_intake_requirement, column: intake_code,            type: identifier, description: "Parent intake code.", sort: 1 }
+  - { table: v_intake_requirement, column: intake_title,           type: text,       description: "Parent intake title.", sort: 2 }
+  - { table: v_intake_requirement, column: requirement_code,       type: identifier, description: "Stable code (BR-1, FR-1, NFR-1, CR-1).", sort: 3 }
+  - { table: v_intake_requirement, column: requirement_kind,       type: category,   description: "business | functional | non_functional | compliance.", sort: 4 }
+  - { table: v_intake_requirement, column: requirement_statement,  type: text,       description: "The requirement itself.", sort: 5 }
+  - { table: v_intake_requirement, column: acceptance_criteria,    type: text,       description: "Measurable / observable success criteria.", sort: 6 }
+  - { table: v_intake_requirement, column: requirement_source,     type: text,       description: "Reference (PRD §, NYDFS letter, SR 11-7 §, etc.).", sort: 7 }
+  - { table: v_intake_requirement, column: requirement_status,     type: category,   description: "draft|approved|implemented|verified|deprecated", sort: 8 }
+  - { table: v_intake_requirement, column: updated_at,             type: date,       description: "Last edit timestamp.", sort: 9 }
+
+  # ---- v_intake_approval (one row per signoff; pending requests appear via LEFT JOIN) ---
+  - { table: v_intake_approval, column: intake_code,               type: identifier, description: "Parent intake code.", sort: 1 }
+  - { table: v_intake_approval, column: intake_title,              type: text,       description: "Parent intake title.", sort: 2 }
+  - { table: v_intake_approval, column: ai_risk_tier,              type: category,   description: "Parent intake risk tier.", sort: 3 }
+  - { table: v_intake_approval, column: approval_kind,             type: category,   description: "intake | risk_reclassification | promote_candidate | promote_champion | retire", sort: 4 }
+  - { table: v_intake_approval, column: approval_request_status,   type: category,   description: "pending | approved | rejected | withdrawn", sort: 5 }
+  - { table: v_intake_approval, column: target_entity_type,        type: category,   description: "Set on promote_* requests; the entity being promoted.", sort: 6 }
+  - { table: v_intake_approval, column: approval_summary,          type: text,       description: "Human-readable summary of what was approved.", sort: 7 }
+  - { table: v_intake_approval, column: opened_at,                 type: date,       description: "When the approval request was opened.", sort: 8 }
+  - { table: v_intake_approval, column: opened_by,                 type: text,       description: "Who opened the request.", is_pii: true, sort: 9 }
+  - { table: v_intake_approval, column: opened_by_role,            type: category,   description: "Persona of the opener.", sort: 10 }
+  - { table: v_intake_approval, column: decided_at,                type: date,       description: "When the request reached terminal status.", sort: 11 }
+  - { table: v_intake_approval, column: signoff_role,              type: category,   description: "Approver role (business_owner, compliance, legal, model_risk, ai_governance, security, privacy).", sort: 12 }
+  - { table: v_intake_approval, column: approver_name,             type: text,       description: "Name of the person who signed.", is_pii: true, sort: 13 }
+  - { table: v_intake_approval, column: approver_email,            type: text,       description: "Email of the person who signed.", is_pii: true, sort: 14 }
+  - { table: v_intake_approval, column: signoff_decision,          type: category,   description: "approved | rejected | requested_changes | abstained", sort: 15 }
+  - { table: v_intake_approval, column: signoff_comment,           type: text,       description: "Free-form comment from the approver.", sort: 16 }
+  - { table: v_intake_approval, column: evidence_url,              type: text,       description: "Optional link to retained doc / email evidence.", sort: 17 }
+  - { table: v_intake_approval, column: signed_at,                 type: date,       description: "When the signoff was recorded.", sort: 18 }
 
 
 # -----------------------------------------------------------------------------
@@ -429,3 +490,110 @@ reports:
       - { code: data_lineage_provenance,                  section: "Data Lineage",                sort: 10 }
       - { code: ai_transparency_descriptions,             section: "Plain-Language Description",  sort: 11 }
       - { code: use_user_authorization_controls,          section: "Use Controls",                sort: 12 }
+
+  # ─────────────────────────────────────────────────────────────────
+  # Intake reports (Phase B). Compose from analytics.v_intake* views.
+  # All three follow the same pattern: enumerate from L1, attach the
+  # standard envelope from engine, render through the .docx template.
+  # ─────────────────────────────────────────────────────────────────
+
+  - code: intake_inventory
+    name: Use Case Intake Inventory
+    description: |
+      Inventory of every recorded AI use case — its business problem,
+      owner, risk classification, approval status, human-oversight
+      strategy, and the registry artifacts realised against it. This
+      is the primary evidence that every AI system in the program was
+      authorized through a documented governance flow before any model
+      was built.
+    report_kind: metadata_driven
+    docx_template: reports/intake_inventory.docx
+    output_formats: [html, docx, pdf]
+    scope_params:
+      type: object
+      properties:
+        intake_code:
+          type: string
+          description: "Restrict to one intake by code (optional)."
+        ai_risk_tier:
+          type: string
+          enum: [minimal, limited, high, unacceptable]
+          description: "Filter by AI risk tier (optional)."
+        status:
+          type: string
+          description: "Filter by intake status (optional)."
+    sort_seq: 50
+    canonical_requirements:
+      - { code: model_inventory_registration,             section: "Inventory of Recorded Use Cases", sort: 1 }
+      - { code: model_ownership_accountability,           section: "Ownership & Accountability",      sort: 2 }
+      - { code: written_ais_program,                      section: "Program Implementation",          sort: 3 }
+      - { code: ai_governance_organizational_structure,   section: "Governance Structure",            sort: 4 }
+      - { code: model_risk_identification_classification, section: "Risk Classification",             sort: 5 }
+      - { code: regulatory_examination_readiness,         section: "Examination Readiness",           sort: 6 }
+
+  - code: approval_audit_log
+    name: Approval Audit Log
+    description: |
+      Every approval signoff recorded across the use-case intake flow —
+      who approved what, in what role, when, with what comment, and on
+      what evidence. The durable record of segregation-of-duty controls
+      and named accountability for every AI system in the program.
+    report_kind: metadata_driven
+    docx_template: reports/approval_audit_log.docx
+    output_formats: [html, docx, pdf]
+    scope_params:
+      type: object
+      properties:
+        intake_code:
+          type: string
+          description: "Restrict to one intake by code (optional)."
+        signed_after:
+          type: string
+          format: date-time
+          description: "Only signoffs on or after this timestamp (optional)."
+        signed_before:
+          type: string
+          format: date-time
+          description: "Only signoffs strictly before this timestamp (optional)."
+        signoff_role:
+          type: string
+          description: "Restrict to one approval role (optional)."
+    sort_seq: 60
+    canonical_requirements:
+      - { code: ai_governance_organizational_structure,   section: "Governance Structure",         sort: 1 }
+      - { code: model_ownership_accountability,           section: "Ownership & Accountability",   sort: 2 }
+      - { code: change_management_versioning,             section: "Change Management",            sort: 3 }
+      - { code: regulatory_examination_readiness,         section: "Examination Readiness",        sort: 4 }
+      - { code: written_ais_program,                      section: "Program Implementation",       sort: 5 }
+
+  - code: intake_impact_assessment_register
+    name: Impact Assessment Register
+    description: |
+      Register of high-risk and limited-risk AI use cases together with
+      their documented impact assessments — data sources and
+      classification, populations affected, potential harms,
+      mitigations, fairness and privacy considerations, and the
+      human-oversight strategy. Direct evidence for risk-management
+      and consumer-protection obligations.
+    report_kind: metadata_driven
+    docx_template: reports/intake_impact_assessment_register.docx
+    output_formats: [html, docx, pdf]
+    scope_params:
+      type: object
+      properties:
+        intake_code:
+          type: string
+          description: "Restrict to one intake by code (optional)."
+        ai_risk_tier:
+          type: string
+          enum: [limited, high]
+          description: "Filter by risk tier (default: high)."
+    sort_seq: 70
+    canonical_requirements:
+      - { code: model_documentation_for_qualified_review, section: "Documentation Sufficient for Review", sort: 1 }
+      - { code: data_governance_documentation,            section: "Data Governance",                     sort: 2 }
+      - { code: privacy_data_security,                    section: "Privacy & Data Security",             sort: 3 }
+      - { code: fairness_pre_deployment,                  section: "Fairness Considerations",             sort: 4 }
+      - { code: human_oversight_intervention,             section: "Human Oversight Strategy",            sort: 5 }
+      - { code: risk_proportionate_controls,              section: "Risk-Proportionate Controls",         sort: 6 }
+      - { code: consumer_ai_notification,                 section: "Consumer Protection",                 sort: 7 }

@@ -1,0 +1,21 @@
+{#
+  Intake badge partial — renders {code, tier, status} as a colored pill.
+  Reusable on any page where the parent has an `intake` row in scope
+  (with .code, .application_code, .title, .ai_risk_tier, .status).
+
+  Path-scoped link: /studio/intake/{application_code}/{intake_code}.
+#}
+<a href="/studio/intake/{{ intake.application_code }}/{{ intake.code }}"
+   class="inline-flex items-center gap-2 px-2.5 py-1 text-xs font-medium rounded
+          {% if intake.ai_risk_tier == 'high' %}bg-red-100 text-red-800 border border-red-200
+          {% elif intake.ai_risk_tier == 'limited' %}bg-amber-100 text-amber-800 border border-amber-200
+          {% elif intake.ai_risk_tier == 'minimal' %}bg-emerald-100 text-emerald-800 border border-emerald-200
+          {% elif intake.ai_risk_tier == 'unacceptable' %}bg-zinc-200 text-zinc-700 border border-zinc-300 line-through
+          {% else %}bg-slate-100 text-slate-800 border border-slate-200
+          {% endif %}"
+   title="{{ intake.title }} — risk: {{ intake.ai_risk_tier }} — status: {{ intake.status }}">
+  <span class="text-[10px] uppercase tracking-wider opacity-70">Intake</span>
+  <span class="font-mono">{{ intake.application_code }}/{{ intake.code }}</span>
+  <span class="text-[10px] uppercase opacity-70">· {{ intake.ai_risk_tier }}</span>
+  <span class="text-[10px] uppercase opacity-70">· {{ intake.status }}</span>
+</a>

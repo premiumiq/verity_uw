@@ -92,16 +92,31 @@ async def get_report_canonicals(
 ) -> list[dict[str, Any]]:
     """Return the canonical requirements this report covers, in section order.
 
-    Each row also carries:
-      - `provisions`: list of {citation, title, framework_code, framework_name}
-      - `frameworks`: list of distinct framework codes citing this canonical
-      - `frameworks_label`: comma-separated framework codes for inline display
+    Each row carries:
+      - `coverage_level`            -- Full / Substantial / Partial / Gap
+      - `coverage_rationale`        -- authored system-language prose
+                                       (what the system / process does to
+                                       address the requirement). Rendered
+                                       directly in the report — no
+                                       branding, no concatenated feature
+                                       names. Source of truth lives in
+                                       compliance_seed_data.yaml.
+      - `coverage_customer_actions` -- authored prose describing what
+                                       the customer's policies / processes
+                                       must still cover outside the
+                                       system.
+      - `provisions`                -- list of {citation, title, framework_code, framework_name}
+      - `frameworks_label`          -- comma-separated framework codes
+      - `primary_features`          -- [{code, name}] satisfying this canonical (primary role)
+      - `supporting_features`       -- [{code, name}] (supporting role)
     """
     return await verity.db.fetch_all_raw(
         """
         SELECT cr.code, cr.title, cr.description,
                t.code AS theme_code, t.name AS theme_name,
                cov.coverage_level,
+               cov.rationale         AS coverage_rationale,
+               cov.customer_actions  AS coverage_customer_actions,
                rr.section, rr.sort_seq, rr.notes,
                COALESCE(
                    (SELECT json_agg(json_build_object(
@@ -123,7 +138,33 @@ async def get_report_canonicals(
                     JOIN compliance.regulatory_framework  f ON f.id = p.framework_id
                     WHERE prm.canonical_requirement_id = cr.id),
                    '—'
-               ) AS frameworks_label
+               ) AS frameworks_label,
+               -- Primary features satisfying this canonical (the
+               -- structural compliance claim alongside the authored
+               -- prose). 'name' is the system-language label; 'code'
+               -- is the stable identifier for cross-reference.
+               COALESCE(
+                   (SELECT json_agg(json_build_object(
+                              'code', f.code,
+                              'name', f.name
+                          ) ORDER BY f.sort_seq, f.code)
+                    FROM compliance.requirement_feature_link rfl
+                    JOIN compliance.feature f ON f.id = rfl.feature_id
+                    WHERE rfl.canonical_requirement_id = cr.id
+                      AND rfl.role = 'primary'),
+                   '[]'::json
+               ) AS primary_features,
+               COALESCE(
+                   (SELECT json_agg(json_build_object(
+                              'code', f.code,
+                              'name', f.name
+                          ) ORDER BY f.sort_seq, f.code)
+                    FROM compliance.requirement_feature_link rfl
+                    JOIN compliance.feature f ON f.id = rfl.feature_id
+                    WHERE rfl.canonical_requirement_id = cr.id
+                      AND rfl.role = 'supporting'),
+                   '[]'::json
+               ) AS supporting_features
         FROM compliance.report_requirement       rr
         JOIN compliance.report_definition        rd
              ON rd.id = rr.report_id

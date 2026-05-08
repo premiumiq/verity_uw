@@ -134,24 +134,63 @@
              value="{{ field.raw_value if field.raw_value is not none else '' }}"
              {% if input_type == 'number' %}step="1"{% endif %}>
 
-      <input class="verity-field-edit-reason"
-             name="reason"
+      {# Reason dropdown + reveal-on-Other text input.
+
+         The dropdown's onchange handler does three things:
+         (1) pulls the per-preset send-feedback default off the
+             selected option's data-feedback attribute and pushes
+             it into the checkbox below;
+         (2) shows the free-text input only when "Other" is
+             picked, hides it otherwise;
+         (3) flips the text input's required flag to match its
+             visibility, so submitting "Other" without a typed
+             reason is a client-side validation error.
+
+         The dropdown itself is required so an operator can't
+         submit an edit without picking SOMETHING. The two
+         hidden form fields the route reads are
+         `reason_preset` (the dropdown's selected id) and
+         `reason_other` (the free-text input, only meaningful
+         when reason_preset == "other"). #}
+      <select class="verity-field-edit-reason-preset"
+              name="reason_preset"
+              required
+              onchange="(function(s){
+                var f=s.closest('form');
+                var t=f.querySelector('.verity-field-edit-reason-other');
+                var c=f.querySelector('input[name=send_feedback]');
+                var o=s.options[s.selectedIndex];
+                var fb=(o&&o.dataset.feedback==='true');
+                if(c) c.checked=fb;
+                var isOther=(s.value==='other');
+                if(t){t.style.display=isOther?'':'none'; t.required=isOther;}
+              })(this)">
+        <option value="" data-feedback="false">Reason for change…</option>
+        {% for rid, label, default_fb in edit_reasons %}
+          <option value="{{ rid }}"
+                  data-feedback="{{ 'true' if default_fb else 'false' }}">
+            {{ label }}
+          </option>
+        {% endfor %}
+      </select>
+
+      <input class="verity-field-edit-reason-other"
+             name="reason_other"
              type="text"
-             placeholder="Reason for change (required when sending feedback)"
-             {% if field.feedback_default %}required{% endif %}>
+             placeholder="Type your reason"
+             style="display:none">
 
       {% if field.extraction %}
       {# Send-feedback checkbox is shown only when an extraction
          row exists (i.e. AI was involved in this field at all).
-         Default-checked when AI provided a value or was expected
-         to find one and missed. The inline JS toggles the
-         reason input's `required` attribute as the user
-         changes their mind. #}
+         The dropdown's onchange handler above is the primary
+         driver of this checkbox's state, but the operator can
+         still flip it manually after picking a preset (e.g. to
+         forward an "Override per UW judgment" edit anyway). #}
       <label class="verity-field-edit-feedback"
-             title="Forward this correction to Verity as a HITL override. When on, a reason is required.">
+             title="Forward this correction to Verity as a HITL override.">
         <input type="checkbox" name="send_feedback" value="1"
-               {% if field.feedback_default %}checked{% endif %}
-               onchange="(function(c){var r=c.closest('form').querySelector('.verity-field-edit-reason');if(r)r.required=c.checked;})(this)">
+               {% if field.feedback_default %}checked{% endif %}>
         Send feedback to Verity
       </label>
       {% endif %}

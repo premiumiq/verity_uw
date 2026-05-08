@@ -202,6 +202,126 @@ feature_planes:
     description: Authoritative store and decision-making surface (shipped).
     sort_seq: 10
     capabilities:
+      # ── Governance Intake ─────────────────────────────────────
+      # The "process" layer that sits upstream of the registry.
+      # Every AI use case starts here: business case captured,
+      # risk-classified, multi-role approved, traced to requirements,
+      # and gated through promotion. Implements the controls expected
+      # by NAIC Model Bulletin §3, NYDFS Circular Letter No. 7, EU AI
+      # Act Articles 9–13, and SR 11-7 §I–II in their use-case-level
+      # framing. See docs/architecture/governance-intake.md.
+      - code: governance_intake
+        name: Governance Intake
+        sort_seq: 5
+        features:
+          - code: use_case_intake_registry
+            name: Use case intake registry
+            description: |
+              Every AI use case is recorded as a structured intake before any
+              agent or task is built. The intake captures the business problem,
+              expected benefit, owner, requesting team, scope (in/out-of-scope
+              decisions), and affected populations. It is the single source of
+              truth for which AI work is authorized to exist.
+            status: shipped
+            sort_seq: 1
+          - code: risk_tier_at_intake
+            name: AI risk-tier classification at intake
+            description: |
+              Each use case is classified at intake into one of four tiers —
+              minimal, limited, high, or unacceptable — using EU AI Act
+              framing. The tier drives the depth of the impact assessment, the
+              set of approval roles required, and the strictness of the
+              promotion gate. Unacceptable-tier intakes are auto-rejected.
+            status: shipped
+            sort_seq: 2
+          - code: naic_materiality_classification
+            name: NAIC materiality classification at intake
+            description: |
+              Each use case is classified as material or non-material under
+              the NAIC Model Bulletin definition. Material classifications
+              trigger the documented governance program and the board /
+              senior-management reporting flow.
+            status: shipped
+            sort_seq: 3
+          - code: multi_role_approval_chain
+            name: Multi-role approval chain
+            description: |
+              Approval of a use case requires signoff from a tier-appropriate
+              set of roles: business owner, compliance, legal, model risk,
+              AI governance, and (where applicable) security and privacy.
+              Each signoff is durable, attributed, timestamped, and recorded
+              with optional evidence URL. The use case cannot move into the
+              build phase until all required roles have signed.
+            status: shipped
+            sort_seq: 4
+          - code: intake_impact_assessment
+            name: Impact assessment at intake
+            description: |
+              Use cases at limited or high risk tier require a documented
+              impact assessment before approval. The assessment records
+              data sources and their classification, populations affected,
+              potential harms with severity and likelihood, mitigations with
+              named owners, fairness and privacy considerations, and an
+              explicit human-oversight plan.
+            status: shipped
+            sort_seq: 5
+          - code: human_oversight_strategy_capture
+            name: Human oversight strategy capture
+            description: |
+              Each use case records its human-in-the-loop strategy: how
+              humans review or override AI output, and the trigger condition
+              for review (always | confidence threshold | sample | exception).
+              The strategy is durable evidence of the human-oversight controls
+              established at design time and is surfaced inline on every
+              compliance report covering the use case.
+            status: shipped
+            sort_seq: 6
+          - code: intake_requirements_traceability
+            name: Requirements traceability
+            description: |
+              Business, functional, non-functional, and compliance requirements
+              are captured per use case with status tracking (draft, approved,
+              implemented, verified, deprecated). Each registry artifact
+              (agent, task, prompt, tool, test suite) links back to the
+              requirements it implements, providing end-to-end traceability
+              from regulatory obligation through requirement through deployed
+              component.
+            status: shipped
+            sort_seq: 7
+          - code: artifact_plan_from_approved_intake
+            name: Build-plan generation from approved intake
+            description: |
+              When a use case is approved, the system derives a draft plan
+              of the registry artifacts (agents, tasks, prompts, tools, test
+              suites, ground-truth datasets) needed to implement the
+              requirements. Engineers review and realize plan rows into
+              actual registry drafts, ensuring the build phase begins with
+              explicit governance authorization.
+            status: shipped
+            sort_seq: 8
+          - code: intake_promotion_gate
+            name: Intake-aware promotion gate
+            description: |
+              Promotion of any registry artifact (agent, task, prompt) through
+              the lifecycle is blocked until its parent use case is in
+              approved or live status. High-risk use cases additionally
+              require an explicit promote-to-champion approval per artifact —
+              providing a second authorization point at the moment of
+              production deployment.
+            status: shipped
+            sort_seq: 9
+          - code: persona_aware_action_gating
+            name: Role-based action authorization with audit trail
+            description: |
+              Every write to the governance system records the role under
+              which the user was acting (business owner, compliance, legal,
+              model risk, AI governance, security, privacy, engineer,
+              auditor). Authorization for each action is gated by this
+              role; the role is durable on every audit trail row, providing
+              segregation-of-duty evidence for examiners.
+            status: shipped
+            sort_seq: 10
+
       - code: asset_registry
         name: Asset Registry
         sort_seq: 10

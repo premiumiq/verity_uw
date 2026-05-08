@@ -1,0 +1,396 @@
+/* ──────────────────────────────────────────────────────────
+   MODEL INVENTORY — PRODUCTION GRAPH
+   ──────────────────────────────────────────────────────────
+   Styles for:
+     * Subnav (Report | Production Graph)
+     * Top control bar (filter dropdown, layer toggles, reset)
+     * Cytoscape canvas + lane headers
+     * HTML node label content (icon strip, title, subtitle,
+       decision-count bubble)
+     * Hover tooltip
+   Colours match the JS-side TYPE_COLOR map. If you change one,
+   change the other.
+   ────────────────────────────────────────────────────────── */
+
+
+/* ── Subnav (shared by both inventory tabs) ─────────────── */
+
+.inventory-subnav {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid #e5e7eb;
+    margin-bottom: 16px;
+}
+
+.inventory-subnav-tab {
+    padding: 10px 16px;
+    border-bottom: 2px solid transparent;
+    color: var(--verity-text-light, #6b7280);
+    font-size: 0.9rem;
+    text-decoration: none;
+    transition: color 0.15s, border-color 0.15s;
+}
+.inventory-subnav-tab:hover {
+    color: var(--verity-text, #1f2937);
+}
+.inventory-subnav-tab.active {
+    color: var(--verity-primary, #1f2937);
+    border-bottom-color: var(--verity-primary, #1f2937);
+    font-weight: 500;
+}
+
+
+/* ── Top control bar ────────────────────────────────────── */
+
+.inventory-graph-controls {
+    display: flex;
+    gap: 24px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+}
+
+.inventory-graph-control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.inventory-graph-control-label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--verity-text-light, #6b7280);
+}
+
+.inventory-graph-control-actions {
+    margin-left: auto;
+}
+
+/* Application filter — <details>/<summary> dropdown */
+
+.inventory-graph-dropdown {
+    position: relative;
+    min-width: 220px;
+}
+.inventory-graph-dropdown summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 6px 28px 6px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    background: #ffffff;
+    font-size: 0.9rem;
+    position: relative;
+}
+.inventory-graph-dropdown summary::-webkit-details-marker { display: none; }
+.inventory-graph-dropdown summary::after {
+    content: '';
+    position: absolute;
+    right: 10px; top: 50%;
+    width: 6px; height: 6px;
+    border-right: 1.5px solid #6b7280;
+    border-bottom: 1.5px solid #6b7280;
+    transform: translateY(-70%) rotate(45deg);
+}
+.inventory-graph-dropdown[open] summary::after {
+    transform: translateY(-30%) rotate(-135deg);
+}
+.inventory-graph-dropdown-body {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 10;
+    margin-top: 2px;
+    min-width: 100%;
+    max-height: 280px;
+    overflow-y: auto;
+    background: #ffffff;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.06);
+    padding: 6px;
+}
+.ig-filter-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    border-radius: 3px;
+}
+.ig-filter-item:hover { background: #f3f4f6; }
+
+/* Combined Show/Legend — one row per node type. Each row
+   carries: checkbox, colour swatch, the same Unicode glyph
+   used inside that type's nodes, and the type label. The row
+   doubles as the legend so operators don't need a separate
+   key. Rendered into #node-type-legend by inventory_graph.js
+   so colour and glyph come from the JS-side TYPE_COLOR /
+   ICONS maps without duplication here. */
+
+.inventory-graph-legend {
+    /* All five entries inline on one row. flex-wrap allows the
+       row to wrap on very narrow viewports rather than overflow,
+       but on a normal-width screen everything fits on one line. */
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    align-items: center;
+}
+
+.ig-legend-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.88rem;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 3px;
+}
+.ig-legend-row:hover { background: #f3f4f6; }
+
+.ig-legend-row input[type="checkbox"] {
+    margin: 0;
+}
+
+.ig-legend-swatch {
+    /* Colour chip — matches the node's left stripe. */
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    flex: 0 0 10px;
+}
+
+.ig-legend-glyph {
+    /* The same Unicode glyph that appears inside the node. */
+    font-size: 1.1rem;
+    width: 18px;
+    text-align: center;
+    line-height: 1;
+}
+
+.ig-legend-label {
+    color: var(--verity-text, #1f2937);
+}
+
+/* Reset button */
+
+.inventory-graph-btn {
+    padding: 6px 14px;
+    background: #ffffff;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+.inventory-graph-btn:hover {
+    background: #f3f4f6;
+    border-color: #9ca3af;
+}
+
+
+/* ── Lane headers ──────────────────────────────────────── */
+
+.inventory-graph-lane-headers {
+    display: grid;
+    /* 3 equal lanes; pixel widths of LANE_X in JS sit inside
+       these columns. The lane labels just sit on top of the
+       canvas, they don't constrain layout. */
+    grid-template-columns: 1fr 1fr 1fr;
+    margin-top: 4px;
+}
+.inventory-graph-lane-header {
+    text-align: center;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--verity-text-light, #6b7280);
+    padding: 6px 0;
+    border-top: 1px solid #f3f4f6;
+}
+
+
+/* ── Canvas ─────────────────────────────────────────────── */
+
+#inventory-graph {
+    width: 100%;
+    height: 720px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    background:
+        repeating-linear-gradient(
+            to right,
+            transparent 0px,
+            transparent 32px,
+            rgba(0,0,0,0.02) 32px,
+            rgba(0,0,0,0.02) 33px),
+        #ffffff;
+    position: relative;
+}
+
+.inventory-graph-error {
+    padding: 16px;
+    color: #b91c1c;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
+
+
+/* ── Node HTML labels (rendered by cytoscape-node-html-label) ─ */
+
+.ig-node {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 220px;
+    height: 64px;
+    box-sizing: border-box;
+    padding: 8px 12px 8px 16px;
+    background: #ffffff;
+    /* Border defaults to transparent. Real nodes apply
+       border-color via inline style from nodeHtmlLabel().
+       Defaulting to transparent means an empty / unstyled
+       .ig-node element renders invisibly — useful guard
+       against any plugin wrapper accidentally inheriting
+       this class. */
+    border: 2px solid transparent;
+    border-radius: 8px;
+    pointer-events: none;       /* clicks fall through to Cytoscape */
+    font-family: 'Poppins', system-ui, sans-serif;
+    position: relative;
+    /* Two box-shadows: the inset coloured stripe on the left
+       edge as the type marker, plus a subtle drop shadow for
+       lift. Stripe colour is set per node via the
+       --ig-node-stripe CSS variable from nodeHtmlLabel().
+       Defaults to transparent for the same reason as the
+       border above. */
+    box-shadow:
+        inset 6px 0 0 0 var(--ig-node-stripe, transparent),
+        0 1px 2px rgba(0,0,0,0.04);
+}
+
+/* Single unicode glyph as the icon — same characters used in
+   the sidebar nav (.verity-nav-icon). Sized large enough to
+   read clearly at default zoom but kept narrow so the title
+   gets the rest of the row. */
+.ig-node-icon {
+    flex: 0 0 26px;
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.45rem;
+    line-height: 1;
+    font-weight: 500;
+    /* The Unicode glyphs render slightly low without a small
+       baseline nudge — most have visual centre below the
+       typographic centre. */
+    margin-top: -1px;
+}
+
+.ig-node-text {
+    flex: 1 1 auto;
+    min-width: 0;               /* lets text-overflow kick in */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.ig-node-title {
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: #111827;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ig-node-subtitle {
+    font-size: 0.7rem;
+    color: #6b7280;
+    line-height: 1.2;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Decision-count bubble — sits in the top-right corner of
+   executable nodes. Coloured background matches the type
+   stripe so the bubble reads as part of the same node. */
+.ig-node-bubble {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    min-width: 26px;
+    height: 22px;
+    padding: 0 7px;
+    border-radius: 11px;
+    color: #ffffff;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 22px;
+    text-align: center;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+}
+
+
+/* ── Hover tooltip ─────────────────────────────────────── */
+
+.inventory-graph-tooltip {
+    position: fixed;
+    z-index: 50;
+    max-width: 320px;
+    padding: 10px 12px;
+    background: #1f2937;
+    color: #f9fafb;
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+    font-size: 0.78rem;
+    pointer-events: none;
+}
+.inventory-graph-tooltip[hidden] { display: none; }
+
+.ig-tooltip-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: #ffffff;
+}
+.ig-tooltip-table {
+    border-collapse: collapse;
+    width: 100%;
+}
+.ig-tooltip-table th {
+    text-align: left;
+    font-weight: 500;
+    color: #9ca3af;
+    padding: 2px 8px 2px 0;
+    white-space: nowrap;
+    vertical-align: top;
+}
+.ig-tooltip-table td {
+    padding: 2px 0;
+    color: #f9fafb;
+    word-break: break-word;
+}
+.ig-tooltip-foot {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255,255,255,0.12);
+    font-size: 0.7rem;
+    color: #9ca3af;
+    font-style: italic;
+}

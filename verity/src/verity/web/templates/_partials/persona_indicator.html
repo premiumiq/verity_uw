@@ -1,0 +1,42 @@
+{#
+  Persona indicator — display-only label that sits in the sidebar
+  footer of both Admin and Studio. Shows the current persona; clicking
+  the row opens /admin/profile where the user can actually switch.
+
+  Required template context:
+    persona  -- a StudioRole enum or None (set by PersonaMiddleware)
+
+  Switching is intentionally NOT in the sidebar — there's exactly one
+  surface where the role changes (the profile page), and the sidebar
+  is just an always-visible reminder of "who you are acting as right
+  now." See docs/architecture/governance-intake.md § 5.1 for the
+  rationale.
+#}
+{% set role_name = persona.value if persona else 'viewer' %}
+
+<a href="/admin/profile"
+   title="Switch role on the profile page"
+   style="display: flex; align-items: center; gap: 8px;
+          padding: 6px 16px 8px; text-decoration: none;
+          color: rgba(255,255,255,0.55); font-size: 0.65rem;
+          line-height: 1.2; transition: color 0.15s;"
+   onmouseover="this.style.color='#8FAADC'"
+   onmouseout="this.style.color='rgba(255,255,255,0.55)'">
+
+  {# small role chip — initials, monochrome, matches sidebar palette #}
+  <span style="display: inline-flex; align-items: center; justify-content: center;
+               width: 18px; height: 18px; border-radius: 50%;
+               background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.85);
+               font-size: 0.55rem; font-weight: 600; text-transform: uppercase;
+               letter-spacing: 0.05em;">
+    {{ role_name[:2] }}
+  </span>
+
+  <span>
+    <span style="display: block; opacity: 0.7; text-transform: uppercase;
+                 letter-spacing: 0.05em; font-size: 0.55rem;">Acting as</span>
+    <span style="display: block; font-weight: 500;">
+      {{ role_name | replace('_', ' ') | title }}
+    </span>
+  </span>
+</a>
